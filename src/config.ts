@@ -54,6 +54,8 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     turnSupervisor: flag(env.TURN_SUPERVISOR, turnUnits),
     /** Minions' GitHub credential helpers; `GH_HELPER=0` turns them off. */
     ghHelper: env.GH_HELPER !== '0',
+    /** The tools this server runs for some schemes (src/server-tools.ts); `CITADEL_SERVER_TOOLS=0` turns them off, as test servers do. */
+    serverTools: env.CITADEL_SERVER_TOOLS !== '0',
 
     embedModel: env.CITADEL_EMBED_MODEL || 'Qwen3-Embedding-0.6B-Q8_0',
     embedUrl: env.CITADEL_EMBED_URL || 'http://127.0.0.1:21434',

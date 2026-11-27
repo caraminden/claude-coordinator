@@ -1,7 +1,7 @@
 // Two agents with the same token (#468 S09-3): the app keeps the newer and tells the older why it was dropped. The older
 // one must not reconnect at once, or the two drop each other once a second for as long as both run.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { copyFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -49,7 +49,10 @@ test('a machine agent told another agent took over says so and does not reconnec
 test('a runner agent told another agent took over says so and does not reconnect at once', async () => {
   const tokenFile = tmp.path('token');
   writeFileSync(tokenFile, 'ccm_1_x\n');
-  const { connects, out } = await run([join(REPO, 'public/runner-agent.mjs'), '--token-file', tokenFile]);
+  // A copy in the temp folder: the agent keeps its files (slept.json) beside itself, and one left in public/ dirties the checkout (#2192).
+  const agent = tmp.path('runner-agent.mjs');
+  copyFileSync(join(REPO, 'public/runner-agent.mjs'), agent);
+  const { connects, out } = await run([agent, '--token-file', tokenFile]);
   assert.equal(connects, 1, out);
   assert.match(out, /another agent connected with this machine's token, from other-pc/);
 });

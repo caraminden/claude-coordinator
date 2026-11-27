@@ -12,7 +12,8 @@
  * @typedef {{ id: string, status: string, to?: string, plan?: string, summary?: string, machine?: Owned, releaseKey?: { title: string }, hostTool?: { source?: string, package?: string }, memory?: { project: number }, instructions?: { scope?: string }, machineLend?: Owned & { after?: { server: string | null, workspaces: string[] }, lines: string[], why?: string, page: string }, diff?: { op: string, text?: string }[], by?: string, at?: number }} PlanCard
  * @typedef {{ by?: string, dismissed?: boolean, saved?: boolean, sent?: boolean }} Settled
  * @typedef {{ label: string, description?: string, recommended?: boolean, image?: string }} Opt
- * @typedef {{ question: string, header?: string, multiSelect?: boolean, options: Opt[] }} Q
+ * @typedef {{ what: string, cost?: string, when: string, tier?: string, scheme?: string }} RosterRow
+ * @typedef {{ question: string, header?: string, multiSelect?: boolean, options: Opt[], roster?: RosterRow[] }} Q
  * @typedef {{ selected: Set<string>, other: string }} Pick
  * @typedef {Omit<QuestionCard, 'questions' | 'recipe'> & { questions: Q[], recipe?: { kind: { name: string }, machine: string }, settled?: Settled }} QCard
  * @typedef {{ selected: string[], other?: string }} Answer
@@ -590,6 +591,15 @@ export function settleSpend(log, data) {
 /** @param {string} text @param {number} ticketId */
 const cardText = (text, ticketId) => (/^ {0,3}(```|~~~)/m.test(text) || /\]\(#\//.test(text) ? markdown(text, ticketId) : text);
 
+/** A cabal forming card's members, one row each: what it does, its cost and when it starts, with its model small and muted. */
+/** @param {RosterRow[]} rows */
+const rosterList = (rows) =>
+  h(
+    'ul',
+    { class: 'roster' },
+    rows.map((r) => h('li', {}, h('span', { class: 'what' }, r.scheme ? h('span', { class: 'muted' }, `${r.scheme} · `) : '', r.what), h('span', { class: 'meta' }, r.cost ?? 'no estimate', ' · ', threadRefs(r.when), r.tier ? h('span', { class: 'muted tier' }, ` · ${r.tier}`) : ''))),
+  );
+
 /** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */
 /** @param {Answer[]} answers */
 export function answerSummary(answers) {
@@ -834,10 +844,21 @@ export function questionCard(ticketId, card, opts = {}) {
         'div',
         { class: 'qtitle' },
         card.kind === 'merge' || q.header ? h('span', { class: 'chip' }, card.kind === 'merge' ? (card.into ? 'Merge' : 'Ship It') : q.header) : '',
-        card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
+        card.recipe && i === 0
+          ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?`
+          : cardText(
+              q.roster
+                ? q.question
+                    .split('\n\n')
+                    .filter((para) => !para.startsWith('- '))
+                    .join('\n\n')
+                : q.question,
+              ticketId,
+            ), // a roster draws its rows below, so its "- " lines (the plain-text twin) stay out
         q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : '',
       ),
       card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
+      q.roster ? rosterList(q.roster) : '',
       gallery
         ? h(
             'div',

@@ -1343,7 +1343,7 @@ export function appInstructionsEditor() {
     'section',
     { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'app-instructions-head' }),
-    settingsJump(['app-instructions-text', 'Instructions'], ['app-instructions-recent', 'Recent changes'], ['github-owner-section', 'GitHub owner']),
+    settingsJump(['app-instructions-text', 'Instructions'], ['app-instructions-recent', 'Recent changes'], ['github-owner-section', 'GitHub owner'], ['cloud-sessions-section', 'Cloud sessions']),
     settingsHelp('Rules for how people like to work in every scheme, read by each minion and Taskmaster from its next turn.', 'They come right before its scheme instructions, and a scheme instruction overrides one of these only where it names the rule it replaces.'),
     aids.el,
     textarea,
@@ -1351,6 +1351,7 @@ export function appInstructionsEditor() {
     repeats,
     h('div', { id: 'app-instructions-recent', class: 'settings-anchor' }, history),
     githubOwnerField(),
+    cloudSessionsField(),
   );
   (async () => {
     try {
@@ -1417,6 +1418,46 @@ function githubOwnerField() {
     h('h3', { class: 'settings-label' }, 'GitHub owner for new schemes'),
     settingsHelp('A scheme started with a new repo gets a private GitHub repo under this account or organisation.', "Blank uses the owner of Citadel's own repo."),
     h('div', { class: 'row' }, input, save, status),
+  );
+}
+
+/** The admin switch for every scheme's cloud sessions (#2193): off, a minion's turns run at perigee or a machine; a running session keeps its follow-ups. */
+function cloudSessionsField() {
+  const state = h('span', {}, 'Loading…');
+  /** @type {boolean | null} */
+  let on = null;
+  // The switch and its words are one button, so the whole line is the tap target.
+  const flip = h('button', { type: 'button', class: 'cloud-flip', role: 'switch', 'aria-checked': 'false', 'aria-label': 'Cloud sessions for every scheme', disabled: true }, h('span', { class: 'rules-switch', 'aria-hidden': 'true' }), state);
+  const show = (/** @type {boolean} */ v) => {
+    on = v;
+    flip.setAttribute('aria-checked', String(v));
+    flip.disabled = false;
+    state.textContent = v ? 'On: research, ideation and marked minions start as cloud sessions.' : 'Off: no new cloud sessions; sessions already running keep their follow-ups.';
+  };
+  flip.onclick = () => {
+    const was = !!on;
+    optimistic({
+      key: 'cloud-sessions',
+      apply: () => show(!was),
+      send: () => api('api/app/settings', { method: 'PUT', body: { cloud_sessions: !was } }),
+      undo: () => {
+        if (on === !was) show(was);
+      },
+      label: `turn cloud sessions ${was ? 'off' : 'on'}`,
+    });
+  };
+  api('api/app/settings').then(
+    (/** @type {{ cloud_sessions?: boolean }} */ s) => show(!!s.cloud_sessions),
+    (err) => {
+      state.textContent = `Could not load it: ${err.message}`;
+    },
+  );
+  return h(
+    'div',
+    { class: 'cloud-sessions settings-anchor', id: 'cloud-sessions-section' },
+    h('h3', { class: 'settings-label' }, 'Cloud sessions'),
+    settingsHelp("Whether a minion's first turn may start as a Claude Code cloud session, in every scheme.", 'Off, a session already running keeps its follow-ups, and a minion that runs a turn here stays here once it is back on.'),
+    flip,
   );
 }
 

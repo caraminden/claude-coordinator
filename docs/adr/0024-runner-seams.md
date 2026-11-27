@@ -42,6 +42,9 @@ Decision: Cara, 2026-11-20, on #1310's card, picked "One queue per minion; One t
   ships, each tested on its own.
 - **Splitting the runner's tenants** (spend, budget, progress, plan, usage, Codex, cards; about 550 lines) into
   files. Rejected: a cut by line count. They don't share the lifecycle state, and nothing gets deeper.
+  Reversed by #2045: Cara, 2026-11-26, on its card, "Move them too". They moved as they were, each a class with a small
+  deps interface (`src/turn-refs.ts` for the cards and scheme refs, `src/turn-progress.ts`, `src/turn-spend.ts`,
+  `src/plan-usage.ts`); the lifecycle core stays in runner.ts, as below.
 - **Fix each copy gap where it is found** (the status quo, as #1286 and #1364 do). It works one bug at a time, and
   each new path (RL1's kill resume, the next wait) adds another copy site.
 

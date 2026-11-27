@@ -21,6 +21,8 @@ export interface CabalCard {
   lead: number;
   number: number | null;
   title: string;
+  /** "Build 7", or a goal cabal's name: its section's heading in the list (#2181). */
+  name: string;
   /** "Build 7's Overseer": one per cabal (Josh, 2026-11-25). */
   overseer: string;
   /** The lead's build, whose section the card takes the place of; null for a goal cabal without one. */
@@ -63,6 +65,7 @@ export async function cabalCards(store: Store, projectId: number, deps: BoardDep
       lead: leadId,
       number: board.lead.number,
       title: board.lead.title,
+      name: board.name,
       overseer: overseerOf(board),
       build: store.getTicket(leadId)?.build ?? null,
       done: board.kind === 'build' ? 'merged' : 'shipped',
@@ -80,9 +83,9 @@ export class CabalCards {
   private cache = new Map<number, { list: CabalCard[]; json: string }>();
   private running = new Map<number, Promise<void>>();
   private again = new Set<number>();
-  private d: { store: Store; broadcast: (msg: object) => void; parked: BoardDeps['parked'] };
+  private d: { store: Store; broadcast: (msg: { type: 'cabals'; projectId: number; cabals: CabalCard[] }) => void; parked: BoardDeps['parked'] };
 
-  constructor(d: { store: Store; broadcast: (msg: object) => void; parked: BoardDeps['parked'] }) {
+  constructor(d: { store: Store; broadcast: (msg: { type: 'cabals'; projectId: number; cabals: CabalCard[] }) => void; parked: BoardDeps['parked'] }) {
     this.d = d;
   }
 

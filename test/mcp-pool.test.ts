@@ -38,7 +38,7 @@ async function fakeApp() {
     req.on('end', () => {
       const token = String(req.headers.authorization ?? '').replace(/^Bearer /, '');
       calls.push({ method: req.method!, path: req.url!, token });
-      if (req.method === 'GET' && /^\/api\/machines\/(5|windows)\/session\?/.test(req.url!)) {
+      if (req.method === 'GET' && /^\/api\/machines\/(?:5|windows|tool-perigee-godot)\/session\?/.test(req.url!)) {
         machine.gets++;
         machine.session = String(machine.gets).padStart(24, '0');
         const [picked, from] = req.url!.includes('/windows/') ? (machine.picked.shift() ?? ['win-a', null]) : [null, null];
@@ -47,7 +47,7 @@ async function fakeApp() {
         machine.stream = res;
         return;
       }
-      const m = req.url!.match(/^\/api\/machines\/(?:5|windows)\/session\/([0-9]{24})$/);
+      const m = req.url!.match(/^\/api\/machines\/(?:5|windows|tool-perigee-godot)\/session\/([0-9]{24})$/);
       if (req.method === 'POST' && m) {
         const message = JSON.parse(body).message;
         // A session whose stream ended is gone, as the app answers it.
@@ -293,6 +293,16 @@ test("machine tools are lazy: a remembered tool list answers the turn's start, a
   await until('the machine got the notification', () => app.machine.posts.some((m) => m.method === 'notifications/cancelled'));
   process.kill(pool.pid, 0);
   assert.equal((await rpc(pool.port, 'token-b', path, toolCall(4, 'run_task', { task: 'again' }))).result.content[0].text, 'ran run_task');
+});
+
+test("a tool the server runs (#2179) goes through the pool to the app's session route under its tool-<name> key", async () => {
+  const app = await fakeApp();
+  const pool = await started(spec(root(), 'v1', undefined, true));
+  await registerTurn(pool, 'token-g', turn(app.base, 44, 1));
+  const path = '/machine/tool-perigee-godot/mcp?name=perigee-godot';
+  await rpc(pool.port, 'token-g', path, { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } } });
+  assert.equal((await rpc(pool.port, 'token-g', path, toolCall(2, 'run_task', { task: 'build' }))).result.content[0].text, 'ran run_task');
+  assert.equal(app.calls.filter((c) => c.path.startsWith('/api/machines/tool-perigee-godot/session?server=mcp')).at(-1)!.token, 'token-g');
 });
 
 test('the pooled Windows tools say which PC their first call ran on, and that they moved when the app picked another', async () => {

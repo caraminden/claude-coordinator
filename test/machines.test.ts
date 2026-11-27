@@ -268,7 +268,8 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
 
   // A name the agent didn't find lends nothing: Citadel can name a server, never a command.
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'not-there', workspaces: ['nor-this'] } } });
-  assert.deepEqual((await find()).reason, 'Lends nothing: nothing is ticked');
+  // Its line names what is ticked and missing, not "nothing is ticked" (#2194).
+  assert.deepEqual((await find()).reason, 'Ticked but not on that computer: not-there, nor-this');
   assert.deepEqual(
     Object.keys((await turnNow('made up')).results).filter((n) => n.startsWith('ticks')),
     [],

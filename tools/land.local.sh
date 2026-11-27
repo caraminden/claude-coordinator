@@ -28,7 +28,7 @@ land_merge() {
   elif [ -f "$t/ship-numbers.ts" ]; then
     "$t/citadel-node" --no-warnings "$t/ship-numbers.ts" merge "$1" "$2" "$3" "$4"
   elif [ -z "${LAND_MERGE_DIFF3:-}" ]; then
-    git merge-file "$3" "$2" "$4"
+    git merge-file --marker-size="${6:-7}" "$3" "$2" "$4"
   else
     return 1
   fi

@@ -146,9 +146,10 @@ const MINION = /(?<!\b(?:PRs?|[Pp]ull [Rr]equests?|[Ii]ssues?):?\s?)(?<![\w&/#.:
  * The cards waiting on people that `text` mentions without linking any of them, by minion. A paragraph
  * that says "card" means the cards of the minions it names with a #N, or failing any of those with a
  * card waiting, this chat's own (`self`). A link to any card of that minion's counts, so one link
- * serves a paragraph that mentions it twice.
+ * serves a paragraph that mentions it twice. A card addressed `to` someone but the turn's `reader` isn't the
+ * paragraph's card unless it names that person: "a card waiting on you" is the reader's.
  */
-export function unlinkedCards(text: string, cards: CardLink[], self: number | null): CardLink[][] {
+export function unlinkedCards(text: string, cards: CardLink[], self: number | null, reader?: string | null): CardLink[][] {
   if (!cards.length) return [];
   const plain = text.replace(CODE, ' ');
   const linked = new Set([...plain.matchAll(/\?e=(\d+)/g)].map((m) => Number(m[1])));
@@ -159,7 +160,8 @@ export function unlinkedCards(text: string, cards: CardLink[], self: number | nu
     if (!CARD.test(para)) continue;
     const named = [...new Set([...para.matchAll(MINION)].map((m) => Number(m[1])))].filter((n) => of(n).length);
     for (const minion of named.length ? named : [self]) {
-      const waiting = of(minion);
+      const theirs = (c: CardLink) => !named.length && reader && c.to && c.to.toLowerCase() !== reader.toLowerCase() && !para.toLowerCase().includes(c.to.toLowerCase());
+      const waiting = of(minion).filter((c) => !theirs(c));
       if (waiting.length && !waiting.some((c) => linked.has(eventOf(c)))) missing.set(minion, waiting);
     }
   }

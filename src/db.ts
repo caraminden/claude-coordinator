@@ -748,7 +748,7 @@ export class Store {
     if (first == null) return;
     let n = 0;
     for (const row of this.db
-      .prepare(`SELECT * FROM events WHERE id >= ? AND ((ticket_id = ? AND kind = 'claude' AND json_extract(data, '$.type') = 'assistant' AND instr(data, '"type":"text"') > 0)
+      .prepare(`SELECT * FROM events WHERE id >= ? AND ((ticket_id = ? AND kind = 'claude' AND json_extract(data, '$.type') = 'assistant' AND json_extract(data, '$.replaced') IS NULL AND instr(data, '"type":"text"') > 0)
         OR (kind = 'user_message' AND json_extract(data, '$.from') = ?)) ORDER BY id DESC`)
       .iterate(first, ticketId, ticketId)) {
       yield row as unknown as EventRow;

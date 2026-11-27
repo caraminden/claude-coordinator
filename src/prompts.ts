@@ -18,6 +18,7 @@ import { CITADEL_REPLY_MS } from './access.ts';
 import { advisedModel, tableText } from '../public/model-table.js';
 import { DONE_LINES } from './done-lines.ts';
 import type { QueuedMessage } from './runner.ts';
+import type { ServerTool } from './server-tools.ts';
 
 /** The live checkout: the code this server runs, which Citadel's own Taskmaster may read. */
 export const CHECKOUT = join(import.meta.dirname, '..');
@@ -340,6 +341,7 @@ export function promptParts(
   jobMachines: string[] = [],
   fableOver = false,
   cabal: CabalRole | null = null,
+  serverTools: ServerTool[] = [],
 ): { system: PromptSections; turn: PromptSections } {
   const layers = { app: appInstructions(appText), rules: minionRulesLines(project), scheme: projectInstructions(project, !!appText.trim()) };
   if (ticket.kind === 'coordinator') {
@@ -421,7 +423,7 @@ export function promptParts(
           : 'When you open a GitHub pull request or dispatch a workflow on your branch, the app messages you as "[GitHub]: ..." on its CI, reviews and merge: don\'t wait on CI in a turn or a background loop; set state outside and end the turn.',
       ],
       files: filesDir ? [filesLine(filesDir)] : [],
-      machines: machineTools(machines),
+      machines: [...serverToolLines(serverTools), ...machineTools(machines)],
       jobs: jobMachines.length ? [jobsLine(jobMachines)] : [],
     },
   };
@@ -479,6 +481,11 @@ export function machineServers(m: TurnMachine): { name: string; server: MachineS
 /** Machines whose owners let jobs run on them (#857): queue_job's one line. */
 function jobsLine(names: string[]): string {
   return `GPU jobs: ${names.join(', ')} run container jobs (an image pinned by digest) with queue_job (leave machine out and Citadel picks one); its owner gives each new recipe a go on a card in your chat, and jobs run in its job hours unless you ask for now with a reason. You are woken when one ends; results land in the shared folder's jobs/<id>/. job_status reads it, stop_job stops it.`;
+}
+
+/** The tools Citadel's own server runs for this scheme's minions (src/server-tools.ts, #2179). */
+function serverToolLines(tools: ServerTool[]): string[] {
+  return tools.map((t) => `Server tool: ${t.name} (mcp__${t.name}) runs here on Citadel's server, for this scheme's minions.\nNotes on ${t.name}:\n${t.notes}`);
 }
 
 /** Which people's computers lend this turn their MCP tools. */

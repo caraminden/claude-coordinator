@@ -20,6 +20,9 @@ import { llamaEmbed } from './memory.ts';
 import { apiRoutes } from './routes/all.ts';
 import { READER_ANSWER_MS, READER_ROUTES, applySnap, type Snapshot, type SnapDelta } from './front.ts';
 import { Runner } from './runner.ts';
+import { TurnRefs } from './turn-refs.ts';
+import { TurnSpend } from './turn-spend.ts';
+import { PlanUsage } from './plan-usage.ts';
 import { MinionQueue } from './minion-queue.ts';
 import { LIMIT_RESUMES, WaitList } from './resumes.ts';
 import { StatusPage } from './status-page.ts';
@@ -76,7 +79,11 @@ export function readerRunner(store: Store, snap: Snapshot): Runner {
     resumes: { limit: new WaitList(store, LIMIT_RESUMES) },
     onLive: () => {},
     // Unused: live() below carries main's ratio as step_ratio, so a reader keeps no cache of its own.
-    stepRatio: () => 1,
+    turnProgress: { stepRatio: () => 1 },
+    // The parts view() reads of runner.ts's split-out helpers (#2045), each with only the store, as this stand-in has.
+    refs: Object.assign(Object.create(TurnRefs.prototype), { d: { store } }),
+    turnSpend: Object.assign(Object.create(TurnSpend.prototype), { d: { store } }),
+    planUsage: Object.assign(Object.create(PlanUsage.prototype), { d: { store } }),
     live: (t: Ticket) => {
       const live = snap.ready ? snap.live[t.id] : undefined;
       if (!live) throw new Error(`No live state for minion ${t.id} yet`);

@@ -30,7 +30,7 @@ test('appending a Codex turn past the log cap keeps only its newest lines, at mo
   const dir = join(root, 'turn');
   mkdirSync(dir);
   writeFileSync(join(dir, 'codex-log.jsonl'), line(999999));
-  (runner as any).keepCodexLog(t.id, readFileSync(join(dir, 'codex-log.jsonl'), 'utf8'));
+  (runner as any).planUsage.keepCodexLog(t.id, readFileSync(join(dir, 'codex-log.jsonl'), 'utf8'));
   const kept = store.getSetting<CodexThread>(codexThreadKey(t.id))!;
   assert.ok(kept.log.length <= 2 * HANDOVER_MAX, `the log is ${kept.log.length} characters, over ${2 * HANDOVER_MAX}`);
   assert.ok(kept.log.endsWith(line(999999)), 'the newest turn is kept');

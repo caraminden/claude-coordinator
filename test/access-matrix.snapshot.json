@@ -1389,6 +1389,26 @@
   "m1": "401 Unknown machine token; make a new one in the Machines panel",
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
  },
+ "GET /api/machines/tool-perigee-godot/session": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "403 perigee-godot isn't lent to this scheme",
+  "m2": "403 perigee-godot isn't lent to this scheme"
+ },
+ "POST /api/machines/tool-perigee-godot/session/0123456789abcdef01234567": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn can use a machine",
+  "member": "403 Only a minion's turn can use a machine",
+  "outsider": "403 Only a minion's turn can use a machine",
+  "tmA": "403 Only a minion's turn can use a machine",
+  "tmB": "403 Only a minion's turn can use a machine",
+  "m1": "503 That session ended",
+  "m2": "503 That session ended"
+ },
  "DELETE /api/machines/turn-call/x": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
@@ -3562,6 +3582,36 @@
   "m1": "400 Summary is required",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/heavy-builds": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself places its heavy jobs",
+  "member": "403 Only the minion itself places its heavy jobs",
+  "outsider": "403 Only the minion itself places its heavy jobs",
+  "tmA": "403 Only the minion itself places its heavy jobs",
+  "tmB": "403 Only the minion itself places its heavy jobs",
+  "m1": "400 kind must be one of apk, cargo, suite, other",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:minion1/heavy-builds/1": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself places its heavy jobs",
+  "member": "403 Only the minion itself places its heavy jobs",
+  "outsider": "403 Only the minion itself places its heavy jobs",
+  "tmA": "403 Only the minion itself places its heavy jobs",
+  "tmB": "403 Only the minion itself places its heavy jobs",
+  "m1": "404 No such heavy job of this minion's",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:minion1/heavy-builds/1/file": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself places its heavy jobs",
+  "member": "403 Only the minion itself places its heavy jobs",
+  "outsider": "403 Only the minion itself places its heavy jobs",
+  "tmA": "403 Only the minion itself places its heavy jobs",
+  "tmB": "403 Only the minion itself places its heavy jobs",
+  "m1": "404 No such heavy job of this minion's",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/host-tool": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can propose a host tool in its chat",
@@ -4539,6 +4589,36 @@
   "outsider": "404 No such minion",
   "tmA": "400 Summary is required",
   "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/heavy-builds": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself places its heavy jobs",
+  "member": "403 Only the minion itself places its heavy jobs",
+  "outsider": "403 Only the minion itself places its heavy jobs",
+  "tmA": "403 Only the minion itself places its heavy jobs",
+  "tmB": "403 Only the minion itself places its heavy jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/heavy-builds/1": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself places its heavy jobs",
+  "member": "403 Only the minion itself places its heavy jobs",
+  "outsider": "403 Only the minion itself places its heavy jobs",
+  "tmA": "403 Only the minion itself places its heavy jobs",
+  "tmB": "403 Only the minion itself places its heavy jobs",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/heavy-builds/1/file": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion itself places its heavy jobs",
+  "member": "403 Only the minion itself places its heavy jobs",
+  "outsider": "403 Only the minion itself places its heavy jobs",
+  "tmA": "403 Only the minion itself places its heavy jobs",
+  "tmB": "403 Only the minion itself places its heavy jobs",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

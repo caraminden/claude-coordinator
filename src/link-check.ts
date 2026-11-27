@@ -235,7 +235,7 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const misused = misusedWords(reply);
   const refs = readRefs(cfg.refs);
   const strays = refs ? strayRefs(reply, refs) : [];
-  const cards = refs?.cards ? unlinkedCards(reply, refs.cards, refs.self ?? null) : [];
+  const cards = refs?.cards ? unlinkedCards(reply, refs.cards, refs.self ?? null, refs.reader) : [];
   const misplaced = refs?.cards ? misplacedCards(reply, refs.cards, refs.self ?? null) : [];
   const stale = refs?.settled ? staleCards(reply, refs.settled) : [];
   const rolled = await handRolledPages(reply, cfg);

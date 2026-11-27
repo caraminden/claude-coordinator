@@ -51,11 +51,12 @@ import { claudeConfigDir, lastEffortLater } from './src/sessions.ts';
 import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
+import { SERVER_TOOLS, ServerToolSessions, serverToolsFor } from './src/server-tools.ts';
 import { MachinePools } from './src/machine-pools.ts';
 import { MachineCopies, wireCopies } from './src/machine-away.ts';
 import { awayTick, machineLink, workerInfo } from './src/machine-turn.ts';
 import { imageFile, WorkerJoin } from './src/worker-join.ts';
-import { RoleSetups } from './src/role-setup.ts';
+import { RoleSetups, shippedImages } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
@@ -99,6 +100,7 @@ import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
+import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import type { GhJob } from './src/gh-bodies.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
@@ -165,8 +167,8 @@ import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { MainRollbacks, ROLLBACK_EVERY_MS } from './src/main-rollback.ts';
-import { Builds } from './src/builds.ts';
-import { CabalCards } from './src/cabal-cards.ts';
+import { type BuildSummary, Builds } from './src/builds.ts';
+import { type CabalCard, CabalCards } from './src/cabal-cards.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
@@ -696,6 +698,8 @@ function liveOn(head: string | null, booted = false) {
   })().catch((err) => console.error('Checking waiters after a deploy failed:', err));
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
+// Never in a preview or a test server (CITADEL_SERVER_TOOLS=0): a call would start the real Godot editor.
+const serverTools = config.serverTools && !PREVIEW ? new ServerToolSessions() : undefined;
 machines.tokenKey = machineTokenKey;
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
 /** Take a card out of people's way with a line saying why (a machine job's go, a superseded kit sync); an answered or settled one stays. */
@@ -769,10 +773,30 @@ const sendRunnerPlans = () => {
 };
 if (!BOOT_CHECK) every('runner plans', MachineBalancer.TICK_MS, sendRunnerPlans);
 machines.agentUrl = MACHINES_URL?.origin ?? null;
+// Where citadel-heavy sends a job whose files come back, or in a scheme with no CI (H2, src/heavy-builds.ts): a machine's Builds role, else perigee's line.
+const buildsRole = (id: number) => store.machineRoles(id).find((r) => r.role === 'builds');
+const buildPlacer = new BuildPlacer({
+  machines: () =>
+    store
+      .listMachines()
+      .filter((m) => m.owner_id !== null && machines.isOnline(m.id))
+      .map((m) => ({ id: m.id, name: m.name, priority: m.priority ?? null })),
+  builds: (id, projectId) => {
+    const m = store.getMachine(id);
+    const p = store.getProject(projectId);
+    const role = buildsRole(id);
+    return !!(m && p && role?.on && lendsRole(store, m, 'builds', p) && buildsReady(role.setup, shippedImages()));
+  },
+  free: (id) => balancer.free(id, buildsRole(id)?.caps.threads ?? null, 'build:'),
+  warm: (projectId, kind) => store.machineJobs({ project: projectId, kindName: kind, states: ['done'] }, 1)[0]?.machine_id ?? null,
+});
 const jobs = new MachineJobs({
   store,
   broadcast,
-  room: (id, job) => balancer.ask(id, job),
+  room: (id, job) => buildRoom(balancer, id, job, job.key.startsWith('build:') ? (buildsRole(id)?.caps.threads ?? null) : null),
+  heavyDone: (key) => balancer.done(key),
+  heavyHeld: (id, job) => balancer.hold(id, job),
+  buildsMay: (job) => buildPlacer.buildsMay(job.machine_id, job.project_id),
   freed: (id, keep) => balancer.release(id, 'gpu:', keep),
   send: (id, msg) => machines.sendJob(id, msg),
   online: (id) => machines.isOnline(id),
@@ -797,7 +821,7 @@ const jobs = new MachineJobs({
     return c ? join(services.dataDir(c), 'jobs', String(job.id)) : null;
   },
 });
-machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
+machines.jobHooks = { info: (m, known, since, builds) => jobs.reconcile(m, known, since, builds), offline: (id) => jobs.offline(id) };
 // A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).
 if (!BOOT_CHECK)
   machines.watchBoxes((id, text) => {
@@ -811,9 +835,12 @@ const workFlow = new WorkFlow(store, { dir: join(DATA_DIR, 'work-flow'), read: r
 const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
+if (serverTools) runner.serverTools = (projectId, kind) => serverToolsFor(projectId, kind);
 // A machine whose Windows screen role is lent comes too, for the pooled mcp__windows__ tools (Build 7 M5): its named tools only with its Tools role.
+// A machine named like a tool the server runs (src/server-tools.ts) is left out: perigee-godot's old row (#2179).
 runner.machines = (project, askers) =>
   machines.online().flatMap((m) => {
+    if (SERVER_TOOLS.some((t) => t.name === m.name)) return [];
     const tools = lendsRole(store, m, 'tools', project, askers);
     const screen = m.servers.includes('ws') && lendsRole(store, m, 'screen', project, askers);
     return tools || screen ? [{ ...m, servers: tools ? m.servers : [], ...(screen ? { screen: true as const } : {}) }] : [];
@@ -1395,10 +1422,16 @@ const artifacts = new ArtifactScanner(store, DATA_DIR, broadcast);
 const sharedDir = artifacts.sharedDir;
 const ships = new ShipStatus({ store, runner, broadcast, liveHead: () => waiters.head, checkoutDir: import.meta.dirname });
 const ticketBranch = ships.branch;
+// A changed build or cabal list goes to the readers before the stream (#2181): a page load a reader answered before its
+// sweep caught up came back with the older list, and the page kept it until the list next changed.
+const listChanged = (msg: { type: 'builds'; projectId: number; builds: BuildSummary[] } | { type: 'cabals'; projectId: number; cabals: CabalCard[] }) => {
+  throughFront?.publish(msg.type === 'builds' ? { builds: { [msg.projectId]: msg.builds } } : { cabals: { [msg.projectId]: msg.cabals } });
+  broadcast(msg);
+};
 // Each build branch's header in the minions list (src/builds.ts): feeders folded in and open, commits behind main.
-const builds = new Builds({ store, broadcast });
+const builds = new Builds({ store, broadcast: listChanged });
 // Each open cabal's card in the minions list (src/cabal-cards.ts), polled with the build headers.
-const cabals = new CabalCards({ store, broadcast, parked: (t) => runner.parked(t) });
+const cabals = new CabalCards({ store, broadcast: listChanged, parked: (t) => runner.parked(t) });
 runner.ship = ships.ship;
 
 // What each minion waits on (#544): the land line in this checkout's git dir (tools/deploy-queue.sh), the heavy slots.
@@ -2629,6 +2662,7 @@ const app: App = {
   apkBuilds,
   desktop,
   machines,
+  serverTools,
   machineCopies,
   jobs,
   pusher,
@@ -2648,6 +2682,7 @@ const app: App = {
   ciHold,
   runnerCap,
   heavy: heavyPlacer,
+  buildPlacer,
   chunked,
   claude: claudeLink,
   codex: codexLink,

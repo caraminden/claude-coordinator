@@ -6,7 +6,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, type Booted, fakeClaude, tempRoot, until } from './helpers.ts';
+import { agentToken, bootServer, type Booted, fakeClaude, holds, tempRoot, until } from './helpers.ts';
+import { whenText } from '../src/cabal-start.ts';
 import { json } from './typed.ts';
 
 type Ev = { id: number; kind: string; data: string };
@@ -81,7 +82,18 @@ test('the forming card approves the roster with who and when; an unapproved row 
   assert.equal((await board(lead.id, { action: 'row', label: 'X', title: 'Gone', handoff: 'handoffs/nope.md' })).status, 400, 'a handoff must exist');
 
   const { data, answer } = await form('Not yet');
-  assert.match(data.questions[0].question, /Do a · handoffs\/a\.md · Sonnet[^\n]*· ~\$40/, "each row with its handoff, its tier and its handoff's cost");
+  const q = data.questions[0] as { question: string; roster: { what: string; cost?: string; when: string; tier?: string }[] };
+  assert.match(q.question, /^- Do a · ~\$40 · now$/m, 'each row on its own line: what it does, its cost, when it starts');
+  assert.match(q.question, /^- Do b · ~\$5 · after Do a$/m, "a dependency by the other piece's title, not its label");
+  assert.doesNotMatch(q.question, /handoffs\/|Sonnet/, 'no handoff path or model on the text');
+  assert.deepEqual(
+    q.roster.map((r) => [r.what, r.when]),
+    [
+      ['Do a', 'now'],
+      ['Do b', 'after Do a'],
+    ],
+  );
+  assert.match(q.roster[0].tier!, /Sonnet/, 'the tier rides along for the muted draw');
   assert.equal(rowOf('A').approved_at, null, 'Not yet approves nothing');
   assert.ok(answer);
 
@@ -116,6 +128,7 @@ test('cabal_start starts an approved row in the build and Goal, with the lead as
   const a = minion('Do a')!;
   assert.equal(r.data.started, a.number);
   assert.equal(a.parent, lead.number);
+  assert.equal(String(((await s.call(`/api/tickets/${a.id}`)).data.ticket.properties ?? {}).requestedBy ?? ''), String(((await s.call(`/api/tickets/${lead.id}`)).data.ticket.properties ?? {}).requestedBy ?? 'none'), "the lead's requestedBy, as its assigned");
   assert.equal(a.build, 7, "the lead's build");
   assert.deepEqual([a.model, a.effort], ['claude-sonnet-5-5', 'medium'], "the row's tier");
   assert.equal(rowOf('A').ticket_id, a.id, 'on its own row');
@@ -235,4 +248,35 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   assert.equal(await asked(), 2, 'the planned piece still holds it');
   assert.equal((await board(chief.id, { action: 'row', row: planned.data.row, remove: true })).status, 200);
   await until('asked once the piece is dropped', async () => (await asked()) === 3);
+});
+
+test("a row's start reads in words: now, after another piece by its title (labels with spaces too, an approved row too), once #N is live", () => {
+  const all = [
+    { label: 'H1', title: 'Owners piece' },
+    { label: 'VM piece', title: 'A VM is a capability' },
+  ];
+  assert.equal(whenText({ after: '' }, all), 'now');
+  assert.equal(whenText({ after: 'H1' }, all), 'after Owners piece');
+  assert.equal(whenText({ after: 'VM piece' }, all), 'after A VM is a capability');
+  assert.equal(whenText({ after: 'H1, #2179' }, all), 'after Owners piece, once #2179 is live');
+  assert.equal(whenText({ after: '2179' }, all), 'once #2179 is live');
+  assert.equal(whenText({ after: 'H1 + #2179' }, all), 'after Owners piece, once #2179 is live');
+});
+
+test('a page load never answers with an older cabal list than the stream sent: the readers have it the moment main does (#2181)', async () => {
+  const q = (await s.call('/api/projects', { name: 'Flip' })).data;
+  const chief = (await s.call(`/api/projects/${q.id}/tickets`, { title: 'Flip lead', message: 'Lead.', build: 10 })).data;
+  type Card = { lead: number; members: unknown[] };
+  const cards = async () => ((await s.call(`/api/projects/${q.id}?tickets=open`)).data.cabals ?? []) as Card[];
+  // Each write: once a page load has the change, every later one keeps it (the readers' sweep came 3 s behind, #2181).
+  for (const [n, body] of [
+    [0, { action: 'log', text: 'Laying out the roster' }],
+    [1, { action: 'row', label: 'A', title: 'Do a' }],
+    [2, { action: 'row', label: 'B', title: 'Do b' }],
+  ] as const) {
+    assert.equal((await board(chief.id, body)).status, 200);
+    const has = async () => (await cards()).some((c) => c.lead === chief.id && c.members.length === n);
+    await until(`a page load has the card with ${n} rows`, has);
+    await holds(`every page load keeps the card with ${n} rows`, has, { ms: 4000 });
+  }
 });

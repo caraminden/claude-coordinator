@@ -439,6 +439,8 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       CITADEL_ZONE: TEST_ZONE,
       // GitHub reads go through the `gh` on PATH, which tests stub, not a helper reaching api.github.com (#1542).
       GH_HELPER: '0',
+      // No server tools (src/server-tools.ts): a test scheme with Delve's id would start the real Godot bridge.
+      CITADEL_SERVER_TOOLS: '0',
       // GET /api/test/settled, for settled() and stop() below (#1437).
       CITADEL_TEST_SETTLED: '1',
       // Node's compile cache for the server's modules (#1518): a cold boot type-strips and compiles the whole app, about

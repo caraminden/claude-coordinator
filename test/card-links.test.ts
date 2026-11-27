@@ -470,3 +470,17 @@ test("a secret card is a secret card in the minions list and the tools' waiting 
   const c = { minion: 3, kind: 'question' as const, what: cardWhat('question', data), label: cardLabel('question', data), href: '#/p/2/t/3?e=9' };
   assert.equal(cardText(c), 'secret card "a secret to save as BRAVE_SEARCH_KEY": [open it](#/p/2/t/3?e=9)');
 });
+
+test("a card addressed to someone else isn't this reply's card unless the reply names them or links it", () => {
+  const josh = { ...card(null, 44), to: 'Josh' };
+  const mine = { ...card(null, 55), to: 'Cara' };
+  const of = (text: string, all: CardLink[]) => unlinkedCards(text, all, null, 'Cara').map((g) => g.map((c) => c.href));
+  assert.deepEqual(of("#2180's roster card is waiting on you.", [josh]), []);
+  assert.deepEqual(of('There is a card waiting on you.', [josh]), []);
+  assert.deepEqual(of("Josh's card is still open.", [josh]), [['#/p/2?e=44']]);
+  assert.deepEqual(of('The card below is yours.', [josh, mine]), [['#/p/2?e=55']]);
+  assert.deepEqual(
+    unlinkedCards('There is a card waiting.', [josh], null),
+    [['#/p/2?e=44']].map(() => [josh]),
+  );
+});

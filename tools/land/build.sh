@@ -2,12 +2,11 @@
 # Build branches (--into build/<n>): claims, the build's lock and the merge into it.
 # Sourced by tools/land.sh up front: definitions only (#2099).
 
-# Build claims (#1159): build-claims.md on build/<n>, the build minion's plan, names the files each feeder writes
-# ("#<n>: <paths>"; a path ending in / is a folder, the longest match wins), the hub files any feeder may add to
-# ("shared: <paths>") and the build minion ("build: #<n>"). A feeder's --into is refused when it writes a file another
-# feeder claimed, an unclaimed file another feeder already merged in, the claims file itself, or, in a shared file,
-# lines another feeder merged in. Who merged a commit comes from build/<n>'s reflog ("land.sh --into <branch>"),
-# else from a "#<n>" at the start of its subject. It runs at --check, before the lock, and again after the rebase. A plain check, no AI; with no claims file there is no check.
+# Build claims (#1159): build-claims.md on build/<n> names the files each feeder writes ("#<n>: <paths>"; a path ending
+# in / is a folder, longest match wins), the files any feeder may add to ("shared: <paths>") and the build minion
+# ("build: #<n>"). A feeder's --into is refused when it writes a file another feeder claimed or merged in first, the
+# claims file, or, in a shared file, lines another feeder merged in. Who merged a commit: build/<n>'s reflog
+# ("land.sh --into <branch>"), else a "#<n>" starting its subject. Runs at --check and after the rebase. No file, no check.
 claims_check() {
   local trunk=$1 claims me boss mb merged f who m a b why
   claims=$(git show "refs/heads/$build:build-claims.md" 2>/dev/null) || return 0
@@ -69,9 +68,8 @@ claims_check() {
   refuse "$why"
 }
 
-# One writer per build branch, on fd 6: a merge into it, its --full run or its land. Merges into a build take a minute,
-# so they wait only for each other, not in the lands' line. --full and --build take it before they get in that line, so
-# a land never waits on a feeder's test run; the feeders wait for them instead.
+# One writer per build branch, on fd 6: a merge into it, its --full run or its land. Merges wait only for each other, not
+# in the lands' line; --full and --build take it before that line, so a land never waits on a feeder's test run.
 build_lock() {
   local lock=$state/build-${build#build/}.lock wait=${LAND_BUILD_WAIT:-3600}
   exec 6>"$lock" || { say "can't open $lock for writing, so nothing merged: a person needs to look at it"; return 1; }
@@ -82,7 +80,7 @@ build_lock() {
   return 1
 }
 
-# The end of --into: build/<n> moves to what was tested, unless something moved it meanwhile (the compare-and-swap).
+# The end of --into: build/<n> moves to what was tested unless something moved it meanwhile (compare-and-swap).
 merge_into() {
   git update-ref -m "land.sh --into $branch" "refs/heads/$build" "$tip" "$base" || refuse "$build moved while this ran (not by land.sh, which holds its lock), so nothing merged: run it again"
   land_mark merged

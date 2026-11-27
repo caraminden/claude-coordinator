@@ -104,6 +104,23 @@ test('with its jobs block broken, a machine still hears of a job it lists, and o
   assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: 5 }), false, 'it named none: Citadel ends the job itself');
 });
 
+test('with no GPU jobs block a machine still hears of a build job (H2), and its builds-only list is reconciled on its own', () => {
+  const { relay, store, box } = world();
+  const owner = store.createUser({ name: 'Owner', login: 'owner' });
+  const p = store.createProject('U', null, owner.id);
+  const row = { machine_id: box.id, project_id: p.id, ticket_id: null, contraption_id: null, asked_by: 'x', kind: '{}', kind_hash: 'h', inputs: '[]', limit_s: 60, run_when: 'now', reason: 'r', state: 'queued', created_at: 1 } as const;
+  const build = store.addMachineJob({ ...row, kind_name: 'cargo', go: 'builds' });
+  const gpu = store.addMachineJob({ ...row, kind_name: 'k', go: 'now' });
+  const agent = stream();
+  relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
+  const seen: unknown[] = [];
+  relay.jobHooks = { info: (_m, known, _since, builds) => void seen.push({ known, builds }), offline() {} };
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: build.id }), true, 'a build needs no jobs block');
+  assert.equal(relay.sendJob(box.id, { type: 'job.stop', id: gpu.id }), false);
+  relay.setInfo(store.getMachine(box.id)!, { v: 2, known_builds: [{ id: build.id, state: 'running' }] });
+  assert.deepEqual(seen, [{ known: null, builds: [{ id: build.id, state: 'running' }] }]);
+});
+
 test('an agent that beats and then goes quiet (a laptop asleep) is dropped within a couple of minutes; one that never beats is kept', () => {
   mock.timers.enable({ apis: ['setInterval', 'Date'] });
   try {

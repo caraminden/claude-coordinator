@@ -252,9 +252,7 @@
   "Runner.recover": ["boot",7,"runner.recover() at startup, server.ts:488"],
   "Runner.reattach": ["boot",1,"Runner.recover re-attach at startup"],
   "Runner.spawnWrapper": ["rare",1,"writeFileSync only if the wrapper spawn errors; turn start path"],
-  "Runner.readStreamAtBoot": ["boot",3,"Runner.reattach at startup, for a turn found ended; the poll reads off the thread (#2134)"],
-  "Runner.writeRefs": ["rare",2,"a card a turn posts itself: its own snapshot is written before the tool call is answered (refreshRefs `posted`, pinned by test/off-thread-fs.test.ts); every other turn's goes through putRefs, off the thread"],
-  "Runner.writeSchemeRefs": ["rare",1,"the same posted card: one existsSync of that turn's own snapshot before writeRefs writes it at once; other turns' snapshots are written off the thread"]
+  "Runner.readStreamAtBoot": ["boot",3,"Runner.reattach at startup, for a turn found ended; the poll reads off the thread (#2134)"]
  },
  "src/running-turn.ts": {
   "pids": ["rare",1,"the \"still going?\" chip (ChildTurn.look); the stop and the poll read pid.json off the thread (pidsOff, #2134)"],
@@ -327,6 +325,10 @@
  "src/turn-launch.ts": {
   "pinTurnFiles": ["rare",39,"boot, plus re-pin on SIGHUP after a kit/tools deploy"],
   "coordinatorAccess": ["rare",1,"readdirSync fallback only if openTickets unset; runner always sets it"]
+ },
+ "src/turn-refs.ts": {
+  "TurnRefs.writeRefs": ["rare",2,"a card a turn posts itself: its own snapshot is written before the tool call is answered (refreshRefs `posted`, pinned by test/off-thread-fs.test.ts); every other turn's goes through putRefs, off the thread"],
+  "TurnRefs.writeSchemeRefs": ["rare",1,"the same posted card: one existsSync of that turn's own snapshot before writeRefs writes it at once; other turns' snapshots are written off the thread"]
  },
  "src/turn-run.mjs": {
   "put": ["boot",2,"wrapper/supervisor child process, not the server"],

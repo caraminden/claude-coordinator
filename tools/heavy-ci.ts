@@ -124,7 +124,7 @@ function repo(): string {
 }
 
 // Files a snapshot leaves out: an untracked secret pushed to GitHub would outlive the scratch ref.
-const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/*.p12', '**/*.jks', '**/*.keystore', '**/id_rsa*', '**/id_ed25519*'];
+export const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/*.p12', '**/*.jks', '**/*.keystore', '**/id_rsa*', '**/id_ed25519*'];
 
 /** A commit of the working copy as it is (tracked and untracked files, .gitignore kept), on top of HEAD. */
 function snapshot(): string {

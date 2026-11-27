@@ -36,8 +36,8 @@ train_main_red() {
   main_red=$(sed 's/ /, /g' <<<"${reds[*]}") main_red_other=$(sed 's/ /, /g' <<<"${other[*]}") main_red_mine=$(sed 's/ /, /g' <<<"${mine[*]}") main_red_riders=${#train_n[@]}
   local who="this train's" more flakes
   [ ${#train_n[@]} -gt 0 ] || who="this ship's"
-  # Its passed-alone files go by #1419's rule (Cara, "Known flakes only"): a known flake no ship changed is excused; a new
-  # one may be the train's own, and the leak guard's red is never a flake. Either counts as another red: no ship through.
+  # Passed-alone files go by #1419's rule: a known flake no ship changed is excused; a new one may be the train's own, and
+  # the leak guard's red is never a flake. Either counts as another red: no ship through.
   flakes=$(train_labels | sed -n 's/^failed in the full run, passed alone //p' | paste -sd, - | sed 's/,/, /g') || true
   if [ -n "$main_red_other$main_red_mine" ] || [ ${#touched[@]} -gt 0 ]; then
     :
@@ -71,11 +71,9 @@ train_main_red() {
   return 0
 }
 
-# Known flakes (#1419, Cara 2026-11-20, "Known flakes only": "Skip the extra run when each failed test has already flaked on
-# other ships in the last 2 weeks, or a minion is fixing it"; ADR 0006's amendment). <files, comma-separated>, each of
-# which passed alone: whether every one is a known flake (tools/known-flakes.ts: the retro log's sightings on other
-# branches, an open fix minion, and not a broken test) that no ship on the train changed, nor what it imports (the suspects' map). Says why
-# not; on yes, sets $known_why ("<file> (<why>), ..."). Anything it can't tell keeps today's fresh run.
+# Known flakes (#1419, ADR 0006). <files, comma-separated>, each of which passed alone: whether every one is a known flake
+# (tools/known-flakes.ts: sightings on other branches, an open fix minion, not a broken test) that no ship on the train changed,
+# nor what it imports. Says why not; on yes, sets $known_why ("<file> (<why>), ..."). Anything it can't tell keeps a fresh run.
 known_flakes() {
   local files=() f m out hits=() chg=() ok=1 who
   known_why=''
@@ -86,8 +84,7 @@ known_flakes() {
   out=$(LAND_FLAKE_DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} \
     "$tools/citadel-node" --no-warnings "$tools/known-flakes.ts" "$branch ${train_br[*]}" "${files[@]}" 2>/dev/null) || ok=''
   [ -n "$out" ] || { say "couldn't tell whether $1 are known flakes (tools/known-flakes.ts gave no answer)"; return 1; }
-  # A broken test (#1487: red in a big share of the last hours' runs) is said as known-flakes.ts words it, and logged, so the
-  # server moves its fix minion to the front of the line (src/flake-fixes.ts) and Releases calls it one (src/land-news.ts).
+  # A broken test (#1487) is said in known-flakes.ts's words and logged, so its fix minion moves to the front (src/flake-fixes.ts).
   [ -n "$ok" ] || { while read -r f; do
     if [[ $f == 'broken test, not a flake: '* ]]; then
       say "$f"

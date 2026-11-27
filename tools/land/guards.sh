@@ -2,14 +2,12 @@
 # The guard tests and main's boot check, run on the rebased branch before CI.
 # Sourced by tools/land.sh up front: definitions only (#2099).
 
-# <state>/bad: "<commit> <last-good> <when> <what it restarted on>", left by the restart that rolled <commit>'s deploy back (tools/deploy.sh),
-# or with " rollback" after it by a Roll back to last green from <commit> (deploy.sh --to, #1016).
-# While main still holds that commit every deploy pulls it in again and is rolled back too (#553), so only its fix
-# may land: a branch that changes a file that deploy changed, or one the lander vouches for with LAND_FIX=1.
+# <state>/bad: "<commit> <last-good> <when> <what it restarted on>", left by tools/deploy.sh when it rolled <commit>'s deploy
+# back (" rollback" after it: a Roll back to last green, #1016). While main holds it every deploy is rolled back too
+# (#553), so only its fix may land: a branch changing a file that deploy changed, or LAND_FIX=1.
 bad_check() {
   local bad good rest
-  # <state>/rolling-back: "<from> <to> <when>", while a Roll back to last green's restart waits (deploy.sh --to, #1271).
-  # Its deploy would refuse after main moved, so refuse now, the fix too: its own deploy would undo the roll back.
+  # <state>/rolling-back: "<from> <to> <when>", while a Roll back's restart waits (#1271): a deploy would undo it, the fix's too.
   if [ -s "$state/rolling-back" ]; then
     read -r _ good _ <"$state/rolling-back" || true
     if systemctl --user is-active -q "${DEPLOY_UNIT:-cc-restart-when-idle}" 2>/dev/null; then
@@ -21,23 +19,18 @@ bad_check() {
   read -r bad good rest <"$state/bad" || true
   git -C "$SOURCE" merge-base --is-ancestor "$bad" main 2>/dev/null || { rm -f "$state/bad"; return 0; }
   [ -z "${LAND_FIX:-}" ] || return 0
-  [ -z "$(comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort))" ] || return 0 # not `| grep -q`, as above
+  [ -z "$(comm -12 <(git diff --name-only "$good" "$bad" | sort) <(git diff --name-only main HEAD | sort))" ] || return 0
   local why="the restart on it failed: its report is in the chat of the minion that deployed it"
   [ "${rest##* }" != rollback ] || why="a member pressed Roll back to last green on Releases"
   refuse "main holds $(git log -1 --format='%h "%s"' "$bad"), whose deploy was rolled back ($why), and $branch changes none of the files that deploy changed, so its deploy would be rolled back too. Nothing landed. Land the fix for it first (or its revert); if $branch is that fix, run LAND_FIX=1 tools/land.sh (from a turn in a container: the land tool with fix: true)"
 }
 
-# The deploy's boot check, before a CI run is spent (#646). Only while <state>/refusing is there: deploy.sh leaves it
-# ("<when> <why>") when its boot check fails and removes it when one passes. On Nov 13 nine landings each waited in
-# line and for CI, to be refused by a boot check that failed on every commit. The fix for such a failure passes here
-# and lands as usual. Off: LAND_PREFLIGHT=0, or for every landing, touch <state>/preflight-off.
-# A ship that fails it while main fails it too is not the cause (#1564, Cara 2026-11-21, D "Go"): a plain land keeps
-# its ticket, lets go of the lock and holds with the phase "held: main is broken", passed over by the line, and goes on
-# from its rebase once main boots again (refusing cleared by a deploy that passed, main moved, or main's own check
-# passing on a recheck). Only past LAND_HOLD_MAX is it refused as before.
-# [<epoch>]: main's own boot check (its exit code), shared by every ship: run again once main moves or after
-# LAND_HOLD_RECHECK s. A pass from before <epoch> (when this ship's own check began) is run again too: the box may have
-# broken since, and reading it as a pass would make that look like the ship's fault (#1864).
+# The deploy's boot check, before a CI run is spent (#646), only while <state>/refusing ("<when> <why>", set by deploy.sh
+# when its boot check fails) is there. Off: LAND_PREFLIGHT=0, or touch <state>/preflight-off.
+# A ship failing it while main fails too is not the cause (#1564): a plain land lets go of the lock, holds as "held: main
+# is broken" and goes on from its rebase once main boots again. Past LAND_HOLD_MAX it is refused.
+# [<epoch>]: main's own boot check (exit code), shared by every ship: run again once main moves, after LAND_HOLD_RECHECK s,
+# or for a pass from before <epoch> (this ship's check began): the box may have broken since (#1864).
 main_boot() {
   local from=${1:-0} m sha rc at d
   m=$(git -C "$SOURCE" rev-parse main)
@@ -46,7 +39,7 @@ main_boot() {
     read -r sha rc at 2>/dev/null <"$state/boot-main" || true
     if [ "${sha:-}" = "$m" ] && [[ ${at:-} =~ ^[0-9]+$ ]] && [ $(($(date +%s) - at)) -lt "${LAND_HOLD_RECHECK:-900}" ] && { [ "$rc" != 0 ] || [ "$at" -ge "$from" ]; }; then echo "$rc"; exit 0; fi
     d=$(mktemp -d "${TMPDIR:-/tmp}/land-main-boot.XXXXXX")
-    # A copy that can't be made can't tell, so the ship is judged alone, as before.
+    # No copy, no verdict: the ship is judged alone.
     git -C "$SOURCE" archive "$m" | tar -x -C "$d" || { rm -rf "${d:?}"; echo 0; exit 0; }
     rc=0
     timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-600}" "$d/tools/citadel-node" "$d/tools/boot-check.ts" "$d" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >"$state/boot-main.log" 2>&1 9>&- 7>&- 6>&- 4>&- || rc=$?
@@ -67,13 +60,13 @@ preflight() {
   queue_phase "boot check before CI since $(date +%H:%M)"
   land_mark preflight preflight
   began=$(date +%s)
-  # As deploy.sh runs it: the commit's own check, a limit from outside, not as `node`, and without the locks' fds.
+  # As deploy.sh runs it: the commit's own check, an outside time limit, not as `node`, without the locks' fds.
   timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-600}" "$here/tools/citadel-node" "$here/tools/boot-check.ts" "$here" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >/dev/null 9>&- 7>&- 6>&- || rc=$?
   if [ "$rc" = 0 ]; then
     say "the boot check passes on $short, so this landing goes on"
     return 0
   fi
-  # 124, or 137 from timeout's KILL: stopped at the limit, which is not a verdict on the change (as deploy.sh says of it).
+  # 124 or 137 (timeout's KILL): stopped at the limit, not a verdict on the change.
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
     say "the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-600} s): running it on main, to tell a broken main from a broken change"
   else
@@ -99,15 +92,15 @@ preflight() {
     QUEUE_KEEP=$DEPLOY_QUEUE_TICKET queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
     unset -f queue_wait_check
     train_verdict held
-    LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}" # RETRY_NOW: not quiet, so a land.sh the fix changed takes over
+    LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}"
   fi
   retro_log "preflight refusal · $label · refusing since $since ($why)"
   [ "$rc" != 124 ] && [ "$rc" != 137 ] || refuse "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-600} s), so no CI run was spent and $untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
   refuse "deploy has been refusing since $since: $why, and $short fails the same check here (its output is above) while main passes it, so the cause is in your change: no CI run was spent and $untouched; $branch keeps the rebased work. Fix it and land again"
 }
 
-# [<worktree>]: the guard tests the repo has, in that worktree (this one by default). 0: passed, 1: failed (its output
-# in $guard_out), 2: couldn't decide (citadel-test's exit in $guard_rc), 3: the repo has none.
+# [<worktree>]: the repo's guard tests in that worktree (default this one). 0: passed, 1: failed (output in $guard_out),
+# 2: couldn't decide (citadel-test's exit in $guard_rc), 3: none.
 guard_run() {
   local dir=${1:-.} tests=() f
   guard_out='' guard_rc=0
@@ -120,7 +113,7 @@ guard_run() {
 
 guard_files() { sed -nE 's/^✖ ([^ :]+\.test\.ts).*/\1/p' <<<"$guard_out" | sort -u | paste -sd, -; }
 
-# <commit>: guard_run on that commit, in a scratch worktree (a ship train's top or a bisect step, #1479).
+# <commit>: guard_run on it in a scratch worktree (a train's top or a bisect step, #1479).
 guard_at() {
   local wt rc=0
   wt=$(mktemp -d "${TMPDIR:-/tmp}/land-guard.XXXXXX") && git worktree add -q --detach "$wt" "$1" >/dev/null 2>&1 || { guard_out='' guard_rc=2; return 2; }
@@ -140,7 +133,7 @@ guards() {
     *)
       grep -v '^full output: ' <<<"$guard_out" | tail -n 60 | sed 's/^/land: guard: /' >&2
       retro_log "guard · $label · $(guard_files) · $((SECONDS - t0))s"
-      [ ! -f "$state/split" ] || ! grep -qF "${DEPLOY_QUEUE_TICKET##*/} $branch" "$state/split" || rm -f "$state/split" # the red train's bad ship is found (split_over)
+      [ ! -f "$state/split" ] || ! grep -qF "${DEPLOY_QUEUE_TICKET##*/} $branch" "$state/split" || rm -f "$state/split"
       refuse "guard tests failed on $short, the branch rebased onto ${build:-main} (output above), so no CI run was spent and $untouched; $branch keeps the rebased work. Run citadel-test on that file, fix it, commit, then run this again" ;;
   esac
 }

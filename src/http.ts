@@ -1,5 +1,6 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
 import type { HeavyPlacer } from './heavy-place.ts';
+import type { BuildPlacer } from './heavy-builds.ts';
 import type { MachineCopies } from './machine-away.ts';
 import type { HeldStarts } from './held-starts.ts';
 import type { TestCounts } from './waits.ts';
@@ -28,6 +29,7 @@ import type { Builds } from './builds.ts';
 import type { CabalCards } from './cabal-cards.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket, TicketFields } from './db.ts';
 import type { MachineRelay } from './machines.ts';
+import type { ServerToolSessions } from './server-tools.ts';
 import type { MachineJobs } from './machine-jobs.ts';
 import type { KitSync } from './kit-sync.ts';
 import type { GithubLink } from './github-link.ts';
@@ -377,6 +379,8 @@ export interface App {
   /** Desktop apps' update feeds and their launcher (src/desktop-feed.ts, #1148); absent in tests that build no server. */
   desktop?: { feeds: DesktopFeeds; launchers: Launchers };
   machines: MachineRelay;
+  /** Tools the server itself runs for some schemes' minions (src/server-tools.ts, #2179); absent in tests that build no server. */
+  serverTools?: ServerToolSessions;
   /** What worker machines hold of each minion (src/machine-away.ts, Build 7 T6); absent in tests that build no server. */
   machineCopies?: MachineCopies;
   /** Jobs on people's own machines (src/machine-jobs.ts, #857). */
@@ -411,6 +415,8 @@ export interface App {
   runnerCap?: Pick<RunnerCap, 'text'>;
   /** Heavy jobs off the server waiting for room on a PC (src/heavy-place.ts, #2120); absent in tests that don't need it. */
   heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone' | 'holds'>;
+  /** Where citadel-heavy's heavy jobs go, and the Builds role's container jobs (src/heavy-builds.ts, H2); absent in tests that don't need it. */
+  buildPlacer?: Pick<BuildPlacer, 'place' | 'buildsMay'>;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
   /** Each scheme's files by size and by how many minions changed them, counted daily (src/code-counts.ts, #1988). */

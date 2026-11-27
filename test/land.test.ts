@@ -1804,6 +1804,29 @@ test("a clean smoke check lands as before, its time outside the timing line; tes
   assert.deepEqual(off.ran(), []);
 });
 
+test('the smoke check runs changed .js and .mjs tests too, and reruns a failed one alone: one passing .ts file never makes it a flake (#2167)', () => {
+  const r = smokeSetup();
+  // citadel-test, red on a .ts, a .js and a .mjs file; alone, the .js and .mjs ones still fail.
+  writeFileSync(
+    join(r.source, 'tools', 'citadel-test'),
+    `#!/usr/bin/env bash
+echo "\${CITADEL_TEST_ALWAYS:+alone }$*" >>"$SMOKE_ARGS"
+[ -z "\${CITADEL_TEST_ALWAYS:-}" ] || { [[ "\${@: -1}" == *.test.ts ]]; exit; }
+echo "✖ test/always.test.ts:3 › a snapshot"; echo "✖ test/guard.test.js › (the file itself)"; echo "✖ test/other.test.mjs:2 › a guard"; exit 1
+`,
+  );
+  git(r.source, 'commit', '-qam', 'a red .js guard');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'test/guard.test.js', '');
+  r.commit(r.wt, 'test/other.test.mjs', '');
+  const res = r.smoke();
+  assert.equal(res.status, 1, res.stderr);
+  assert.deepEqual(r.ran(), ['--timeout 300 test/always.test.ts test/guard.test.js test/mine.test.ts test/other.test.mjs', 'alone --timeout 300 test/always.test.ts', 'alone --timeout 300 test/guard.test.js', 'alone --timeout 300 test/other.test.mjs']);
+  assert.match(res.stderr, /^land: smoke: tests failed \(exit 1\)/m);
+  assert.doesNotMatch(res.stderr, /passed alone/);
+  assert.doesNotMatch(landLog(r.shared), /· flake · /);
+});
+
 // #1983: eight ships on 2026-11-25 waited up to 70 minutes in line to hear they were over the size list. The real repo-wide
 // list and the real size test (its list of allowed giants emptied: the fixture has none of them), run by the real citadel-test.
 test('a branch over the file size limit is refused by the smoke check, before the line (#1983)', () => {

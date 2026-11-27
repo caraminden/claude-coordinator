@@ -15,9 +15,20 @@ import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 import type { Prepared } from './ship-handoff.ts';
 
+/** One member on a cabal's forming card: what it does, its cost, when it starts (tier is drawn small and muted). */
+export interface CardRosterRow {
+  what: string;
+  cost?: string;
+  when: string;
+  tier?: string;
+  scheme?: string;
+}
+
 /** One question on a card, as ask_question takes it. */
 export interface CardQuestion {
   question: string;
+  /** A list the card draws under the question; the question's "- " lines say the same in plain text. */
+  roster?: CardRosterRow[];
   header?: string;
   multiSelect?: boolean;
   options?: { label: string; description?: string; recommended?: boolean; image?: unknown }[];

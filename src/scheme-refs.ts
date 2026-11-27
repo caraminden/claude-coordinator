@@ -20,6 +20,8 @@ export interface SchemeRefs {
   minions: Record<string, { title: string; closed: boolean }>;
   /** The turn's own minion number, null for the Taskmaster (card-links.ts). */
   self?: number | null;
+  /** The login the turn's minion runs for: a card addressed to someone else isn't the reply's card unless it names them. */
+  reader?: string | null;
   /** This scheme's cards waiting on people (card-links.ts), refreshed when a card is posted mid-turn. */
   cards?: CardLink[];
   /** This scheme's newest cards that no longer wait on people, with what happened to them (#531). */

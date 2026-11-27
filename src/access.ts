@@ -178,11 +178,11 @@ export function lendsToEveryone(store: Store, machine: Pick<Machine, 'id'>, role
  * switched on and its list of schemes has this one (#438's one list, a list per role since M1), and its owner is in the
  * scheme. Every machine has an owner (Build 10 H1); a role it lent to everyone (lendsToEveryone) goes to any turn there,
  * else only to turns its owner asked for (#306, Josh: "any scheme they are in ... can use their machine to do stuff on
- * their behalf"). CI runners, which no turn asks for, need only the owner in the scheme. A row with no owner (one the
+ * their behalf"). CI runners and builds (H2: a build runs no Claude), which no turn asks for, need only the owner in the scheme. A row with no owner (one the
  * backfill could name no one for) lends nothing. */
 export function lendsRole(store: Store, machine: Machine, role: Role, project: Project, askers: readonly number[] = []): boolean {
   if (!store.roleGrants(machine.id, role, project.id)) return false;
-  if (role === 'ci') return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
+  if (role === 'ci' || role === 'builds') return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
   if (lendsToEveryone(store, machine, role)) return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
   return ownerAsked(store, machine.owner_id, askers, project.id);
 }

@@ -4,21 +4,19 @@
 import { execFile, spawn } from 'node:child_process';
 import { oomKilled } from './host-job.ts';
 import { createHash } from 'node:crypto';
-import { appendFileSync, close, closeSync, existsSync, fstat, open, mkdirSync, openSync, read, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, type Stats } from 'node:fs';
+import { appendFileSync, close, closeSync, existsSync, fstat, open, mkdirSync, openSync, read, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync, type Stats } from 'node:fs';
 import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketFields, type TicketState, type TurnResult } from './db.ts';
+import { askerKey, type EventRow, type Project, type Store, type Ticket, type TicketFields, type TicketState, type TurnResult } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { CompactWatch } from './compactions.ts';
 import type { Claim } from './claims.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
-import type { SchemeRefs } from './scheme-refs.ts';
-import { cardHref, cardLabel, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
@@ -30,6 +28,11 @@ import { KeepaliveRun } from './keepalive-run.ts';
 import { Closing } from './closing.ts';
 import { TurnEvents } from './turn-events.ts';
 import { containerFiles, TurnLaunches } from './launch-build.ts';
+import { TurnRefs } from './turn-refs.ts';
+import { TurnProgress } from './turn-progress.ts';
+import { TurnSpend } from './turn-spend.ts';
+import { PlanUsage } from './plan-usage.ts';
+export { schemeRefs } from './turn-refs.ts';
 import { Lanes } from './lanes.ts';
 import { DismissedCleanup } from './dismissed-cleanup.ts';
 import { projectDir } from './workspace.ts';
@@ -47,11 +50,12 @@ import { dropTurnDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
 import { endFiles, STEER_PENDING, steerLater, unsentSteers, unsentSteersAtBoot, type EndFiles, type TurnFiles } from './turn-files.ts';
 import { size } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
-import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
+import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { Holds } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
 import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, loadImages, lostSessionText, promptMessage, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import type { ServerTool } from './server-tools.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { awayLine, awayResume, nextMark } from './machine-away.ts';
@@ -59,7 +63,7 @@ import { type AwayEnd, MachineTurn, placedAt, placeTurn } from './machine-turn.t
 import { hostReach, writesLine } from './host-reach.ts';
 import type { Block, MachineHost, MachinePools } from './machine-pools.ts';
 import { RunsOn, type runsOnCard } from './runs-on.ts';
-import { alive, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
+import { alive, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, TURN_NODE, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets } from './secrets.ts';
 import type { StatusFields } from './status-trailer.ts';
@@ -71,11 +75,10 @@ import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, newCalls, noteCalls, repliedPrompt, sameCall, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
 import { longestTool, quietAt, type Activity, type ProcCheck } from './quiet.ts';
-import { applyEvent, createProgress, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
-import { packPlan, unpackPlan } from './history.ts';
+import { planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { readGrunts } from './grunts.ts';
-import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
-import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
+import { budgetCard, budgetFor, budgetKey, startHoldKey, passed, turnLine } from './minion-budget.ts';
+import { type SpendState } from './spend-alert.ts';
 import { clockTime, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
@@ -84,18 +87,17 @@ import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillRes
 import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, type OnAccount } from './line-place.ts';
 import { runningTurn, runningTurnOff, START_GRACE_MS, wrapperAlive, wrapperAliveOff, wrapperInProc, type TurnAt } from './running-turn.ts';
-import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
+import { type CloudHost, TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
+import { CLOUD_OFF, CLOUD_PLACE, CloudPool } from './cloud-pool.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { describeActivity, guessWindow, pushKind, slimEvent } from './stream-events.ts';
-import { usageWindow, type CodexLimits, type CodexWindow, type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type RateLimitInfo, type Usage } from './turn-messages.ts';
+import { type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type Usage } from './turn-messages.ts';
 import { contextKey, windowKey, freshKey, handoffKey, failNoteKey, closeCancelledKey, turnKey, warmKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
 import { sleepKey, type Sleep } from './needs.ts';
 import { argInProc, claudePidNow } from './wrapper-alive.ts';
 
-/** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
-const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
 /** Whether `path` is there, asked off the server's thread (#1808). */
 const exists = (path: string) =>
   access(path).then(
@@ -106,13 +108,6 @@ const exists = (path: string) =>
 const openOff = (path: string) => new Promise<number>((res, rej) => open(path, 'r', (err, fd) => (err ? rej(err) : res(fd))));
 const fstatOff = (fd: number) => new Promise<Stats>((res, rej) => fstat(fd, (err, st) => (err ? rej(err) : res(st))));
 const readOff = (fd: number, buf: Buffer, at: number) => new Promise<number>((res, rej) => read(fd, buf, 0, buf.length, at, (err, n) => (err ? rej(err) : res(n))));
-/** The scheme-refs snapshot for a turn of `project`: its name, the other schemes' names and its minions, plus its cards waiting on people (card-links.ts). */
-export function schemeRefs(project: Project, projects: Project[], tickets: Ticket[], cards?: { self: number | null; cards: CardLink[] }): SchemeRefs {
-  const minions: SchemeRefs['minions'] = {};
-  for (const t of tickets) if (t.number != null) minions[t.number] = { title: t.title, closed: t.status === 'closed' };
-  return { scheme: project.name, others: projects.filter((p) => p.id !== project.id).map((p) => p.name), minions, ...cards };
-}
-
 /** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
 const CARD_KINDS = new Set(['question', 'question_more', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
 /** The card kinds a turn posts itself: its own snapshot has them before its tool call returns (refreshRefs). */
@@ -171,6 +166,8 @@ export interface TurnState {
   killTries?: number;
   /** It runs on Codex (src/codex-turn.ts), not claude (#337). */
   codex?: true;
+  /** It runs as a cloud session (src/cloud-turn.mjs, #2153): it holds a cloud place, and its words are sent once, so no steering. */
+  cloud?: true;
   /** A Claude turn that starts with the Codex turns before it: their thread is dropped once it succeeds. */
   handBack?: true;
   /** The person it runs for (turnPerson). */
@@ -359,8 +356,6 @@ export class Runner {
   private closing = new Map<number, string | null>();
   /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
   private deployedMidTurn = new Set<number>();
-  private progress = new Map<number, ReturnType<typeof createProgress>>();
-  private stepRatios = new Map<number, { at: number; ratio: number }>();
   /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
   private turnFrom = new Map<number, number>();
   /** A sealed minion's state and note when a turn answering a message started: put back at its end, while still sealed (#261). */
@@ -468,8 +463,12 @@ export class Runner {
   /** Machines online now whose Tools role is lent to this scheme (access.ts lendsRole); a thread's turn gets each one's MCP tools. */
   /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
+  /** The tools the server runs for a scheme's minions (src/server-tools.ts, #2179). */
+  serverTools: (projectId: number, kind: string) => ServerTool[] = () => [];
   /** The connected machines as places for turns (Build 7 T4), set by server.ts; none yet: a turn marked for one waits. */
   pools: MachinePools | null = null;
+  /** The cloud's pool (#2153, src/cloud-pool.ts): marks and sessions. */
+  readonly cloud: CloudPool;
   /** Where each minion's turns may run, when a person said (Build 7 T4). */
   readonly runsOn: RunsOn;
   onRunsOnCard: (ticketId: number, question: ReturnType<typeof runsOnCard>) => string | null = () => null;
@@ -508,6 +507,10 @@ export class Runner {
   private closer: Closing;
   private turnEvents: TurnEvents;
   private launches: TurnLaunches;
+  private refs: TurnRefs;
+  private turnProgress: TurnProgress;
+  private turnSpend: TurnSpend;
+  private planUsage: PlanUsage;
   private cleanup: DismissedCleanup;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all; `only`: on a machine, its accounts signed in there (#2061). */
   placeFor?: (person: number | null, warm?: string, taskmaster?: boolean, only?: number[]) => TurnPlace | { refused: string };
@@ -633,8 +636,6 @@ export class Runner {
   onTurnError: (ticketId: number, text: string, eventId?: number) => void = () => {};
   /** A running turn passed a spend stage (#723): push it to the usual people and the turn's person. */
   onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
-  /** Each running turn's spend meter, by the turn's start (a new turn starts a new one). */
-  private spends = new Map<number, { startedAt: number; meter: SpendMeter; prior: number; budget: Budget | null }>();
   private killWaves: KillWaves;
   /** A minion passed four times its budget (#1114): the server tells its Taskmaster. */
   onBudgetWake: (ticketId: number, text: string) => void = () => {};
@@ -710,9 +711,11 @@ export class Runner {
       },
       now: () => this.now(),
     });
+    this.cloud = new CloudPool(store);
     this.turnLine = new TurnLine({
       store,
       pools: this.machineHost,
+      cloud: this.cloudHost,
       exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
       busy: (id) => this.lanes.busy(id),
       asks: (id, via) => this.lineAsks(id, via),
@@ -884,19 +887,20 @@ export class Runner {
       broadcastTicket: (id) => this.broadcastTicket(id),
       saveTurn: (id, patch) => this.saveTurn(id, patch),
       secretsOfTurn: (id) => this.secretsOfTurn(id),
-      updateUsage: (info, id) => this.updateUsage(info, id),
+      updateUsage: (info, id) => this.planUsage.updateUsage(info, id),
       updateCodexUsage: (l, person) => this.updateCodexUsage(l, person),
       lendWorker: (id) => this.lendWorker(id),
       quietSince: (id, live, now) => this.quietSince(id, live, now),
       checkQuiet: (id, live, now) => this.checkQuiet(id, live, now),
       keepaliveResult: (id, ev) => this.keepaliveRun.keepaliveResult(id, ev),
-      meterSpend: (id, ev) => this.meterSpend(id, ev),
+      meterSpend: (id, ev) => this.turnSpend.meterSpend(id, ev),
       progressFor: (id) => this.progressFor(id),
-      recordSteps: (id, p) => this.recordSteps(id, p),
-      savePlan: (id, p, upTo) => this.savePlan(id, p, upTo),
+      recordSteps: (id, p) => this.turnProgress.recordSteps(id, p),
+      savePlan: (id, p, upTo) => this.turnProgress.savePlan(id, p, upTo),
       carryReply: (id) => this.carryReply(id),
       keepTurn: (id, state, r) => this.keepTurn(id, state, r),
-      settleSpend: (id) => this.spends.get(id)?.meter.settle(),
+      cloud: () => this.cloud,
+      settleSpend: (id) => this.turnSpend.spends.get(id)?.meter.settle(),
       setFailNote: (id, fields) => this.setFailNote(id, fields),
       onStatusTrailer: (id, fields) => this.onStatusTrailer(id, fields),
       onStreamEvent: (id, ev) => this.onStreamEvent(id, ev),
@@ -904,12 +908,41 @@ export class Runner {
       onFilesMayChange: (id, soon) => this.onFilesMayChange(id, soon),
       onTurnError: (id, text, eventId) => this.onTurnError(id, text, eventId),
     });
+    this.turnProgress = new TurnProgress({ store });
+    this.turnSpend = new TurnSpend({
+      store,
+      turns: this.turns,
+      now: () => this.now(),
+      emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved),
+      saveTurn: (id, patch) => this.saveTurn(id, patch),
+      broadcastTicket: (id) => this.broadcastTicket(id),
+      onSpendAlert: (id, text, eventId, person) => this.onSpendAlert(id, text, eventId, person),
+      onBudgetWake: (id, text) => this.onBudgetWake(id, text),
+      onBudgetCard: (id, question) => this.onBudgetCard(id, question),
+    });
+    this.planUsage = new PlanUsage({
+      store,
+      turns: this.turns,
+      resumes: () => this.resumes,
+      broadcast: (msg) => this.broadcast(msg),
+      codexWhy: (person) => this.codexWhy(person),
+      turnPerson: (t, p, waiting, resuming) => this.turnPerson(t, p, waiting, resuming),
+      limitCleared: (payer) => this.limitCleared(payer),
+      claudeAccounts: (person) => this.claudeAccounts?.(person),
+      onCleared: (person, account) => this.onCleared?.(person, account),
+    });
+    this.refs = new TurnRefs({
+      store,
+      turns: this.turns,
+      clock: () => this.clock,
+      approvals: () => this.approvals,
+    });
     this.launches = new TurnLaunches({
       store,
       dataDir: this.dataDir,
       claudeBin: this.claudeBin,
       deploysRepos: this.deploysRepos,
-      refsSeq: this.refsSeq,
+      refsSeq: this.refs.refsSeq,
       now: () => this.now(),
       promptHolds: () => this.promptHolds,
       turnsDir: () => this.turnsDir,
@@ -930,7 +963,8 @@ export class Runner {
       openPr: (id) => this.openPr(id),
       memoryScheme: (projectId) => this.memoryScheme(projectId),
       machines: (p, askers) => this.machines(p, askers),
-      refsText: (t) => this.refsText(t),
+      serverTools: (p, kind) => this.serverTools(p, kind),
+      refsText: (t) => this.refs.refsText(t),
       codexWhy: (person) => this.codexWhy(person),
       codexPlaceFor: (person) => this.codexPlaceFor?.(person),
       githubFor: (person, dir, later) => this.githubFor?.(person, dir, later),
@@ -1157,7 +1191,7 @@ export class Runner {
    */
   live(ticket: Ticket, ratio?: number) {
     const closed = ticket.status === 'closed';
-    ratio ??= closed ? 1 : this.stepRatio(ticket.project_id);
+    ratio ??= closed ? 1 : this.turnProgress.stepRatio(ticket.project_id);
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
     const p = closed ? null : this.progressFor(ticket.id);
@@ -1229,7 +1263,7 @@ export class Runner {
     const limit = once(LIMIT_RESUMES, () => this.resumes.limit.all()).find((w) => w.ticket === ticket.id) ?? null;
     const closed = ticket.status === 'closed';
     // What steps took against their guesses (#571), which both bars scale the guesses by.
-    const ratio = closed ? 1 : once(`ratio:${ticket.project_id}`, () => this.stepRatio(ticket.project_id));
+    const ratio = closed ? 1 : once(`ratio:${ticket.project_id}`, () => this.turnProgress.stepRatio(ticket.project_id));
     const live = this.live(ticket, ratio);
     this.onLive(ticket.id, live);
     const { asks, ...shown } = live;
@@ -1281,11 +1315,11 @@ export class Runner {
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
-      budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket, list?.properties) : null,
+      budget: ticket.kind === 'ticket' && !closed ? this.turnSpend.budgetView(ticket, list?.properties) : null,
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
       host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
-      payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id, user)),
+      payer: once(`payer:${ticket.person_id}`, () => this.planUsage.payerView(ticket.person_id, user)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
       context_window: this.store.getSetting<number>(windowKey(ticket.id)) ?? guessWindow(ticket.model || ticket.last_model),
       // When its last turn ended, for the composer's cold-wake hint (#413).
@@ -1368,7 +1402,7 @@ export class Runner {
 
   /** A closed minion's entries in the per-minion caches; each is rebuilt or set again if it is reopened (runner-turn-maps.test.ts says how). */
   forgetMaps(ticketId: number) {
-    this.progress.delete(ticketId);
+    this.turnProgress.progress.delete(ticketId);
     this.mainModels.delete(ticketId);
     this.gateCounted.delete(ticketId);
     this.contextSizes.delete(ticketId);
@@ -1650,7 +1684,7 @@ export class Runner {
           this.lendWorker(ticketId);
           return live.ended;
         },
-        live.machine?.id ?? 0,
+        live.machine?.id ?? (turn.cloud ? CLOUD_PLACE : 0),
       ),
     );
     if (turn.card) this.endLive(live, ticketId);
@@ -2061,7 +2095,7 @@ export class Runner {
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
     // Nor a low-effort turn (#951) something other than a success notice: it waits for a turn at the minion's own effort.
-    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !turn.card && !otherPerson && !(turn.light && !light) && !live.ending);
+    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !turn.card && !otherPerson && !(turn.light && !light) && !turn.cloud && !live.ending);
     // A minion waiting on its start card (#1674) holds everything, wakes and its chained brief too, until a person answers it.
     const parked = !!(!live && ticket && ((hold && this.parked(ticket)) || (!('answer' in extra) && this.store.getSetting(startHoldKey(ticketId)))));
     // A person's words to a minion waiting on a kept card stand in for its answer (#1916). A question card's answer isn't about it.
@@ -2648,6 +2682,46 @@ export class Runner {
     stuck: (id, since, block) => this.runsOn.stuck(id, since, block),
   };
 
+  /** A cloud follow-up runs on the account its session was started on (#2153): another can't resume it. */
+  private cloudAccount(id: number, person: number | null): number[] | undefined {
+    const s = this.turnLine.placeOf(id) === CLOUD_PLACE ? this.cloud.session(id) : null;
+    return s && s.person === person && s.account ? [s.account] : undefined;
+  }
+
+  /** Whose login a minion's first cloud turn would run on, or why it can't go: only a minion's ordinary turn on Claude. */
+  private cloudAsk(id: number, via?: RetryKind): string | { ticket: Ticket; project: Project; person: number; type: string | null } {
+    const type = this.store.props.forTarget('minion', id).type;
+    if (!this.cloud.may(id, typeof type === 'string' ? type : null)) return this.cloud.on() ? 'not a research or ideation minion, nor marked for the cloud' : CLOUD_OFF;
+    const ticket = this.store.getTicket(id);
+    const project = ticket && this.store.getProject(ticket.project_id);
+    if (!ticket || !project || ticket.kind !== 'ticket' || !ticket.cwd) return 'not a minion with a checkout';
+    const waiting = this.waiting(id);
+    const person = this.turnPerson(ticket, project, waiting, !!via);
+    if (person === null) return 'no one to run it for';
+    if (waiting.msgs.some((m) => m.images?.length || m.files?.length)) return "its message carries pictures or files, which a cloud session can't see";
+    return this.turnAtHome(ticket, project, person)?.why ?? { ticket, project, person, type: typeof type === 'string' ? type : null };
+  }
+
+  /** Its cloud session is the one its next turn follows up: on the login of the person that turn is for (sender pays). */
+  private cloudBound(id: number, via?: RetryKind): boolean {
+    const s = this.cloud.session(id);
+    const ticket = s && this.store.getTicket(id);
+    const project = ticket && this.store.getProject(ticket.project_id);
+    return !!project && this.turnPerson(ticket, project, this.waiting(id), !!via) === s.person;
+  }
+
+  /** What the line asks of the cloud (#2153): only a research, ideation or marked minion's first turn starts a session, on the login and account its turn would use. */
+  private readonly cloudHost: CloudHost = {
+    bound: (id, via) => this.cloudBound(id, via),
+    takes: (id, via) => {
+      const ask = this.cloudAsk(id, via);
+      if (typeof ask === 'string') return ask;
+      const { account } = this.accountOf(ask.ticket, ask.person);
+      if (account === 0) return 'none of their Claude accounts can run a turn now';
+      return this.cloud.takes(id, { type: ask.type, ran: !!ask.ticket.session_id || !!this.store.lastTurnOn(id), repoUrl: ask.project.repo_url });
+    },
+  };
+
   /** Only an ordinary minion's turn on Claude is ever placed on a machine (spec section 2): why this one, a fresh start's step or one that Codex runs, isn't. */
   private turnAtHome(ticket: Ticket, project: Project, person: number | null): Block | null {
     if (this.fresh.freshStep(ticket.id)) return { why: 'this turn runs at perigee', never: true };
@@ -2663,6 +2737,14 @@ export class Runner {
   private startPlace(ticket: Ticket, person: number | null, via?: RetryKind): { id: number; name: string } | 'wait' | null {
     const need = this.machineHost.mark(ticket.id);
     const at = this.turnLine.placeOf(ticket.id);
+    // Its session is on one login: another person's turn can't follow it up there (sender pays), so that one runs away from it, fresh.
+    const s = this.cloud.session(ticket.id);
+    if (s && s.person !== person) this.emit(ticket.id, 'note', { text: `This turn runs at perigee: this minion's cloud session is on ${this.store.getUser(s.person)?.name ?? 'another person'}'s login, and a turn runs on its sender's own.` });
+    if (at === CLOUD_PLACE) {
+      // The line placed it before its person changed (cloudBound asks the same): it runs here.
+      if (s && s.person !== person) this.turnLine.comeHome(ticket.id);
+      return null;
+    }
     if (!need && !at) return null;
     const project = this.store.getProject(ticket.project_id);
     const home = need === 0 || (need && need !== at) || !project || this.turnAtHome(ticket, project, person);
@@ -2874,7 +2956,7 @@ export class Runner {
     // A hidden keepalive (#862): it re-reads the cached prefix and changes nothing of the minion's, the chat included.
     const keepalive = !!batch[0]?.keepalive;
     // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container; on a machine, an account signed in there (#2061).
-    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator', keepalive || batch[0]?.fresh ? undefined : this.pools?.accountsAt(this.turnLine.placeOf(ticket.id), person)) ?? { host: true as const };
+    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator', keepalive || batch[0]?.fresh ? undefined : (this.cloudAccount(ticket.id, person) ?? this.pools?.accountsAt(this.turnLine.placeOf(ticket.id), person))) ?? { host: true as const };
     if ('refused' in claudePlace) {
       if (keepalive) return;
       this.emit(ticket.id, 'note', { text: claudePlace.refused });
@@ -2958,7 +3040,7 @@ export class Runner {
     const same = codexThread?.person === person && codexThread.thread;
     // The place startPlace found a moment ago; one whose machine went since waits there for it. Codex turns, keepalives and fresh-session steps run here (turnAtHome).
     const at = codex || keepalive || step ? 0 : this.turnLine.placeOf(ticket.id);
-    const worker = at ? { id: at, name: this.pools!.nameOf(at) } : null;
+    const worker = at > 0 ? { id: at, name: this.pools!.nameOf(at) } : null;
     // Host reach (T8): marked for that machine, on its owner's turn: the owner's login and the owner's ask (the asker the
     // run_on_host route checks), so a relay that runs on the owner's login doesn't reach. Its tools, container and chat lines follow.
     const reach = worker && asker === person && hostReach(this.runsOn.get(ticket.id), this.store.getMachine(worker.id) ?? null, person) ? worker.name : null;
@@ -3122,7 +3204,12 @@ export class Runner {
       if (!same) this.store.setSetting(codexThreadKey(ticket.id), { thread: null, person: person!, log: codexThread?.log ?? '' });
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
-    await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
+    // A cloud turn (#2153): the turn's wrapper runs the cloud driver in claude's place, on the same login and with the same env.
+    const flag = (f: string) => (plan.args.includes(f) ? (plan.args[plan.args.indexOf(f) + 1] ?? null) : null); // the minion's model and effort, as its claude would get them
+    const cloudJob = at === CLOUD_PLACE && ticket.cwd ? this.cloud.job({ ...ticket, cwd: ticket.cwd }, batch, plan.command, filesDir, this.now(), { model: flag('--model'), effort: flag('--effort') }) : null;
+    if (cloudJob) await writeFile(join(dir, 'cloud.json'), JSON.stringify(cloudJob));
+    const spec = cloudJob ? { ...plan, command: join(dir, 'pin', 'bin', TURN_NODE), args: [join(dir, 'pin', 'cloud-turn.mjs'), join(dir, 'cloud.json')] } : plan;
+    await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(spec, ticket.cwd)), { mode: 0o600 });
     if (plan.spawn.how === 'container') await containerFiles(dir, place as Extract<TurnPlace, { host: false }>);
     // Its `machine` file and first beat: the machine's agent fetches the folder and starts it (src/machine-turn.ts), from its account's own folder there (#2061).
     const projects = join(dirname(this.store.path), 'projects');
@@ -3191,6 +3278,7 @@ export class Runner {
       chosenEffort: !!ticket.effort || codex || light,
       ...(light ? { light: true as const } : {}),
       ...(codex ? { codex: true as const } : {}),
+      ...(cloudJob ? { cloud: true as const } : {}),
       ...(handBack.length ? { handBack: true as const } : {}),
       ...(step ? { fresh: step } : {}),
       ...(handoff ? { handoff: true as const } : {}),
@@ -3220,7 +3308,7 @@ export class Runner {
     const live = this.follow(ticket.id, turn);
     live.had = had;
     // A refresh of the scheme's snapshots since this one's was taken didn't know this turn: it gets the newest now.
-    if ((this.refsSeq.get(project.id) ?? 0) !== built.refsSeq) {
+    if ((this.refs.refsSeq.get(project.id) ?? 0) !== built.refsSeq) {
       try {
         this.writeRefs(join(dir, 'scheme-refs.json'), ticket);
       } catch {
@@ -3544,7 +3632,7 @@ export class Runner {
     this.clock.clearTimeout(live.stopTimer);
     this.clock.clearTimeout(live.stopGraceTimer);
     this.turns.delete(ticketId);
-    this.spends.delete(ticketId);
+    this.turnSpend.spends.delete(ticketId);
     // Kept for the failure note below, which quotes its stderr.
     const secrets = this.secretsOfTurn(ticketId);
     this.turnSecrets.delete(ticketId);
@@ -3566,7 +3654,7 @@ export class Runner {
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
     }
     // A Codex turn's log joins its thread's, for the way back to Claude (#337); the turn's folder goes below.
-    if (turn?.codex) this.keepCodexLog(ticketId, files.codexLog);
+    if (turn?.codex) this.planUsage.keepCodexLog(ticketId, files.codexLog);
     const code = exit?.code ?? null;
     const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
     if (startError && stopped) this.emit(ticketId, 'error', { text: startError });
@@ -3846,7 +3934,7 @@ export class Runner {
         this.recordGrunts(ticketId, turn.id, state, r.session_id);
         // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
         const ticket = this.store.getTicket(ticketId);
-        if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
+        if (ticket?.kind === 'ticket') this.turnSpend.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
       })
       .catch((e) => console.error(`[turn] minion ${ticketId}: its turn's cost was not recorded: ${(e as Error).message}`));
   }
@@ -3866,112 +3954,13 @@ export class Runner {
       .catch((e) => console.error(`[grunts] minion ${ticketId}:`, e));
   }
 
-  /**
-   * Count an assistant message (main thread or Grunt) toward the turn's estimated cost, and post the alert card (and push)
-   * when it passes a stage. Saved in the TurnState, so a restart carries on where it was; Codex turns aren't metered.
-   */
-  private meterSpend(ticketId: number, ev: ClaudeEvent) {
-    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
-    if (!turn?.startedAt || turn.codex) return;
-    let spend = this.spends.get(ticketId);
-    if (spend?.startedAt !== turn.startedAt) {
-      const ticket = this.store.getTicket(ticketId);
-      // Earlier turns' cost and the budget once a turn: this runs on every assistant message.
-      const budget = ticket?.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
-      this.spends.set(ticketId, (spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend), prior: budget ? this.store.ticketCost(ticketId) : 0, budget }));
-    }
-    const { meter } = spend;
-    if (!meter.add(ev)) return;
-    const stage = meter.crossed(stagesFrom(this.store.getSetting(STAGES_SETTING)));
-    this.saveTurn(ticketId, { spend: meter.state });
-    this.checkBudget(ticketId, spend.budget, spend.prior + meter.usd, true);
-    if (stage === null) return;
-    const text = spendText(meter.usd, Date.now() - turn.startedAt);
-    console.log(`[spend] minion ${ticketId}: passed $${stage}, about $${meter.usd.toFixed(2)}`);
-    const row = this.emit(ticketId, 'spend', { text, usd: Math.round(meter.usd), stage, turn: turn.startedAt });
-    meter.alert = { stage, event: row.id, at: row.created_at };
-    this.saveTurn(ticketId, { spend: meter.state });
-    this.broadcastTicket(ticketId); // the list row's badge and Needs you
-    this.onSpendAlert(ticketId, text, row.id, turn.person ?? null);
-  }
-
-  /**
-   * Tell the minion and its Taskmaster when its spend passes a budget mark (#1114), each mark once per minion. The ask goes
-   * into the running turn (`steer`) when it can take one; otherwise the next turn's budget line carries it. Never stops anything.
-   */
-  private checkBudget(ticketId: number, budget: Budget | null, spent: number, steer: boolean) {
-    if (!budget) return;
-    const state = this.store.getSetting<BudgetState>(budgetKey(ticketId)) ?? {};
-    const marks = passed(budget, spent, state);
-    if (!marks.length) return;
-    const now = this.now();
-    const level = wakeLevel(budget, spent);
-    this.store.setSetting(budgetKey(ticketId), {
-      ...state,
-      ...(marks.includes('ask') ? { asked: now } : {}),
-      ...(marks.includes('wake') ? { woke: state.woke ?? now, wakes: level } : {}),
-      ...(marks.includes('card') ? { carded: now } : {}),
-    });
-    console.log(`[budget] minion ${ticketId}: passed ${marks.join(' and ')} at about $${spent.toFixed(2)} (usual $${budget.usd.toFixed(2)})`);
-    if (marks.includes('ask')) {
-      const row = this.emit(ticketId, 'note', { text: chatNote(budget, spent) });
-      if (steer) this.steerSystem(ticketId, askText(budget, spent), row.id);
-    }
-    // tellTaskmaster posts its own "Sent the Taskmaster" line in the chat.
-    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent, level, !!state.woke));
-    if (marks.includes('card')) this.onBudgetCard(ticketId, budgetCard(budget, spent, this.costReason(ticketId)));
-  }
-
-  /** The minion's own "Costing more:" line since the ask (#1672), from its main thread's replies; null when it never said. */
-  private costReason(ticketId: number): string | null {
-    const ask = this.store.eventsOfKinds(ticketId, ['note']).findLast((e) => JSON.parse(e.data).text?.startsWith('Budget:'));
-    const texts = this.store
-      .eventsOfKinds(ticketId, ['claude'], ask?.id ?? 0)
-      .filter((e) => e.data.includes(REASON))
-      .flatMap((e) => {
-        const d: ClaudeEvent = JSON.parse(e.data);
-        return d.type === 'assistant' && !d.parent_tool_use_id && Array.isArray(d.message?.content) ? d.message.content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text!) : [];
-      });
-    return costReason(texts);
-  }
-
-  /**
-   * Pass a line from Citadel into the running turn, as a steer is, when it can take one. Not kept in `steered`: one the
-   * turn never reads is dropped rather than queued to start a turn of its own.
-   */
-  private steerSystem(ticketId: number, text: string, id: number): boolean {
-    const live = this.turns.get(ticketId);
-    const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
-    if (!live || !turn || turn.result || turn.fresh || turn.keepalive || turn.stopped || turn.light) return false;
-    if (live.ending) return false;
-    steerLater(live, () => promptMessage([{ author: 'System', text, images: [], id }]));
-    return true;
-  }
-
-  /** What the minion page shows of its budget (#1114), or null with too little history. */
-  private budgetView(ticket: Ticket, props?: Record<string, unknown>) {
-    const b = budgetFor(this.store, ticket, Date.now(), props);
-    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE), card: markOf(b, CARD), ...(b.estimate ? { estimate: b.estimate } : {}) };
-  }
-
-  /** The running turn's unanswered spend alert (openSpend), or null; reads the saved turn only while one runs. */
+  /** Each turn's spend and the minion's budget marks: src/turn-spend.ts. */
   spendAlert(ticket: Ticket) {
-    const spend = this.turns.has(ticket.id) ? openSpend(this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend) : null;
-    return spend && { ...spend, href: cardHref(ticket, spend.event) };
+    return this.turnSpend.spendAlert(ticket);
   }
 
-  /** Keep going (#723): no more spend alerts for the running turn. False when no turn is running. */
   muteSpend(ticketId: number, by: string, startedAt: number): boolean {
-    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
-    // An earlier turn's card can't mute this one: it's refused unless it names the running turn's start.
-    if (!this.turns.has(ticketId) || !turn?.startedAt || turn.startedAt !== startedAt) return false;
-    if (turn.spend?.muted) return true;
-    const spend = this.spends.get(ticketId);
-    if (spend?.startedAt === turn.startedAt) spend.meter.muted = by;
-    this.saveTurn(ticketId, { spend: { ...(turn.spend ?? { usd: 0, fired: 0 }), muted: by } });
-    this.emit(ticketId, 'spend_muted', { turn: turn.startedAt, by });
-    this.broadcastTicket(ticketId);
-    return true;
+    return this.turnSpend.muteSpend(ticketId, by, startedAt);
   }
 
   /**
@@ -4001,124 +3990,34 @@ export class Runner {
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
   private pushCalls = new Map<string, 'push' | 'pr'>();
 
-  /**
-   * A minion's progress as a contraption may see it (#421): the readout's line ("Showing the rune cost… · 1 of 6 done") and step,
-   * built from its task list and tool calls. Never last_activity, which can be the first line of its reply.
-   */
+  /** A minion's task list and its readout: src/turn-progress.ts. */
   progressOf(ticket: Ticket) {
-    const p = this.progressFor(ticket.id);
-    const { total, done, current, step } = stepInfo(p, ticket.status === 'running');
-    return {
-      line: progressLine(p, ticket.status === 'running') || null,
-      step: total ? { n: step, of: total, done, label: current ? current.activeForm || current.subject : null } : null,
-    };
+    return this.turnProgress.progressOf(ticket);
   }
 
-  /**
-   * Task-list state for a ticket, built the first time it is needed: from the state saved when its last
-   * turn ended plus the events since, or from all its events when nothing usable is saved (#530: a
-   * Taskmaster's 6,000 events took 0.6 s to read cold, on the first scheme open after every restart).
-   */
   private progressFor(ticketId: number) {
-    let p = this.progress.get(ticketId);
-    if (!p) {
-      const saved = unpackPlan(this.store.getSetting(planKey(ticketId)));
-      const usable = saved != null;
-      p = saved?.p ?? createProgress();
-      const rows = this.store.planEvents(ticketId, undefined, saved?.upTo ?? 0);
-      for (const row of rows) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
-      // Steps finishing from here on are recorded (#571); those before were, live or by backfillStepTimes.
-      p.finished = [];
-      this.progress.set(ticketId, p);
-      // The full replay is paid once: an idle minion would otherwise pay it after every restart.
-      if (!usable) this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);
-    }
-    return p;
+    return this.turnProgress.progressFor(ticketId);
   }
 
-  /** Save a ticket's task-list state, which holds every event up to `upTo`. */
-  private savePlan(ticketId: number, p: ReturnType<typeof createProgress>, upTo: number) {
-    this.store.setSetting(planKey(ticketId), packPlan(p, upTo));
+  backfillStepTimes() {
+    return this.turnProgress.backfillStepTimes();
   }
 
-  /** Write the steps a ticket's plan finished since the last call to step_times (#571). */
-  private recordSteps(ticketId: number, p: ReturnType<typeof createProgress>) {
-    if (!p.finished?.length) return;
-    const t = this.store.getTicket(ticketId);
-    try {
-      // The effort it ran at: a low-effort turn's steps (#951) are low, whatever the minion's own.
-      const light = this.store.getSetting<TurnState>(turnKey(ticketId))?.light;
-      this.store.addStepTimes(ticketId, p.finished, light ? 'low' : (t?.last_effort ?? t?.effort ?? null));
-      p.finished.length = 0;
-    } catch (err) {
-      // Kept for the next event's try: the backfill has run, so nothing else would record them.
-      console.error(`Ticket ${ticketId}: could not record its finished steps, will retry:`, err);
-    }
-  }
-
-  /**
-   * The readout's ratio of what steps took to their guesses (#571), per scheme, read at most once a minute:
-   * every minion's view carries it.
-   */
-  private stepRatio(projectId: number): number {
-    const hit = this.stepRatios.get(projectId);
-    if (hit && Date.now() - hit.at < 60_000) return hit.ratio;
-    const ratio = this.store.stepRatio(projectId);
-    this.stepRatios.set(projectId, { at: Date.now(), ratio });
-    return ratio;
-  }
-
-  /**
-   * Fill step_times once from every minion's stored events (#571), so the ratio has data from its first day.
-   * One minion per tick, off the boot's hot path; a restart part way starts over, and rows already there stay.
-   */
-  async backfillStepTimes() {
-    if (this.store.getSetting('step_times_backfilled')) return;
-    for (const project of this.store.listProjects()) {
-      for (const t of this.store.listTickets(project.id)) {
-        const p = { ...createProgress(), finished: [] as FinishedStep[] };
-        // shortcut: effort is the minion's now, not when each step ran; nothing reads it yet, and live rows are right.
-        for (const row of this.store.planEvents(t.id)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
-        this.store.addStepTimes(t.id, p.finished, t.last_effort ?? t.effort ?? null);
-        await new Promise((r) => setImmediate(r));
-      }
-    }
-    this.store.setSetting('step_times_backfilled', true);
-  }
-
+  /** Whose plan a turn runs on, and the usage meters of each person's plan and Codex: src/plan-usage.ts. */
   get usage(): Usage | null {
-    return this.store.getSetting<Usage>('usage');
+    return this.planUsage.usage;
   }
 
-  /** Whose plan a person's turns run on: null for the server login (its owner's turns run on the host), else their own. */
   payerOf(uid: number | null | undefined): number | null {
-    return uid && !this.store.getUser(uid)?.server_login ? uid : null;
+    return this.planUsage.payerOf(uid);
   }
 
-  /** A plan as the minion's chip names it: payerOf's id, and whose it is (the server login's owner for it). */
-  private payerView(uid: number | null, user = (id: number) => this.store.getUser(id)): { id: number | null; name: string } | null {
-    if (!uid) return null;
-    const id = user(uid)?.server_login ? null : uid;
-    const name = user(id ?? this.store.serverLoginOwner() ?? uid)?.name;
-    return name ? { id, name } : null;
-  }
-
-  /** A turn is running with this Claude config folder now (#779: unlinking its account would end it on a 401). */
   turnIn(configDir: string): boolean {
-    return [...this.turns.values()].some((t) => t.configDir === configDir);
+    return this.planUsage.turnIn(configDir);
   }
 
-  /**
-   * A person's own plan usage, for their top-bar meter: the server login's, or their container turns', of the
-   * account in use. With several accounts (#779) it says which, and carries each account's.
-   */
-  usageOf(uid: number | null | undefined): (Usage & { account?: number; why?: string; pinned?: number; accounts?: { n: number; label: string; same?: string; usage: Usage | null }[] }) | null {
-    const payer = this.payerOf(uid);
-    const acc = uid ? this.claudeAccounts?.(uid) : null;
-    const usage = this.store.getSetting<Usage>(accountUsageKey(payer, acc?.inUse ?? 1));
-    if (!acc || acc.accounts.length < 2) return usage;
-    // `account` is where a new or cold turn goes now, and `why` (#793): its week resets soonest, it's pinned, or every account is near full.
-    return { ...(usage ?? { weekly: null, session: null, updatedAt: 0 }), account: acc.inUse ?? 1, ...(acc.why ? { why: acc.why } : {}), ...(acc.pinned ? { pinned: acc.pinned } : {}), accounts: acc.accounts.map((a) => ({ ...a, usage: this.store.getSetting<Usage>(accountUsageKey(payer, a.n)) })) };
+  usageOf(uid: number | null | undefined) {
+    return this.planUsage.usageOf(uid);
   }
 
   /**
@@ -4130,81 +4029,20 @@ export class Runner {
     return this.codexReady ? this.codexReady(person) : "Codex isn't set up on this server";
   }
 
-  /** What the usage bar shows of a person's Codex: whether they can use it, the switch and its windows. */
-  codexView(uid: number | null | undefined): { ready: boolean; why: string | null; on: boolean; usage: CodexUsage | null } | null {
-    if (!uid) return null;
-    const why = this.codexWhy(uid);
-    return { ready: !why, why, on: !!this.store.getSetting<boolean>(codexSwitchKey(uid)), usage: this.store.getSetting<CodexUsage>(codexUsageKey(uid)) };
+  codexView(uid: number | null | undefined) {
+    return this.planUsage.codexView(uid);
   }
 
-  /**
-   * "Enable Codex override" (#337). Switching on resumes the person's minions waiting out a usage
-   * limit right away (on Codex now); returns why it can't, or null.
-   */
   setCodexSwitch(uid: number, on: boolean): string | null {
-    if (on) {
-      const why = this.codexWhy(uid);
-      if (why) return why;
-      this.store.setSetting(codexSwitchKey(uid), true);
-    } else this.store.deleteSetting(codexSwitchKey(uid));
-    this.broadcast({ type: 'codex', codex: this.codexView(uid), to: uid });
-    if (!on) return null;
-    const mine = (w: LimitResume) => {
-      const t = this.store.getTicket(w.ticket);
-      const p = t && this.store.getProject(t.project_id);
-      return !!p && this.turnPerson(t!, p, [], true) === uid;
-    };
-    // Due now, on Codex, spaced limitGapMs apart like any limit resume.
-    const list = this.resumes.limit.all();
-    if (list.some(mine)) this.resumes.saveLimits(list.map((w) => (mine(w) ? { ...w, at: Date.now(), tries: 0, codex: true as const } : w)));
-    return null;
+    return this.planUsage.setCodexSwitch(uid, on);
   }
 
-  /** Record a Codex turn's usage windows (account/rateLimits) as its person's, for their usage bar. */
   updateCodexUsage(l: unknown, person: number | null) {
-    const w = (x: CodexWindow | null | undefined) => (x && typeof x.usedPercent === 'number' ? { usedPercent: x.usedPercent, windowDurationMins: typeof x.windowDurationMins === 'number' ? x.windowDurationMins : null, resetsAt: typeof x.resetsAt === 'number' ? x.resetsAt : null } : null);
-    if (person === null || !l) return;
-    this.store.setSetting(codexUsageKey(person), { primary: w((l as CodexLimits).primary), secondary: w((l as CodexLimits).secondary), updatedAt: Date.now() });
-    this.broadcast({ type: 'codex', codex: this.codexView(person), to: person });
+    return this.planUsage.updateCodexUsage(l, person);
   }
 
-  /** Add a finished Codex turn's log to its minion's Codex thread. */
-  private keepCodexLog(ticketId: number, log: string | null) {
-    const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
-    if (!t || !log) return;
-    // Past what a hand-over can carry, the oldest turns go: fitLog would cut them to nothing anyway.
-    let all = t.log + log;
-    if (all.length > CODEX_LOG_MAX) all = all.slice(all.indexOf('\n', all.length - CODEX_LOG_MAX) + 1);
-    this.store.setSetting(codexThreadKey(ticketId), { ...t, log: all });
-  }
-
-  /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */
-  private updateUsage(info: unknown, ticketId?: number) {
-    const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
-    this.recordUsage(info, turn?.container && turn.person ? turn.person : null, turn?.person ?? null, turn?.account);
-  }
-
-  /** Record a Claude turn's `rate_limit_info` on `account` of `payer` (null: the server login), a minion's or an app's (#793). */
   recordUsage(info: unknown, payer: number | null, person: number | null, account?: number) {
-    const windows = (info as RateLimitInfo | null | undefined)?.unifiedWindows;
-    if (!windows) return;
-    const key = accountUsageKey(payer, account);
-    const was = this.store.getSetting<Usage>(key);
-    const now = Date.now();
-    // An event may report one window: the other keeps its last reading until it resets, so the account pick still sees a nearly
-    // spent week. Not its status: a stale 'rejected' would hold the next limit's turns until that window's reset.
-    const kept = (w: Usage['weekly'] | undefined) => (w && w.resetsAt && w.resetsAt > now ? { ...w, status: null } : null);
-    const usage: Usage = { weekly: usageWindow(windows.seven_day) ?? kept(was?.weekly), session: usageWindow(windows.five_hour) ?? kept(was?.session), updatedAt: now };
-    if (!usage.weekly && !usage.session) return;
-    this.store.setSetting(key, usage);
-    // The plan's limit lifted (#477): every window that was hit now says otherwise, so what waits on it needn't wait for the reset time.
-    const hit = (['session', 'weekly'] as const).filter((k) => was?.[k]?.status === 'rejected');
-    if (hit.length && hit.every((k) => usage[k]?.status && usage[k]!.status !== 'rejected')) {
-      if (person && account) this.onCleared?.(person, account);
-      this.limitCleared(payer);
-    }
-    // Only the payer's own meter shows it (server.ts, broadcast): the account in use's, whichever account this turn ran on.
-    this.broadcast({ type: 'usage', usage: person ? (this.usageOf(person) ?? usage) : usage, payer });
+    return this.planUsage.recordUsage(info, payer, person, account);
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {
@@ -4232,193 +4070,24 @@ export class Runner {
     if (lord) data = { ...(data as object), everyone: true };
     const row = this.store.addEvent(ticketId, kind, data, reserved);
     this.broadcast({ type: 'event', event: row });
-    if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId, POSTED_KINDS.has(kind));
+    if (CARD_KINDS.has(kind)) this.refs.refreshRefs(ticketId, POSTED_KINDS.has(kind));
     return row;
   }
 
-  /** A minion's cards waiting on people, oldest first, each with the link that opens it (#400); `placed` adds where each sits (CardLink.below). */
-  cardLinks(ticket: Ticket, placed = false, open?: EventRow[], approvals?: { at: number; card: unknown }[]): CardLink[] {
-    if (ticket.status === 'closed') return [];
-    const minion = ticket.kind === 'coordinator' ? null : ticket.number;
-    const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
-      minion,
-      kind,
-      what: cardWhat(kind, data),
-      label: cardLabel(kind, data),
-      href: cardHref(ticket, eventId),
-      ...((data as { to?: string })?.to ? { to: (data as { to: string }).to } : {}),
-      ...((data as { doc?: { path: string } })?.doc ? { doc: (data as { doc: { path: string } }).doc.path } : {}),
-      // Only question and plan cards are held under the turn's words (public/thread.js heldCards).
-      ...(placed ? { below: kind !== 'approval' && this.store.heldBelow(ticket.id, eventId) } : {}),
-    });
-    const asks = (approvals ?? this.approvals.pending().filter((a) => a.ticketId === ticket.id)).flatMap((a) => {
-      const eventId = this.store.cardEventId(ticket.id, 'approval', (a.card as { id: string }).id);
-      return eventId == null ? [] : [{ at: a.at, id: eventId, card: link('approval', a.card, eventId) }];
-    });
-    const stored = (open ?? this.store.openCardsOf(ticket.id)).map((e) => ({ at: e.created_at, id: e.id, card: link(e.kind as CardLink['kind'], JSON.parse(e.data), e.id) }));
-    // Cards posted in the same millisecond keep the order they were posted in (their event ids).
-    return [...asks, ...stored].sort((a, b) => a.at - b.at || a.id - b.id).map((c) => c.card);
+  /** A minion's cards waiting on people, and the scheme-refs snapshots its link check reads: src/turn-refs.ts. */
+  cardLinks(...args: Parameters<TurnRefs['cardLinks']>) {
+    return this.refs.cardLinks(...args);
   }
 
-  /** The scheme's newest 500 cards that aren't in `open`, with what happened to each (#531). No time cutoff: a card asked weeks ago may be answered today. */
-  private settledCards(projectId: number, open: Set<string>): SettledCard[] {
-    return this.store.recentCards(projectId, 500).flatMap((r) => {
-      const href = cardHref({ project_id: projectId, kind: r.tkind, number: r.number, id: r.ticket_id }, r.id);
-      if (open.has(href)) return [];
-      const kind = r.kind as CardLink['kind'];
-      const data = JSON.parse(r.data);
-      const minion = r.tkind === 'coordinator' ? null : r.number;
-      const how = settledHow(kind, data, r.reply && JSON.parse(r.reply), r.result && JSON.parse(r.result), r.tstatus === 'closed' ? minion : null, (ms) => clockTime(ms));
-      return [{ minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href, how, ...(data?.doc ? { doc: data.doc.path } : {}) }];
-    });
+  warmCards(...args: Parameters<TurnRefs['warmCards']>) {
+    return this.refs.warmCards(...args);
   }
 
-  /** Read each scheme's newest cards' rows into the store's memory in small steps, yielding between them, so the first
-   * refsShared after a restart doesn't read 500 scattered rows in one go (Store.warmCardRows). Quits on its own errors. */
-  async warmCards(chunk = 25, pauseMs = 5) {
-    try {
-      for (const p of this.store.listProjects()) {
-        while (this.store.warmCardRows(p.id, 500, chunk) > 0) await sleep(pauseMs);
-        await sleep(pauseMs);
-      }
-    } catch (err) {
-      console.warn('warming card rows failed:', err);
-    }
+  private writeRefs(...args: Parameters<TurnRefs['writeRefs']>) {
+    return this.refs.writeRefs(...args);
   }
 
-  /**
-   * What every turn's scheme-refs snapshot in a scheme shares, read once however many turns run there (#609). The
-   * scheme's open cards come in one query, not one per minion (#1562).
-   */
-  refsShared(projectId: number) {
-    const tickets = this.store.listTickets(projectId);
-    const openOf = new Map<number, EventRow[]>(tickets.map((t) => [t.id, []]));
-    for (const e of this.store.openCards(projectId)) openOf.get(e.ticket_id)?.push(e);
-    const links = new Map(tickets.map((t) => [t.id, this.cardLinks(t, false, openOf.get(t.id))]));
-    const open = new Set([...links.values()].flat().map((c) => c.href));
-    return { project: this.store.getProject(projectId)!, projects: this.store.listProjects(), tickets, openOf, links, settled: this.settledCards(projectId, open) };
-  }
-
-  /**
-   * Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. `now`
-   * writes it before returning (a launch: the turn reads it from its first reply); a refresh goes through putRefs.
-   */
-  private writeRefs(file: string, ticket: Ticket, shared = this.refsShared(ticket.project_id), now = false) {
-    const text = this.refsText(ticket, shared);
-    if (now) {
-      // Whole or not at all: the link check may read it mid-turn.
-      writeFileSync(`${file}.new`, text);
-      renameSync(`${file}.new`, file);
-      // A refresh still on its way to this file would put older text back: it writes this one last.
-      const held = this.refsWrites.get(file);
-      if (held) held.text = text;
-    } else this.putRefs(file, text);
-  }
-
-  /** A turn's scheme-refs snapshot (scheme-refs.ts) as text: its scheme's minions and the cards waiting on people. */
-  private refsText(ticket: Ticket, shared = this.refsShared(ticket.project_id)) {
-    const { project, projects, tickets, openOf, links, settled } = shared;
-    // Only the turn's own cards say where each sits (`placed`).
-    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => (t.id === ticket.id ? this.cardLinks(t, true, openOf.get(t.id)) : links.get(t.id)!)) };
-    return JSON.stringify({ ...schemeRefs(project, projects, tickets, cards), settled });
-  }
-
-  /** Per scheme: how many refreshes of its turns' snapshots have run, so a launch can tell it missed one (#1808). */
-  private refsSeq = new Map<number, number>();
-
-  /** Per snapshot file: the newest text still to write (null once taken), and its writes' end. */
-  private refsWrites = new Map<string, { text: string | null; done: Promise<void> }>();
-
-  /**
-   * Writes a running turn's snapshot off the server's thread (#1768): on a busy disk the write and rename each held
-   * every request for up to a second (Nov 24, six holds). One write per file at a time, the newest text winning, whole
-   * or not at all, and only over a snapshot that is still there: a turn that ended took its folder with it.
-   */
-  private putRefs(file: string, text: string) {
-    const held = this.refsWrites.get(file);
-    if (held) {
-      held.text = text;
-      return;
-    }
-    const w = { text: text as string | null, done: Promise.resolve() };
-    this.refsWrites.set(file, w);
-    w.done = (async () => {
-      try {
-        while (w.text !== null) {
-          const next = w.text;
-          w.text = null;
-          await access(file);
-          await writeFile(`${file}.new`, next);
-          await rename(`${file}.new`, file);
-        }
-      } catch {
-        // A stale snapshot only means a card goes unchecked.
-      } finally {
-        this.refsWrites.delete(file);
-      }
-    })();
-  }
-
-  /** Resolves once every snapshot write under way has reached its file. */
-  async refsWritten(): Promise<void> {
-    while (this.refsWrites.size) await Promise.all([...this.refsWrites.values()].map((w) => w.done));
-  }
-
-  /** The least time between two refreshes of a scheme's snapshots (refreshRefs). */
-  refsGapMs = 2_000;
-  /** Per scheme: when its snapshots were last refreshed, and the refresh waiting for the gap to pass. */
-  private refsLast = new Map<number, { at: number; due?: ClockTimer }>();
-
-  /**
-   * A card was posted or settled in `ticketId`'s chat: the running turns of its scheme get it in their snapshot, so the
-   * link check knows it. At most once per refsGapMs per scheme (#1562): the first card refreshes at once, and the cards
-   * after it within the gap share one refresh at its end. The card's own minion gets its snapshot at once either way:
-   * its link check may read it before the gap ends, and a missing card there bounces its reply (cardlessChoices).
-   * `posted` (the turn posted the card itself) writes that one snapshot before returning, so it is there when the
-   * turn's tool call is answered; every other turn's goes off the server's thread (putRefs).
-   */
-  private refreshRefs(ticketId: number, posted = false) {
-    const projectId = this.store.getTicket(ticketId)?.project_id;
-    if (projectId === undefined) return;
-    const last = this.refsLast.get(projectId);
-    const wait = last ? last.at + this.refsGapMs - this.clock.now() : 0;
-    const own = posted ? ticketId : undefined;
-    if (!last?.due && wait <= 0) return this.writeSchemeRefs(projectId, undefined, own);
-    this.writeSchemeRefs(projectId, ticketId, own);
-    if (last?.due) return;
-    const due = this.clock.setTimeout(() => {
-      try {
-        this.writeSchemeRefs(projectId);
-      } catch (err) {
-        console.error(`Scheme ${projectId}: refreshing its turns' snapshots failed:`, err);
-      }
-    }, wait);
-    due.unref();
-    this.refsLast.set(projectId, { at: last!.at, due });
-  }
-
-  /**
-   * Rewrite the snapshot of every turn running in `projectId`, or only `only`'s, outside the gap (refreshRefs). `own`'s
-   * is written before returning, the rest off the server's thread.
-   */
-  private writeSchemeRefs(projectId: number, only?: number, own?: number) {
-    // The gap starts only once a refresh read something: a card in a scheme with no turn running costs nothing.
-    if (only === undefined) this.refsLast.delete(projectId);
-    this.refsSeq.set(projectId, (this.refsSeq.get(projectId) ?? 0) + 1);
-    let shared: ReturnType<Runner['refsShared']> | undefined;
-    for (const [id, turn] of this.turns) {
-      if (only !== undefined && id !== only) continue;
-      const t = this.store.getTicket(id);
-      if (t?.project_id !== projectId) continue;
-      if (!shared && only === undefined) this.refsLast.set(projectId, { at: this.clock.now() });
-      try {
-        const file = join(turn.dir, 'scheme-refs.json');
-        // A turn that ended took its folder with it (putRefs checks the same, off the thread).
-        if (id === own && !existsSync(file)) continue;
-        this.writeRefs(file, t, (shared ??= this.refsShared(projectId)), id === own);
-      } catch {
-        // A stale snapshot only means a card goes unchecked.
-      }
-    }
+  refsWritten() {
+    return this.refs.refsWritten();
   }
 }

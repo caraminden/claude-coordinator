@@ -50,6 +50,18 @@ const rows: [string, Partial<StatusFacts>, string, string, string | null][] = [
   ["a minion worker on a laptop whose agent isn't there", { workerHere: true, online: false, alwaysOn: false, offers: [], check: null }, 'ready', 'Runs minion turns', null],
   ['a minion worker, its always-on agent gone 6 min', { workerHere: true, online: false, lastSeenAt: now - 6 * min, offers: [], check: null }, 'down', 'Offline', 'always_on'],
   ['CI runner host offline 10 min', { online: false, runners: true, lastSeenAt: now - 10 * min }, 'down', 'Offline', 'always_on'],
+  // One PC's row (Build 7 M2b): its agent and its CI runner agents, each half named (#2194).
+  ['one PC: runners up, its agent found things, nothing ticked', { runnersBeside: true, offers: [], managed: true, finds: true, check: null }, 'ready', 'CI runner host, connected', null],
+  ['one PC: runners up, its agent found nothing', { runnersBeside: true, offers: [], managed: true, check: null }, 'ready', 'CI runner host, connected', null],
+  ['one PC: runners up, no server and no folder', { runnersBeside: true, offers: [], check: null }, 'ready', 'CI runner host, connected', null],
+  ['one PC: runners up, its tools passed', { runnersBeside: true }, 'ready', 'CI runners up · Ready · 47 tools', null],
+  ["one PC: runners up, its tools didn't start", { runnersBeside: true, check: { at: now, results: [{ server: 'mcp', ok: false, tools: [], error: 'x', ms: 1 }] } }, 'fix', "CI runners up · Its tools didn't start: x", 'check'],
+  ["one PC: runners up, what is ticked isn't on that computer", { runnersBeside: true, offers: [], managed: true, finds: true, missing: ['peek-auras', 'cantrips'], check: null }, 'fix', 'CI runners up · Ticked but not on that computer: peek-auras, cantrips', 'tick'],
+  ["one PC: some of what is ticked isn't there, the rest passed", { runnersBeside: true, managed: true, missing: ['zzz'] }, 'fix', 'CI runners up · Ticked but not on that computer: zzz', 'tick'],
+  ['one PC: its runner agents gone, its tools passed', { ciDown: true }, 'fix', 'CI runners not connected · 47 tools ready', null],
+  ['one PC: its runner agents gone, it lends nothing', { ciDown: true, offers: [], managed: true, finds: true, check: null }, 'fix', 'CI runners not connected', null],
+  ["one PC: its runner agents gone, its tools didn't start", { ciDown: true, check: { at: now, results: [{ server: 'mcp', ok: false, tools: [], error: 'x', ms: 1 }] } }, 'fix', "CI runners not connected · Its tools didn't start: x", 'check'],
+  ["ticked workspaces aren't on that computer (an agent moved PCs)", { offers: [], managed: true, finds: true, missing: ['peek-auras'], check: null }, 'fix', 'Ticked but not on that computer: peek-auras', 'tick'],
 ];
 
 for (const [what, facts, status, reason, fix] of rows) {

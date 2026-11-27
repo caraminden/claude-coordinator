@@ -129,7 +129,7 @@ export function joinState(join: MachineJoin, connected: boolean, now = Date.now(
  * so a second try with it is refused. A new row is named from the hostname and owned by whoever made the code; an
  * Update's row gets a new token, which the new agent's service replaces the old one's with.
  */
-export function redeemJoin(store: Store, issueToken: (machineId: number) => string, body: Record<string, unknown>, now = Date.now(), removing: (machineId: number) => boolean = () => false): { id: number; name: string; token: string } {
+export function redeemJoin(store: Store, issueToken: (machineId: number) => string, body: Record<string, unknown>, now = Date.now(), removing: (machineId: number) => boolean = () => false, liveHost: (machineId: number) => string | null = () => null): { id: number; name: string; token: string } {
   const code = typeof body.code === 'string' ? body.code.trim() : '';
   if (!JOIN_CODE.test(code)) throw new HttpError(400, "That isn't a join code: copy the whole command from the Machines page again");
   const report = cleanReport(body.report);
@@ -141,6 +141,10 @@ export function redeemJoin(store: Store, issueToken: (machineId: number) => stri
     if (!machine) throw new HttpError(410, 'The machine this code updates was removed: press Connect a computer for a new one');
     // As the token route: a new token would cut the draining agent off before its copies are home.
     if (removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it gets no new token until its copies are cleared`);
+    // Pasted on another PC, its agent would replace the live one there (#2194: a VM's Update, run on its host); an agent that names no PC can't show it's the same one.
+    const live = liveHost(machine.id);
+    const here = report?.host || text(body.host, 100);
+    if (live && here.toLowerCase() !== live.toLowerCase()) throw new HttpError(409, `This code updates ${machine.name}, whose agent runs on ${live}, but this PC is ${here || 'unnamed'}. Press Update for a new code and run it on ${live} itself (for a VM, inside it); to add this PC, press Connect a computer instead`);
   } else {
     // Every machine has an owner (Build 10 H1): whoever made the code, which Connect a computer does with their own login.
     const owner = join.owner_id ?? join.asker_id;

@@ -64,6 +64,9 @@ export interface JobKind {
   max_limit_s: number;
 }
 
+/** A build job's recipe (H2, src/heavy-builds.ts): threads it holds, the named cache volume and where it mounts, on the agent's builds lane. */
+export type BuildKind = JobKind & { threads: number; volume: string; at: string; lane: 'builds' };
+
 /** What a machine's agent says jobs may use there (its owner's `jobs` block in machine-agent.json; no paths). */
 export interface JobsOffer {
   folders: string[];
@@ -303,6 +306,12 @@ export interface JobDeps {
   room?(machineId: number, job: { key: string; label: string; size: number }): 'start' | 'late' | 'wait';
   /** None of the machine's jobs holds or waits for room but `keep`'s (its key, or null). */
   freed?(machineId: number, keep: string | null): void;
+  /** A build job (H2's builds lane) ended or stopped waiting: its key's room is free (the balancer's done()). */
+  heavyDone?(key: string): void;
+  /** A build job the agent still runs holds its room again (the balancer's hold(), after a server restart). */
+  heavyHeld?(machineId: number, job: { key: string; label: string; size: number }): void;
+  /** A build job may still start on its machine: its Builds role is on, lent to its scheme and set up green (the role's switch is its go). */
+  buildsMay?(job: MachineJob): boolean;
   now?: () => number;
 }
 
@@ -374,12 +383,13 @@ export class MachineJobs {
   waits(job: MachineJob, m = this.machineOf(job)): string | null {
     if (job.state !== 'queued') return null;
     if (!this.d.online(m.id)) return 'machine offline';
+    if (job.go === 'builds') return 'waiting for room';
     const s = storedSettings(m);
     if (s.paused) return 'machine paused';
-    const active = this.store.machineJobs({ machine: m.id, states: ACTIVE }, 1)[0];
+    const active = this.slotJob(m.id);
     if (active) return `behind job #${active.id}`;
     if (job.go !== 'now' && !hoursOpen(s, this.now())) return `outside job hours (opens ${s.start} ${pacificClock(this.now()).zone})`;
-    const ahead = this.store.machineJobs({ machine: m.id, states: ['queued'] }, 1000).filter((q) => q.id < job.id && (q.go === 'now' || hoursOpen(s, this.now())));
+    const ahead = this.store.machineJobs({ machine: m.id, states: ['queued'] }, 1000).filter((q) => q.id < job.id && q.go !== 'builds' && (q.go === 'now' || hoursOpen(s, this.now())));
     if (ahead.length) return `behind job #${ahead.at(-1)!.id}`;
     return null;
   }
@@ -403,7 +413,8 @@ export class MachineJobs {
   /** The stage each live minion's job card was last put at the bottom for; read back from the chat after a restart. */
   private stages = new Map<number, JobStage>();
   private place(job: MachineJob, view: JobView) {
-    if (job.ticket_id === null || !this.d.placed) return;
+    // A build job's minion is waiting on it in citadel-heavy, which prints how it goes: no card in its chat.
+    if (job.ticket_id === null || !this.d.placed || job.go === 'builds') return;
     const stage = jobStage(job.state);
     // 'starting' (the go given, the machine told) is still waiting to the eye, and moves nothing until it runs.
     const shown = job.state === 'starting' ? 'waiting' : stage;
@@ -655,6 +666,12 @@ export class MachineJobs {
   private ended(id: number, text: string, quiet = false) {
     const job = this.store.getMachineJob(id)!;
     this.changed(id);
+    if (job.go === 'builds') {
+      // citadel-heavy in the minion's turn reads how it ended, so nobody is woken; the machine's room is free again.
+      // The balancer's done() tells the server, which pumps the machine again for the next one.
+      this.d.heavyDone?.(`build:${id}`);
+      return;
+    }
     if (job.ticket_id !== null && !quiet) {
       const res = job.state === 'done' ? ` Results: ${job.upload_bytes ? `jobs/${id}/ in the scheme's shared folder` : 'none uploaded'}.` : '';
       this.d.wake(job.ticket_id, `${text}${res}${notTaken(job, this.machineOf(job).name)} job_status ${id} has the details.`, job.state === 'done');
@@ -667,10 +684,12 @@ export class MachineJobs {
    */
   pump(machineId: number) {
     const m = this.store.getMachine(machineId);
-    if (!m || !this.d.online(machineId) || !storedOffer(m)) return;
+    if (!m || !this.d.online(machineId)) return;
+    this.pumpBuilds(machineId);
+    if (!storedOffer(m)) return;
     const s = storedSettings(m);
     const open = hoursOpen(s, this.now());
-    const active = this.store.machineJobs({ machine: machineId, states: ACTIVE }, 1)[0];
+    const active = this.slotJob(machineId);
     if (active) {
       if (active.state === 'running' && !s.paused && !open && active.go !== 'now') this.hold(active, 'hours');
       else if (active.state === 'running' && s.paused) this.hold(active, 'machine');
@@ -691,13 +710,63 @@ export class MachineJobs {
       : this.store
           .machineJobs({ machine: machineId, states: ['queued'] }, 1000)
           .reverse()
-          .find((j) => j.go !== null && (j.go === 'now' || open));
+          .find((j) => j.go !== null && j.go !== 'builds' && (j.go === 'now' || open));
     const key = next && `gpu:${next.id}`;
     this.d.freed?.(machineId, key ?? null);
     if (!next) return;
     // A heavy job waits for its size to be free (Josh, 2026-11-25, "Its size to be free"); no new turn starts there meanwhile.
     if (this.d.room?.(machineId, { key: key!, label: `GPU job ${next.id}`, size: HEAVY.gpu }) === 'wait') return;
     this.startJob(next);
+  }
+
+  /** The job holding the machine's one GPU job slot: build jobs (H2) don't take it. */
+  private slotJob(machineId: number): MachineJob | undefined {
+    return this.store.machineJobs({ machine: machineId, states: ACTIVE }, 100).find((j) => j.go !== 'builds');
+  }
+
+  /**
+   * The builds lane (H2): build jobs start in the order they came, each once the balancer has its size free there (it
+   * holds no turn back past 30 minutes of waiting, as any heavy job). No job hours, no card: the Builds role's switch
+   * is the go, checked again at the start.
+   */
+  private pumpBuilds(machineId: number) {
+    for (const next of this.store.machineJobs({ machine: machineId, states: ['queued'] }, 200).reverse()) {
+      if (next.go !== 'builds') continue;
+      if (this.d.buildsMay && !this.d.buildsMay(next)) {
+        this.store.updateMachineJob(next.id, { state: 'refused', ended_at: this.now(), error: "the machine's Builds role is off, not lent to this scheme, or not set up" });
+        this.ended(next.id, '');
+        continue;
+      }
+      if (this.d.room?.(machineId, { key: `build:${next.id}`, label: `${next.kind_name} build ${next.id}`, size: buildThreads(next) }) === 'wait') return;
+      this.startJob(next);
+      // Not sent (the agent went): the rest wait for it to come back.
+      if (this.store.getMachineJob(next.id)?.state === 'queued') return;
+    }
+  }
+
+  /** Queue a build job (H2's place() chose this machine): no jobs block, go card or job hours; it starts when there is room. */
+  queueBuild(q: { machine: Machine; projectId: number; ticketId: number; askedBy: string; kind: BuildKind; inputs: { name: string; size: number; sha256: string; path: string }[]; limitS: number; reason: string }): MachineJob {
+    const job = this.store.addMachineJob({
+      machine_id: q.machine.id,
+      project_id: q.projectId,
+      ticket_id: q.ticketId,
+      contraption_id: null,
+      asked_by: q.askedBy,
+      kind_name: q.kind.name,
+      kind: JSON.stringify(q.kind),
+      kind_hash: kindHash(q.kind),
+      inputs: JSON.stringify(q.inputs),
+      limit_s: q.limitS,
+      run_when: 'now',
+      reason: q.reason,
+      state: 'queued',
+      created_at: this.now(),
+      go: 'builds',
+      go_by: 'the Builds role',
+    });
+    this.changed(job.id);
+    this.pump(q.machine.id);
+    return this.store.getMachineJob(job.id)!;
   }
 
   private hold(job: MachineJob, by: 'hours' | 'machine') {
@@ -725,9 +794,11 @@ export class MachineJobs {
   /** Every machine with jobs: job hours opening or closing, a one-off window lapsing, a limit passed. */
   tickAll() {
     for (const m of this.store.listMachines()) {
-      if (!storedOffer(m)) continue;
-      const s = storedSettings(m);
-      if (s.until !== null && s.until <= this.now()) this.store.updateMachine(m.id, { job_settings: JSON.stringify({ ...s, until: null }) });
+      // A machine with no jobs block can still run build jobs (H2): their limits and starts are kept too.
+      if (storedOffer(m)) {
+        const s = storedSettings(m);
+        if (s.until !== null && s.until <= this.now()) this.store.updateMachine(m.id, { job_settings: JSON.stringify({ ...s, until: null }) });
+      }
       this.enforceLimit(m.id);
       this.timeOutStart(m.id);
       this.pump(m.id);
@@ -738,21 +809,24 @@ export class MachineJobs {
 
   /** The server enforces the limit too, in case the agent doesn't: past it and a grace, it sends job.stop. Paused time doesn't count. */
   private enforceLimit(machineId: number) {
-    const j = this.store.machineJobs({ machine: machineId, states: ['running'] }, 1)[0];
-    if (!j || Math.max(j.run_s, j.server_run_s) <= j.limit_s + LIMIT_GRACE_S || j.error) return;
-    this.d.send(machineId, { type: 'job.stop', id: j.id });
-    this.store.updateMachineJob(j.id, { error: `over its ${Math.round(j.limit_s / 60)} min limit; Citadel stopped it` });
-    this.changed(j.id);
+    // Build jobs run beside the GPU slot's one, so each running job is checked.
+    for (const j of this.store.machineJobs({ machine: machineId, states: ['running'] }, 100)) {
+      if (Math.max(j.run_s, j.server_run_s) <= j.limit_s + LIMIT_GRACE_S || j.error) continue;
+      this.d.send(machineId, { type: 'job.stop', id: j.id });
+      this.store.updateMachineJob(j.id, { error: `over its ${Math.round(j.limit_s / 60)} min limit; Citadel stopped it` });
+      this.changed(j.id);
+    }
   }
 
   /** A job the machine never moved past "starting" (MA8: an agent that lost it, or a refusal it couldn't report) fails, so the queue moves. */
   private timeOutStart(machineId: number) {
-    const j = this.store.machineJobs({ machine: machineId, states: ['starting'] }, 1)[0];
-    if (!j || this.now() - (j.live_at ?? j.started_at ?? this.now()) < STARTING_TIMEOUT_S * 1000) return;
-    this.d.send(machineId, { type: 'job.stop', id: j.id });
-    const error = `the machine said nothing for ${STARTING_TIMEOUT_S / 3600} h while starting it; Citadel gave up on it`;
-    this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error });
-    this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${this.machineOf(j).name} failed: ${error}.`);
+    for (const j of this.store.machineJobs({ machine: machineId, states: ['starting'] }, 100)) {
+      if (this.now() - (j.live_at ?? j.started_at ?? this.now()) < STARTING_TIMEOUT_S * 1000) continue;
+      this.d.send(machineId, { type: 'job.stop', id: j.id });
+      const error = `the machine said nothing for ${STARTING_TIMEOUT_S / 3600} h while starting it; Citadel gave up on it`;
+      this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error });
+      this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${this.machineOf(j).name} failed: ${error}.`);
+    }
   }
 
   /** When each job was last sent a job.resume again; a pause or a person's resume starts it afresh. */
@@ -840,12 +914,14 @@ export class MachineJobs {
    * here, or that this server never started, is told to stop. Then start what may start. `known` is null when the info
    * named no jobs at all (an agent from before MA1 whose block broke): nothing is lost on that.
    */
-  reconcile(m: Machine, known: { id: number; state: string }[] | null, since: number) {
-    const knows = new Map((known ?? []).map((k) => [k.id, k.state]));
-    if (known)
+  reconcile(m: Machine, known: { id: number; state: string }[] | null, since: number, builds: { id: number; state: string }[] | null = null) {
+    // `builds`: an agent whose GPU jobs folder isn't read yet names only its builds (H2), so only builds can be lost.
+    const list = known ?? builds;
+    const knows = new Map((list ?? []).map((k) => [k.id, k.state]));
+    if (list)
       for (const j of this.store.machineJobs({ machine: m.id, states: ACTIVE }, 50)) {
         // One started on this connection may not be in the agent's list yet: only one from before it can be lost.
-        if (knows.has(j.id) || (j.started_at ?? 0) >= since) continue;
+        if (knows.has(j.id) || (j.started_at ?? 0) >= since || (!known && j.go !== 'builds')) continue;
         this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error: 'the machine restarted' });
         this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${m.name} failed: the machine restarted and lost it.`);
       }
@@ -856,6 +932,8 @@ export class MachineJobs {
         if (!(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
         continue;
       }
+      // A build still running there holds its threads again (the balancer's holds are lost on a server restart).
+      if (j.go === 'builds' && (j.state === 'running' || j.state === 'starting')) this.d.heavyHeld?.(m.id, { key: `build:${j.id}`, label: `${j.kind_name} build ${j.id}`, size: buildThreads(j) });
       // A stop asked while it was offline (stopJob and the limit set error), or a pause: tell it again.
       if (j.error && !(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
       else if (j.state === 'paused' && (state === 'running' || state === 'starting')) this.d.send(m.id, { type: 'job.pause', id });
@@ -941,6 +1019,9 @@ export class MachineJobs {
 }
 
 /** An output's path as the agent sends it, relative to /out: segments of safe names, no `..`, no absolute paths. */
+/** The threads a build job (H2) was sized at. */
+const buildThreads = (j: MachineJob) => Number((JSON.parse(j.kind) as { threads?: number }).threads) || HEAVY.gpu;
+
 export function safeRelPath(p: string): string {
   const parts = p
     .replace(/\\/g, '/')

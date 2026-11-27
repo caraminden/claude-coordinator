@@ -16,6 +16,7 @@ export interface CabalCard {
   lead: number;
   number: number | null;
   title: string;
+  name: string;
   overseer: string;
   build: number | null;
   done: 'merged' | 'shipped';

@@ -12,6 +12,7 @@ import { fileRoutes } from './files.ts';
 import { machineRoutes } from './machines.ts';
 import { jobRoutes } from './jobs.ts';
 import { minionJobRoutes } from './minion-jobs.ts';
+import { heavyBuildRoutes } from './heavy-builds.ts';
 import { ciStoreRoutes } from './ci-store.ts';
 import { desktopRoutes } from './desktop.ts';
 import { pushRoutes } from './push.ts';
@@ -41,6 +42,7 @@ export const apiRoutes = [
   ...machineRoutes,
   ...jobRoutes,
   ...minionJobRoutes,
+  ...heavyBuildRoutes,
   ...ciStoreRoutes,
   ...desktopRoutes,
   ...pushRoutes,

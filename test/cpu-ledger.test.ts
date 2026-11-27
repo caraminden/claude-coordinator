@@ -1,7 +1,7 @@
 // The CPU ledger (#1332): fake cgroup files in, the "CPU by source" table out; counters that restart; a reading's cost.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLedger, ledgerSteps, cpuTable, cpuHours, type CpuLedger } from '../src/cpu-ledger.ts';
@@ -39,6 +39,17 @@ test('a reading names each source and keeps raw totals; other users are one tota
   assert.deepEqual(l.s['t:citadel'], [60e6, 10e6]);
   assert.deepEqual(l.h, [1450 * 10, 450 * 10, 1000, 5000]);
   assert.ok(!Object.keys(l.s).some((k) => /^\d+$/.test(k) || k.includes('user-')), 'no per-user names');
+});
+
+test('the godot-ai bridges the server starts in app-godot.slice are a perigee-godot source of their own (#2179)', async () => {
+  const t = tree({ ...base(), [`${M}/app.slice/app-godot.slice`]: [2e6, 1e6] });
+  try {
+    const l = await readLedger({ ...t, uid: UID });
+    assert.deepEqual(l.s.godot, [9e6, 1e6]);
+    assert.deepEqual(l.s['godot-mcp'], [2e6, 1e6]);
+  } finally {
+    rmSync(t.root, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });
 
 test('the remainders come from each step: the rest of the account, other apps and other users', async () => {

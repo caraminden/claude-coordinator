@@ -11,7 +11,7 @@ import { join, normalize } from 'node:path';
 import { tierLabel } from '../public/model-table.js';
 import { AGENT_NAME, type Session } from './auth.ts';
 import { cabalName, overseerOf, readBoard } from './cabal-board.ts';
-import { type CardQuestion, postCard, tellTaskmaster } from './ci-armed.ts';
+import { type CardQuestion, type CardRosterRow, postCard, tellTaskmaster } from './ci-armed.ts';
 import type { Ticket } from './db-rows.ts';
 import type { CabalMemberRow } from './db/cabals.ts';
 import { type App, HttpError, ownWrites } from './http.ts';
@@ -49,12 +49,31 @@ const name = (app: App, lead: Ticket) => cabalName(app.store, lead, app.store.ge
 const rowName = (r: CabalMemberRow) => r.label || r.title || `row ${r.id}`;
 /** The scheme a row's member runs in: its own, or the lead's. */
 export const rowScheme = (lead: Pick<Ticket, 'project_id'>, r: Pick<CabalMemberRow, 'project_id'>) => r.project_id ?? lead.project_id;
-const schemeName = (app: App, id: number) => app.store.getProject(id)?.name ?? `scheme ${id}`;
+const schemeName = (app: Pick<App, 'store'>, id: number) => app.store.getProject(id)?.name ?? `scheme ${id}`;
 const money = (n: number) => `$${Math.round(n)}`;
 
-/** One roster line as the forming card shows it. */
-const rosterLine = (app: App, lead: Ticket) => (r: CabalMemberRow) =>
-  `- ${rowScheme(lead, r) !== lead.project_id ? `[${schemeName(app, rowScheme(lead, r))}] ` : ''}${[r.label, r.title].filter(Boolean).join(' · ')} · ${r.handoff} · ${tierLabel(r.model, r.effort)}${r.cost != null ? ` · ~${money(r.cost)}` : ''}${r.after ? ` · after ${r.after}` : ''}`;
+const clip = (t: string, n = 60) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+
+/** When a row starts, in words: "now", "after the VM piece", "once #2179 is live". A label names its row by its title, never as "H2". */
+export function whenText(r: Pick<CabalMemberRow, 'after'>, all: Pick<CabalMemberRow, 'label' | 'title'>[]): string {
+  const whole = r.after.trim();
+  // A label may hold spaces (chainOf reads the whole string as one), so the whole string is tried first.
+  const tokens = all.some((x) => x.label && x.label.toLowerCase() === whole.toLowerCase())
+    ? [whole]
+    : whole
+        .split(/[,;&+\s]+|\band\b/i)
+        .filter(Boolean)
+        .map((t) => (/^\d+$/.test(t) ? `#${t}` : t));
+  if (!tokens.length) return 'now';
+  const named = tokens.map((t) => (/^#\d+$/.test(t) ? null : all.find((x) => x.label && x.label.toLowerCase() === t.toLowerCase())?.title || t)).filter((t): t is string => t != null);
+  const live = tokens.filter((t) => /^#\d+$/.test(t)).map((t) => `once ${t} is live`);
+  return [...(named.length ? [`after ${named.map((t) => clip(t)).join(' and ')}`] : []), ...live].join(', ');
+}
+
+/** The roster the forming card draws as a list; its question text carries the same rows as "- " lines for plain-text readers. Model and effort ride along, drawn small and muted. */
+const rosterRows = (app: App, lead: Ticket, rows: CabalMemberRow[], all: CabalMemberRow[]): CardRosterRow[] =>
+  rows.map((r) => ({ what: r.title || r.label, ...(r.cost != null ? { cost: `~${money(r.cost)}` } : {}), when: whenText(r, all), tier: tierLabel(r.model, r.effort), ...(rowScheme(lead, r) !== lead.project_id ? { scheme: schemeName(app, rowScheme(lead, r)) } : {}) }));
+const rosterLines = (roster: CardRosterRow[]) => roster.map((r) => `- ${r.scheme ? `[${r.scheme}] ` : ''}${r.what} · ${r.cost ?? 'no estimate'} · ${r.when}`).join('\n');
 
 /**
  * cabal_board's form: one card in the lead's chat, open to the scheme, for every row neither approved nor started.
@@ -87,20 +106,18 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
   const approved = all.filter((r) => r.approved_at != null || r.ticket_id != null);
   const total = rows.reduce((s, r) => s + (r.cost ?? 0), 0);
   const unknown = rows.filter((r) => r.cost == null).length;
-  const head = approved.length ? `${overseerOf({ name: nm })} (#${lead.number}) asks to add ${rows.length} to its cabal of ${approved.length}` : `${overseerOf({ name: nm })} (#${lead.number}) asks to start its cabal of ${rows.length}`;
-  const where = lead.build != null ? `merging into Build ${lead.build}'s branch` : 'each shipping to live itself';
+  const asks = `${overseerOf({ name: nm })} (#${lead.number}) asks to ${approved.length ? 'add' : 'start'} ${rows.length} ${rows.length === 1 ? 'member' : 'members'}`;
+  const where = lead.build != null ? `merging into Build ${lead.build}` : 'each shipping to live itself';
   const others = [...new Set(rows.map((r) => rowScheme(lead, r)).filter((p) => p !== lead.project_id))];
-  const elsewhere = others.length ? `\n\nRows marked with another scheme run there and ship to its own main${lead.build != null ? `, never into Build ${lead.build}` : ''}: its Taskmaster starts them when ${overseerOf({ name: nm })} asks, and only that scheme's people's go approves them (they get this card too).` : '';
+  const elsewhere = others.length ? `\n\nMarked rows run in another scheme and ship to its own main${lead.build != null ? `, never into Build ${lead.build}` : ''}; only that scheme's people's go starts them (they get this card too).` : '';
+  const roster = rosterRows(app, lead, rows, all);
   const question: CardQuestion = {
     header: approved.length ? 'Add to the cabal' : 'Start the cabal',
-    question:
-      `${head}, ${where}, at most ${w} at work at once (the rest wait as next up)${rows.length ? `, about ${money(total)}${unknown ? ` plus ${unknown} with no estimate` : ''}` : ''}.` +
-      (rows.length ? `\n\n${rows.map(rosterLine(app, lead)).join('\n')}` : '') +
-      elsewhere +
-      `\n\nThe go lets the Overseer start${rows.length ? ' these' : ''}, unseal, stop and reseal its own members itself, and stands for each row's start card up to its cost. Anyone not listed needs another card.`,
+    question: `${asks}, ${where}${rows.length ? `, about ${money(total)}${unknown ? ` plus ${unknown} with no estimate` : ''}` : ''}, ${w} at once.${elsewhere}${rows.length ? `\n\n${rosterLines(roster)}` : ''}`,
+    ...(rows.length ? { roster } : {}),
     multiSelect: false,
     options: [
-      { label: FORM_GO, description: `The Overseer starts them from their handoffs, ${w} at a time; the Taskmaster hears of each start.`, recommended: true },
+      { label: FORM_GO, description: `The Overseer starts them ${w} at a time (the rest wait their turn) and may unseal, stop and reseal its own members, and each start stands up to its row's cost; the Taskmaster hears of each start. Anyone not listed needs another card.`, recommended: true },
       { label: FORM_WAIT, description: 'Nothing starts. Say what to change and the Overseer posts a new card.' },
     ],
   };
@@ -111,6 +128,7 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
     const project = store.getProject(p);
     if (!project) continue;
     const theirs = rows.filter((r) => rowScheme(lead, r) === p);
+    const theirRoster = rosterRows(app, lead, theirs, all);
     const sum = theirs.reduce((s, r) => s + (r.cost ?? 0), 0);
     postCard(app, await ensureCoordinatorFor(app, project, null), {
       asker: lead.id,
@@ -119,8 +137,9 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
         {
           header: 'Start cabal members',
           question:
-            `${overseerOf({ name: nm })}, #${lead.number} in ${own}, leads a cabal there and asks to start ${theirs.length} of its members in ${project.name}, about ${money(sum)}:\n\n${theirs.map(rosterLine(app, lead)).join('\n')}` +
+            `${overseerOf({ name: nm })}, #${lead.number} in ${own}, leads a cabal there and asks to start ${theirs.length} of its members in ${project.name}, about ${money(sum)}:\n\n${rosterLines(theirRoster)}` +
             `\n\nThey run and ship here, to ${project.name}'s own main${lead.build != null ? `, never into ${own}'s Build ${lead.build}` : ''}. Your ${AGENT_NAME} starts each when ${overseerOf({ name: nm })} asks, and their notes and asks go to the cabal's board. Only a ${project.name} member's go starts them.`,
+          ...(theirs.length ? { roster: theirRoster } : {}),
           multiSelect: false,
           options: [
             { label: FORM_GO, description: `Your ${AGENT_NAME} starts them when ${overseerOf({ name: nm })} asks.`, recommended: true },
@@ -192,18 +211,40 @@ export function findRow(app: App, leadId: number, row: unknown): CabalMemberRow 
 /** Members at work, as the board reads them (building, open or blocked): what the width counts. One sealed on its chain, merged or dismissed holds no place. */
 const atWork = async (app: App, leadId: number, self: number) => ((await readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) }))?.counts.working ?? 0) + app.store.cabalRows(leadId).filter((r) => r.asked_at != null && r.ticket_id == null && r.id !== self).length; // a row asked of another scheme's Taskmaster holds its place
 
-/** What a row's `after` chains on: a #N, or another row's label whose minion is started. */
-function chainOf(app: App, lead: Ticket, r: CabalMemberRow): number | null {
-  const after = r.after.trim();
-  if (!after) return null;
-  const n = /^#?(\d+)$/.exec(after);
-  if (n) return Number(n[1]);
-  const other = app.store.cabalRows(lead.id).find((x) => x.label && x.label.toLowerCase() === after.toLowerCase());
-  if (!other) throw new HttpError(400, `Row ${rowName(r)} waits on "${after}", which is no #N and no label on your board`);
-  const t = other.ticket_id != null ? app.store.getTicket(other.ticket_id) : undefined;
-  if (!t) throw new HttpError(409, `Row ${rowName(r)} waits on ${after}, which isn't started yet: start ${after} first`);
-  if (t.project_id !== lead.project_id) throw new HttpError(400, `Row ${rowName(r)} waits on ${after}, which runs in ${schemeName(app, t.project_id)}: a wait only chains within a scheme, so clear its after and start it once ${after} ships`);
-  return t.number!;
+/** What a row's `after` chains on: a #N, or another row's label whose minion is started; "H1, H2" (also "and", "&", "+") is a list, and the parts already shipped or merged drop out. */
+export function chainOf(app: Pick<App, 'store'>, lead: Ticket, r: CabalMemberRow): number | null {
+  const whole = r.after.trim();
+  if (!whole) return null;
+  const rows = app.store.cabalRows(lead.id);
+  // A label may hold spaces (and even "and"), so the whole string is tried as a label first, as whenText does.
+  const isLabel = (x: string) => rows.some((o) => o.label && o.label.toLowerCase() === x.toLowerCase());
+  const parts = isLabel(whole)
+    ? [whole]
+    : whole
+        .split(/\s*(?:[,;&+]|\band\b)\s*/i)
+        .map((x) => x.trim())
+        .filter(Boolean);
+  const open: { part: string; number: number }[] = [];
+  for (const part of parts) {
+    const n = /^#?(\d+)$/.exec(part);
+    let num: number;
+    let t: Ticket | undefined;
+    if (n) {
+      num = Number(n[1]);
+      t = app.store.getTicketByNumber(lead.project_id, num);
+    } else {
+      const other = rows.find((x) => x.label && x.label.toLowerCase() === part.toLowerCase());
+      if (!other) throw new HttpError(400, `Row ${rowName(r)} waits on "${part}", which is no #N and no label on your board`);
+      t = other.ticket_id != null ? app.store.getTicket(other.ticket_id) : undefined;
+      if (!t) throw new HttpError(409, `Row ${rowName(r)} waits on ${part}, which isn't started yet: start ${part} first`);
+      if (t.project_id !== lead.project_id && app.store.lastShipNote(t.id) == null) throw new HttpError(400, `Row ${rowName(r)} waits on ${part}, which runs in ${schemeName(app, t.project_id)}: a wait only chains within a scheme, so clear its after and start it once ${part} ships`);
+      num = t.number!;
+    }
+    if (t && app.store.lastShipNote(t.id) != null) continue; // shipped or merged into the build: nothing left to wait on
+    open.push({ part, number: num });
+  }
+  if (open.length > 1) throw new HttpError(409, `Row ${rowName(r)} waits on ${open.map((o) => `${o.part} (#${o.number})`).join(' and ')}, which are all still open and a start waits on one minion: start it once all but one have shipped or merged`);
+  return open[0]?.number ?? null;
 }
 
 /**
@@ -243,7 +284,8 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   // Checked again at the start: a next-up row may start long after its card, and its handoff may be gone by then.
   const handoff = join(projectSharedDir(app.dataDir, project.id), await handoffPath(app, project.id, r.handoff));
   const after = chainOf(app, lead, r);
-  const type = store.props.forTarget('minion', lead.id).type;
+  const leadProps = store.props.forTarget('minion', lead.id);
+  const type = leadProps.type;
   const message = [extra, `Your brief is the handoff ${handoff}: read it first and work from it.`, `You are a member of ${nm}'s cabal, row ${rowName(r)}. Its lead is ${overseerOf({ name: nm })}, #${lead.number}: read your cabal_board at each wake, set your note there at milestones, and send your asks there.`]
     .filter(Boolean)
     .join('\n\n');
@@ -252,7 +294,8 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
     message,
     model: r.model,
     effort: r.effort,
-    properties: { type: (Array.isArray(type) ? type[0] : type) || 'feature' },
+    // A member is its lead's person's ask too, as it is their assigned minion.
+    properties: { type: (Array.isArray(type) ? type[0] : type) || 'feature', ...(leadProps.requestedBy ? { requestedBy: leadProps.requestedBy } : {}) },
     parent: lead.number,
     cabal: lead.number,
     pick_reason: `on ${nm}'s approved roster (row ${rowName(r)})`,

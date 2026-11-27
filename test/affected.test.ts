@@ -38,9 +38,10 @@ const REPO_WIDE = [
   'worker-tla',
   'frontend-syntax',
   'css-has-cost',
+  'settings-pages.test.js',
   'help-words',
   'unit-thp',
-].map((n) => `test/${n}.test.ts`);
+].map((n) => (n.endsWith('.js') ? `test/${n}` : `test/${n}.test.ts`));
 
 test('globs: * stays in a folder, ** crosses them, **/ may be no folder', () => {
   assert.ok(globRe('public/**').test('public/ui/chat.js'));

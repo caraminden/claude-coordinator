@@ -26,8 +26,8 @@ type Link = {
   queue: Promise<unknown>;
   /** The pooled Windows tools (Build 7 M5): which PC the app picked, said on the session's first tool call. */ note?: string;
 };
-/** A machine's id, or the pooled Windows tools, whose machine the app picks when a session opens. */
-type MachineKey = number | typeof POOLED_WINDOWS;
+/** A machine's id, the pooled Windows tools, or a tool the server runs (src/server-tools.ts). */
+export type MachineKey = number | typeof POOLED_WINDOWS | `tool-${string}`;
 type Turn = { handshake: Rpc[]; link: Promise<Link> | null };
 
 // Claude's MCP handshake replayed to a session it never saw (or a new one): the machine's reply to it is dropped.

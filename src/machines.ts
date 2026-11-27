@@ -11,6 +11,7 @@
 // workspaces it found on that computer, by name, and serves only the ticked ones. An agent set up
 // before that (it posts no version) lends the MCP server on its own command line, and its workspace
 // tools while a person has the machine's workspace tools switched on.
+import { SERVER_TOOLS } from './server-tools.ts';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -59,8 +60,8 @@ export function vmsFound(store: Pick<Store, 'listMachines' | 'linkMachineVm'>, h
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
-/** Names the app's own MCP servers already use. */
-export const RESERVED_NAMES = new Set(['thread', 'coordinator', POOLED_WINDOWS]);
+/** Names the app's own MCP servers already use, the tools the server runs (src/server-tools.ts) among them. */
+export const RESERVED_NAMES = new Set(['thread', 'coordinator', POOLED_WINDOWS, ...SERVER_TOOLS.map((t) => t.name)]);
 /** A machine's workspace tools are the MCP server <name>-ws, so no machine may be named that way. */
 export const WS_SUFFIX = '-ws';
 
@@ -159,6 +160,12 @@ export type StatusFacts = {
   workerHere?: boolean;
   /** A CI runner host: its agent is the runner agent, or was at its last connection. */
   runners: boolean;
+  /** One PC's row (Build 7 M2b): its CI runner agents are connected beside its agent. */
+  runnersBeside?: boolean;
+  /** One PC's row that runs CI (its CI role came from runner agents), none of them connected now. */
+  ciDown?: boolean;
+  /** What is ticked to lend that its agent didn't find on that computer (#2194: an agent now on another PC). */
+  missing?: string[];
   alwaysOn: boolean;
   createdAt: number;
   lastSeenAt: number | null;
@@ -189,6 +196,11 @@ export function machineStatus(f: StatusFacts): MachineStatus {
     return s('asleep', f.alwaysOn ? 'Offline' : 'Asleep', null, seen);
   }
   if (f.runners) return s('ready', 'CI runner host, connected');
+  // A PC that runs CI may lend no tools: only something ticked that isn't there is wrong, and each line names the CI half too.
+  const ci = f.runnersBeside ? 'CI runners up · ' : f.ciDown ? 'CI runners not connected · ' : '';
+  if (f.managed && f.missing?.length) return s('fix', `${ci}Ticked but not on that computer: ${f.missing.join(', ')}`, 'tick');
+  if (!f.offers.length && f.ciDown) return s('fix', 'CI runners not connected');
+  if (!f.offers.length && f.runnersBeside) return s('ready', 'CI runner host, connected');
   if (!f.offers.length && f.managed) {
     return f.finds ? s('fix', 'Lends nothing: nothing is ticked', 'tick') : s('fix', 'Found nothing to lend on that computer', 'tick');
   }
@@ -196,13 +208,14 @@ export function machineStatus(f: StatusFacts): MachineStatus {
     return f.wsOff ? s('fix', 'Lends nothing: workspace tools are off', 'workspace_tools') : s('fix', 'Lends nothing: no MCP server or folder on that computer', 'token');
   }
   const results = f.offers.map((server) => f.check?.results.find((r) => r.server === server));
-  if (results.some((r) => !r)) return s('checking', 'Checking its tools…');
+  if (results.some((r) => !r)) return s('checking', `${ci}Checking its tools…`);
   const checked = { label: 'checked', at: f.check!.at } as const;
   const failed = results.find((r) => !r!.ok);
-  if (failed) return s('fix', `Its ${failed.server === 'ws' ? 'workspace ' : ''}tools didn't start: ${failed.error}`, 'check', checked);
-  if (!f.lent) return s('fix', 'Lent to no scheme', 'lend', checked);
+  if (failed) return s('fix', `${ci}Its ${failed.server === 'ws' ? 'workspace ' : ''}tools didn't start: ${failed.error}`, 'check', checked);
+  if (!f.lent) return s('fix', `${ci}Lent to no scheme`, 'lend', checked);
   const tools = results.reduce((n, r) => n + r!.tools.length, 0);
-  return s('ready', `Ready · ${tools} tool${tools === 1 ? '' : 's'}`, null, checked);
+  const count = `${tools} tool${tools === 1 ? '' : 's'}`;
+  return f.ciDown ? s('fix', `${ci}${count} ready`, null, checked) : s('ready', `${ci}Ready · ${count}`, null, checked);
 }
 
 export function storedCheck(m: Pick<Machine, 'last_check'>): StoredCheck | null {
@@ -214,6 +227,11 @@ export function storedCheck(m: Pick<Machine, 'last_check'>): StoredCheck | null 
 }
 
 const SSE_HEADERS = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' };
+
+/** The jobs an agent's info says it holds, or null when it names none. */
+function cleanKnown(v: unknown): { id: number; state: string }[] | null {
+  return Array.isArray(v) ? v.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : [])) : null;
+}
 
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -382,6 +400,9 @@ function lentServers(store: Pick<Store, 'machineLend'>, m: Machine, agent: Agent
   return [...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []), ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : [])];
 }
 
+/** What is ticked that a managed agent didn't find there: its MCP server, and workspaces by name. */
+const tickedMissing = (lend: Lend | null, agent: Agent): string[] => (lend ? [...(lend.server && !agent.found.some((f) => f.name === lend.server) ? [lend.server] : []), ...lend.workspaces.filter((w) => !agent.workspaces.some((a) => a.name === w))] : []);
+
 /** The MCP server a turn gets by name, as its tools are remembered (src/pool-machine.ts): null without one, or when the agent alone knows. */
 const lentName = (store: Pick<Store, 'machineLend'>, m: Machine, agent: Agent, servers: MachineServer[]) => (agent.managed && servers.includes('mcp') ? (storedLend(store, m)?.server ?? null) : null);
 
@@ -420,7 +441,7 @@ export class MachineRelay {
   private startedAt = Date.now();
   private shown = '';
   /** The jobs queue's hooks (#857), set once by the server: an agent's report of the jobs it knows, and an agent gone. */
-  jobHooks: { info(machine: Machine, known: { id: number; state: string }[] | null, since: number): void; offline(machineId: number): void } | null = null;
+  jobHooks: { info(machine: Machine, known: { id: number; state: string }[] | null, since: number, builds?: { id: number; state: string }[] | null): void; offline(machineId: number): void } | null = null;
 
   constructor(store: Store, onChange: () => void) {
     this.store = store;
@@ -491,6 +512,9 @@ export class MachineRelay {
       startedAt: this.startedAt,
       online: !!agent || runnersOnly,
       runners: runnersOnly,
+      runnersBeside: !!agent && runnersHere.length > 0,
+      ciDown: !!agent && !runnersHere.length && this.store.machineRoles(machine.id).some((r) => r.role === 'ci' && r.on && r.setup?.runner_agent),
+      missing: agent?.managed ? tickedMissing(storedLend(this.store, machine), agent) : [],
       alwaysOn: !!machine.always_on,
       createdAt: machine.created_at,
       lastSeenAt: worker?.seen ? Math.max(worker.seen, machine.last_seen_at ?? 0) : machine.last_seen_at,
@@ -582,8 +606,10 @@ export class MachineRelay {
     const agent = this.agents.get(machineId);
     const machine = this.store.getMachine(machineId);
     if (!agent || !machine) return false;
-    // With no jobs block (a typo broke it) it hears only of a job it said it holds (2MA10), never of a new one.
-    if (!storedOffer(machine) && (msg.type === 'job.start' || !agent.jobs?.has(msg.id))) return false;
+    // With no jobs block (a typo broke it) it hears only of a job it said it holds (2MA10), never of a new one. A build
+    // job (H2) needs no block: the Builds role is its go, and the agent's BuildRunner takes it.
+    const build = this.store.getMachineJob(msg.id)?.go === 'builds';
+    if (!build && !storedOffer(machine) && (msg.type === 'job.start' || !agent.jobs?.has(msg.id))) return false;
     agent.res.write(`data: ${JSON.stringify({ job: msg })}\n\n`);
     return true;
   }
@@ -753,6 +779,11 @@ export class MachineRelay {
     this.runnerAgents.get(`${machineId}:${os}`)?.res.write(`data: ${JSON.stringify({ plan })}\n\n`);
   }
 
+  /** The hostname its machine agent reports, while it is connected. */
+  agentHost(machineId: number): string | null {
+    return this.agents.get(machineId)?.host ?? null;
+  }
+
   /** A machine's CI runner agents connected now. */
   runnersOn(machineId: number): RunnerAgent[] {
     return [...this.runnerAgents].filter(([k]) => k.startsWith(`${machineId}:`)).map(([, r]) => r);
@@ -790,7 +821,7 @@ export class MachineRelay {
   }
 
   /** The agent says what it offers: its servers, and the workspaces in its config. False if it isn't connected. */
-  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown; programs?: unknown; config_file?: unknown; report?: unknown }): boolean {
+  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown; known_builds?: unknown; programs?: unknown; config_file?: unknown; report?: unknown }): boolean {
     const agent = this.agents.get(machine.id);
     // A runner agent posts no info: it offers no MCP server or workspaces.
     if (!agent) return false;
@@ -811,9 +842,11 @@ export class MachineRelay {
     // with no block (a typo in its config still leaves them running there); with no list at all nothing is taken as lost (MA1).
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
-    const known = Array.isArray(body.known_jobs) ? body.known_jobs.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : [])) : null;
-    agent.jobs = known && new Set(known.map((k) => k.id));
-    if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
+    const known = cleanKnown(body.known_jobs);
+    // Only the builds it holds (H2), when its GPU jobs folder can't be read yet: only build jobs are reconciled.
+    const builds = known ? null : cleanKnown(body.known_builds);
+    agent.jobs = (known ?? builds) && new Set((known ?? builds)!.map((k) => k.id));
+    if (offer || machine.jobs || known || builds) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since, builds);
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
       const prev = storedLend(this.store, machine);

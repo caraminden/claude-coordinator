@@ -15,6 +15,7 @@ import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend } from '../machines.ts';
 import { POOLED_WINDOWS } from '../machine-pick.ts';
+import { SERVER_TOOLS, serverToolKey, type ServerTool } from '../server-tools.ts';
 import type { Machine, Project, Ticket } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
 import { cleanCaps, isRole, ROLE_NAMES, ROLES, type Role, type RoleRow, roleCannot } from '../machine-roles.ts';
@@ -111,7 +112,7 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   // Switched on: its workspace tools get their first check now.
   if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
   // A job already running there goes on to its end (its minion hears of it); one that hasn't started never will (2MA9).
-  if (projects !== undefined) app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, 'gpu', j.project_id));
+  if (projects !== undefined) app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, j.go === 'builds' ? 'builds' : 'gpu', j.project_id));
   if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return app.machines.view(app.store.getMachine(machine.id)!);
@@ -169,7 +170,7 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
   app.machines.rolesChanged(machine.id);
   if (role === 'turns') app.runner.turnLine.pump();
   // A job already running goes on to its end; one that hasn't started never will (2MA9). A turn mid-call loses the tools now.
-  app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, 'gpu', j.project_id));
+  app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, j.go === 'builds' ? 'builds' : 'gpu', j.project_id));
   if (role === 'tools') app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return { roles: rolesView(roles), machine: app.machines.view(app.store.getMachine(machine.id)!) };
@@ -345,6 +346,7 @@ export const agentRoutes: Route[] = [
         await readJson(req, 20_000),
         Date.now(),
         (id) => !!app.machineCopies?.removing(id),
+        (id) => app.machines.agentHost(id),
       );
       await ownWrites(); // the panel's next look re-reads the row
       app.broadcast({ type: 'machines', machines: app.machines.list() });
@@ -591,6 +593,19 @@ async function postTurnSession({ req, res, app, caller, params }: Ctx) {
   if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
   const body = await readJson(req, 50_000_000);
   if (!app.machines.fromSession(params.session, { ticketId: caller!.id, projectId: caller!.project_id }, body.message)) throw new HttpError(503, 'That machine went offline', true);
+  return json(res, 202, {});
+}
+
+/** A minion's proxy opens a session to a tool the server runs (src/server-tools.ts, #2179): only in a scheme on its list. */
+function openToolSession({ res, app, caller }: Ctx, tool: ServerTool) {
+  const who = `#${caller!.number} in ${app.store.getProject(caller!.project_id)?.name ?? 'a scheme'}`;
+  if (!app.serverTools?.open(tool, caller!, who, res)) throw new HttpError(403, `${tool.name} isn't lent to this scheme`);
+}
+
+async function postToolSession({ req, res, app, caller, params }: Ctx) {
+  if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
+  const body = await readJson(req, 50_000_000);
+  if (!app.serverTools?.post(params.session, caller!.id, body.message)) throw new HttpError(503, 'That session ended', true);
   return json(res, 202, {});
 }
 
@@ -1030,6 +1045,11 @@ export const machineRoutes: Route[] = [
     ...turns,
     handler: (ctx) => openTurnSession(ctx, true),
   },
+  // Tools the server runs itself, through the same proxies (src/server-tools.ts, #2179).
+  ...SERVER_TOOLS.flatMap((tool): Route[] => [
+    { method: 'GET', path: `/api/machines/${serverToolKey(tool.name)}/session`, ...turns, handler: (ctx) => openToolSession(ctx, tool) },
+    { method: 'POST', path: `/api/machines/${serverToolKey(tool.name)}/session/:session`, ...turns, handler: postToolSession },
+  ]),
   {
     method: 'POST',
     path: '/api/machines/:machineId/session/:session',

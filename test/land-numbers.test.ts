@@ -4,7 +4,8 @@
 // number to take.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
@@ -300,4 +301,20 @@ test('a README Layout row two branches changed differently is refused before the
   assert.match(res.stderr, /smoke: it conflicts with main/);
   assert.match(res.stderr, /README\.md/);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});
+
+test("Citadel's own driver line passes git's %L, so a README clash it can't merge keeps the markers at the path's conflict-marker-size", () => {
+  const d = mkdtempSync(join(tmpdir(), 'marker-'));
+  try {
+    const [m, o, b] = ['m', 'o', 'b'].map((f) => join(d, f));
+    const mine = README.replace(ROW, `${ROW.slice(0, -2)} (mine) |`);
+    writeFileSync(m, README.replace(ROW, `${ROW.slice(0, -2)} (theirs) |`));
+    writeFileSync(o, README);
+    writeFileSync(b, mine);
+    const res = spawnSync('bash', [join(import.meta.dirname, '..', 'tools', 'land-core.sh'), '--merge', 'ours', o, m, b, 'README.md', '9'], { cwd: join(import.meta.dirname, '..'), encoding: 'utf8' });
+    assert.equal(res.status, 1, res.stderr);
+    assert.match(readFileSync(m, 'utf8'), /^<{9} /m);
+  } finally {
+    rmSync(d, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });

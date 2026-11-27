@@ -93,11 +93,15 @@ cpu_ticks() { local s f; read -r s </proc/$$/stat 2>/dev/null || { echo 0; retur
 us() { local t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}; echo "${t:-${SECONDS}000000}"; }
 here=${CITADEL_HEAVY_HERE:-}
 guess=${CITADEL_HEAVY_GUESS:-light}
+orig=("$@") back=()
 usage() {
   cat <<'U'
-usage: citadel-heavy [--here] [--heavy] <command> [args...]
+usage: citadel-heavy [--here] [--heavy] [--back <path>]... <command> [args...]
        citadel-heavy --long <command> [args...]
-  --here   run the command on this machine, never on the scheme's CI.
+  --here   run the command on this machine, never on the scheme's CI or another machine.
+  --back <path>  a file or folder the command makes that you need here (an APK, a binary), from this folder
+           (it must be inside the working copy); repeat it for more. The job then runs on a machine with the Builds role when one has room, and
+           these come back into your working copy.
   --heavy  guess a command with no past runs is heavy (it is light by default); its own runs decide after.
   --long   run the command on the scheme's CI only (not with --here); a long job.
   -h, --help  print this usage. Options go before the command: after it they belong to the command.
@@ -105,10 +109,13 @@ U
 }
 # Help is read before anything runs or waits, a nested call (CITADEL_HEAVY_HELD) included: it never starts a job (#1960).
 # Options are read up to the command; one citadel-heavy doesn't know is refused, not run as a command.
+skip=
 for a in "$@"; do
+  if [ -n "$skip" ]; then skip=; continue; fi
   case $a in
     -h|--help) usage; exit 0 ;;
     --here|--heavy|--long) ;;
+    --back) skip=1 ;;
     -*) say "unknown option $a"; usage >&2; exit 2 ;;
     *) break ;;
   esac
@@ -117,13 +124,14 @@ while :; do
   case ${1:-} in
     --here) here=1; shift ;;
     --heavy) guess=heavy; shift ;;
+    --back) [ $# -ge 2 ] || { say "--back takes a path"; exit 2; }; back+=("$2"); shift 2 ;;
     *) break ;;
   esac
 done
 if [ "${1:-}" = --long ]; then
   [ -z "$here" ] || { say "a long job runs on the scheme's CI only, so --long and --here (or CITADEL_HEAVY_HERE) don't go together"; exit 2; }
   shift
-  case ${1:-} in --here|--heavy|--long) say "--long takes the command next, not $1"; exit 2 ;; esac
+  case ${1:-} in --here|--heavy|--long|--back) say "--long takes the command next, not $1"; exit 2 ;; esac
   exec "$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts" --long "$@"
 fi
 [ $# -gt 0 ] || { usage >&2; exit 2; }
@@ -237,7 +245,46 @@ if [ -z "$first" ] && [ "${CITADEL_HEAVY_JUDGE:-}" != 0 ]; then
 fi
 
 ci=("$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts")
-if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
+hasci= slug=
+[ -n "$here$first" ] || ! slug=$("${ci[@]}" --repo) || hasci=1
+# Another machine (H2, Josh 2026-11-26: "By what comes back", "Perigee is the last machine"): a job with files to bring
+# back, or in a scheme with no CI, goes to a machine whose Builds role is lent to the scheme and has room
+# (tools/heavy-builds.ts); with none it waits in perigee's line, asking again each minute. --here and priority jobs never go.
+builds=("${ci[0]}" "$(dirname "$0")/heavy-builds.ts")
+backargs=()
+for b in "${back[@]}"; do backargs+=(--back "$b"); done
+elsewhere=
+if [ -z "$here$first${CITADEL_HEAVY_NO_ELSEWHERE:-}" ] && [ -n "${COORDINATOR_API:-}" ] && [ -f "${builds[1]}" ] && { [ ${#back[@]} -gt 0 ] || [ -z "$hasci" ]; }; then elsewhere=1; fi
+# Runs it there and exits with its status; returns only when nothing took it, for perigee's line.
+run_elsewhere() {
+  local fell ran on t1 all took status m
+  started=$(date +%s) t1=$(us) fell=$(mktemp) ran=$(mktemp) on=$(mktemp)
+  CITADEL_HEAVY_FALLBACK_FILE=$fell CITADEL_HEAVY_RAN_FILE=$ran CITADEL_HEAVY_ON_FILE=$on "${builds[@]}" "${backargs[@]}" -- "$@"
+  status=$?
+  [ -s "$fell" ] && status=fallback
+  all=$((($(us) - t1) / 1000000)) took=$(cat "$ran" 2>/dev/null) m=$(head -c 100 "$on" 2>/dev/null | tr -d '\t\n')
+  [[ $took =~ ^[0-9]{1,7}$ ]] && [ "$took" -le "$all" ] || took=$all
+  rm -f "$fell" "$ran" "$on"
+  [ "$status" != fallback ] || return 0
+  { mkdir -p "$dir" && printf '%s\t%s\t%s\ton:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "${m:-?}" "$((all - took))" "$took" "$status" >>"$dir/history"; } 2>/dev/null
+  exit "$status"
+}
+[ -z "$elsewhere" ] || run_elsewhere "$@"
+# Back from the line each minute: a machine with room now takes it, and its place in the line goes to the next.
+asked=$SECONDS
+try_elsewhere() {
+  [ -n "$elsewhere" ] && [ $((SECONDS - asked)) -ge "${CITADEL_HEAVY_REPLACE_S:-60}" ] || return 0
+  asked=$SECONDS
+  "${builds[@]}" --place-only -- "$@" || return 0
+  say "a machine with the Builds role has room now, so this leaves perigee's line"
+  [ -z "$marked" ] || rm -f "$dir/first"
+  exec 7>&- 6>&-
+  rm -f "$waitfile"
+  run_elsewhere "$@"
+  # It was taken before this one got there: back into the line, without asking again.
+  CITADEL_HEAVY_NO_ELSEWHERE=1 exec "$0" "${orig[@]}"
+}
+if [ -n "$hasci" ] && [ ${#back[@]} -eq 0 ]; then
   started=$(date +%s) t0=$(us)
   # One job per repo on CI at a time: this waits for the repo's turn, then holds fd 5 while its job runs there.
   # shortcut: this wait writes no wait-* file, so Citadel shows the minion as running, not waiting; add one if people ask.
@@ -273,6 +320,11 @@ if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
     # 75: handed over to Citadel for ships, so it took no time here.
     [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000 + all - took))" "$took" "$status" >>"$dir/history"; } 2>/dev/null
     exit "$status"
+  fi
+  # CI gave it back (no runner took it): a machine with the Builds role still comes before perigee's line.
+  if [ -z "$here$first${CITADEL_HEAVY_NO_ELSEWHERE:-}" ] && [ -n "${COORDINATOR_API:-}" ] && [ -f "${builds[1]}" ]; then
+    elsewhere=1
+    run_elsewhere "$@"
   fi
 fi
 
@@ -479,6 +531,7 @@ if ! flock -n 7; then
   until flock -w "$poll" 7; do
     touch "$waitfile" 2>/dev/null
     stuck
+    try_elsewhere "$@"
     if age=$(head_age "$headfile") && [ "$age" -ge "$head_stale" ]; then
       [ -n "$told_past" ] || say "the job next in line ($(next)) has not moved for $age s (stopped or frozen), so this one goes past it ($who: $what)"
       told_past=1
@@ -504,6 +557,7 @@ if [ -z "$got" ] && ! admit; then
     sleep "$poll"
     touch "$headfile" 2>/dev/null
     stuck
+    try_elsewhere "$@"
     if [ "$waiting" = "$said" ]; then touch "$waitfile" 2>/dev/null; else waiting_on "$waiting"; fi
     if [ "$waiting" != "$said" ] || [ $((SECONDS - told)) -ge 60 ]; then
       tell "still waiting after $(((SECONDS - since) / 60)) min: "

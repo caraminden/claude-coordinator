@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 import { after, test } from 'node:test';
+import { git, makeRepo } from './git.ts';
 import { procsUnder, tempRoot, until } from './helpers.ts';
 import { scriptEnv } from './script-env.ts';
 
@@ -24,9 +25,9 @@ function file(name: string, body: string): string {
 const noList = join(tmp, 'none.txt');
 writeFileSync(noList, '# no repo-wide files\n');
 
-function run(args: string[], always = noList, extraEnv: Record<string, string | undefined> = {}): Promise<{ code: number | null; out: string; ms: number }> {
+function run(args: string[], always = noList, extraEnv: Record<string, string | undefined> = {}, cwd = repo): Promise<{ code: number | null; out: string; ms: number }> {
   const start = Date.now();
-  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_TEST_FILES: '0', CITADEL_MEM_ROOM_MB: '100000', ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = scratch.spawn(bin, args, { cwd, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_TEST_FILES: '0', CITADEL_MEM_ROOM_MB: '100000', ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (b) => (out += b));
   child.stderr.on('data', (b) => (out += b));
@@ -115,16 +116,21 @@ test("a folder is refused: the full suite is the land gate's", async () => {
   assert.match(r.out, /land gate's job/);
 });
 
+// A repo of its own with nothing changed, holding only what --affected reads: the real checkout's `git status` is not
+// the test's to rely on (#2192: a file another test left in it made these two skip, which refuses a ship).
+function cleanRepo(): string {
+  const dir = makeRepo(join(tmp, 'clean-repo'));
+  for (const f of ['citadel-node', 'citadel-node.cjs', 'citadel-test-reporter.ts', 'affected.ts', 'affected-map.txt']) cpSync(join(repo, 'tools', f), join(dir, 'tools', f));
+  git(dir, 'add', '.');
+  git(dir, 'commit', '-qm', 'tools');
+  return dir;
+}
+let clean = '';
+const nothingChanged = (args: string[]) => run(args, noList, {}, (clean ||= cleanRepo()));
+
 // #1621: no files is --affected, with the repo-wide guards on top. Against HEAD so the answer doesn't depend on main.
-test('no files runs --affected, the same as asking for it', async (t) => {
-  const dirty = await new Promise<string>((res) => {
-    let o = '';
-    const c = spawn('git', ['status', '--porcelain'], { cwd: repo });
-    c.stdout.on('data', (b) => (o += b));
-    c.on('close', () => res(o));
-  });
-  if (dirty.trim()) return t.skip('the tree has changes, so --affected would run their tests');
-  const bare = await run(['--base', 'HEAD']);
+test('no files runs --affected, the same as asking for it', async () => {
+  const bare = await nothingChanged(['--base', 'HEAD']);
   assert.equal(bare.code, 0, bare.out);
   assert.match(bare.out, /affected: nothing has changed from HEAD/);
   assert.doesNotMatch(bare.out, /name the test files/);
@@ -170,15 +176,8 @@ test('the real list names files that exist', () => {
   }
 });
 
-test('--affected with nothing changed is not a failure: it says so and runs only the repo-wide list', async (t) => {
-  const dirty = await new Promise<string>((res) => {
-    let o = '';
-    const c = spawn('git', ['status', '--porcelain'], { cwd: repo });
-    c.stdout.on('data', (b) => (o += b));
-    c.on('close', () => res(o));
-  });
-  if (dirty.trim()) return t.skip('the tree has changes, so --affected would run their tests');
-  const r = await run(['--affected', '--base', 'HEAD']);
+test('--affected with nothing changed is not a failure: it says so and runs only the repo-wide list', async () => {
+  const r = await nothingChanged(['--affected', '--base', 'HEAD']);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /affected: nothing has changed from HEAD/);
   assert.match(r.out, /affected: nothing to run/);

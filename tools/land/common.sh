@@ -1,9 +1,8 @@
 # shellcheck shell=bash
-# Common helpers: the retro log, phase times, and every gh call counted (#2099 moved them from land.sh; say and refuse stay there, used before the parts load).
+# Common helpers: the retro log, phase times, and every gh call counted (#2099).
 # Sourced by tools/land.sh up front: definitions only (#2099).
 
-# A line in the scheme's retro log. Best effort: land.sh has no session id, so it goes in the day's land.md, and any
-# failure here is swallowed so the landing goes on as before.
+# A line in the scheme's retro log: day's land.md, best effort (failures swallowed).
 retro_log() (
   set +e
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
@@ -13,13 +12,11 @@ retro_log() (
   printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
 ) >/dev/null 2>&1 || true
 
-# Phase times for the timing line (#565): "<name> <epoch seconds> [<the phase a refusal from here on is at>]" lines
-# in $times, a file of this process's own, so the rebased copy (the exec in land.sh) keeps them. deploy.sh adds "queued"
-# (the restart queued or the front end reloaded) and "live" lines to it, and "landed" comes once its deploy went through.
+# Phase times for the timing line (#565): "<name> <epoch seconds> [<phase a refusal from here on is at>]" lines in $times,
+# a file of this process's own so the rebased copy keeps them; deploy.sh adds "queued" and "live".
 land_mark() { { echo "$1 $(date +%s) ${2:-}" >>"$times"; } 2>/dev/null || true; }
 
-# One line when the landing ends, however it ends (each EXIT trap in land.sh calls it; only the first call finds $times). Best
-# effort, like retro_log.
+# One line when the landing ends, however it ends (each EXIT trap calls it; only the first call finds $times). Best effort.
 land_timing() (
   set +eu
   [ -e "$times" ] || exit 0
@@ -49,26 +46,21 @@ land_timing() (
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[tests]}") · tests $(span "${t[tests]}" "${t[gate]}") · $out"
   else
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[ci]}") · ci-queue $ciq · ci-run $cir · fallback $fb · deploy $(span "${t[deploy]}" "${t[queued]}") · live $live${early_ahead:+ · ci early ${early_ahead}s} · $out"
-    # A landing that asked CI (#1722): its counted gh calls, and what was left of the login's hour as it began. No GitHub
-    # call here: this runs in the EXIT trap with the lock held (#553 M14).
+    # A landing that asked CI (#1722): its counted gh calls and the login's hour left. No GitHub call: EXIT trap, lock held.
     [ -z "${t[quota]}" ] || retro_log "github · $label · $(awk -v b="$branch" -v s="${t[start]:-0}" '$1 >= s && $2 == b' "$state/gh-calls" 2>/dev/null | wc -l) gh calls · left ${t[quota]} as CI began"
   fi
   rm -f "$times" ${claims_flag:+"$claims_flag"}
 ) >/dev/null 2>&1
 
-# Every gh call of any landing is counted in $state/gh-calls (epoch seconds, the landing's branch and the endpoint, no tokens), so
-# the next time the 5,000 an hour run out, `cut -d" " -f2 "$state/gh-calls" | sort | uniq -c` says which landing asked how often (#1655).
-# GitHub's rate_limit read costs none of them, so gh_quota's isn't counted (#1722).
-# At the top level: hub() and own-check.sh's own_hub call it in every copy, the rebased one and --into too.
+# Every gh call is counted in $state/gh-calls (epoch seconds, branch, endpoint; no tokens) so a rate-limit run-out can be traced (#1655).
+# Called at top level by hub() and own-check.sh's own_hub; gh_quota's rate_limit read is not counted (#1722).
 gh_count() { [ "$1" != gh ] || printf '%s %s %s\n' "$(date +%s)" "${branch:-?}" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
 
-# As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
+# As the box's own gh login (#182), whoever's turn this is; never holding the lock.
 hub() { gh_count "$@"; env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
 
-# What is left of the login's hour, as GitHub counts it (#1722): every login's calls draw on it, land.sh's, the server's and
-# each turn's alike, so each CI wait logs it and the next "API rate limit exceeded" has numbers. "<left>/<limit>, resets
-# in <n> min", or "unknown" when GitHub doesn't say. Free: GitHub doesn't count the rate_limit read itself, and gh_count,
-# which counts only a bare gh, leaves out this one through timeout 10 (a short wait when GitHub hangs).
+# What is left of the login's hour (#1722), logged at each CI wait: "<left>/<limit>, resets in <n> min", or "unknown".
+# Free: GitHub doesn't count the rate_limit read, and gh_count skips it (timeout 10).
 gh_quota() {
   local l='' m='' r=''
   read -r l m r < <(hub timeout 10 gh api rate_limit --jq '.resources.core | "\(.remaining) \(.limit) \(.reset)"' 2>/dev/null) || true

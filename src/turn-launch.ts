@@ -23,6 +23,7 @@ import { SCHEME_REFS_MATCHER, SIDE_GUARD_MATCHER, TRIPWIRE_MATCHER, WORDING_MATC
 import { offSkills, skillDenies } from './skills.ts';
 import { CHECKOUT, machineServers, type TurnMachine } from './prompts.ts';
 import { POOLED_WINDOWS } from './machine-pick.ts';
+import { serverToolKey, type ServerTool } from './server-tools.ts';
 import { advisedModel } from '../public/model-table.js';
 import { ZONE } from './pacific.ts';
 import { thpProps } from './unit-thp.ts';
@@ -149,8 +150,26 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
   const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
   if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
-  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), citadel-test, a few test files with only the failures shown (#641), who-touches, which other worktrees change a path (#1159), who-uses, who imports or calls a file or symbol and which tests reach it (#1781), and stale-docs, which finds dead paths in instruction files and stale shared-folder files (#1164), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it; citadel-build-cache shows and clears the shared build caches (#1153); heavy-ci.ts sits beside citadel-heavy, which sends heavy jobs to the scheme's CI through it (#1160), as mem-room does, which tells it how much memory is free (#1340, #1863); citadel-callgrind counts a program's instructions despite perigee's AVX-512 glibc (#1397).
-  for (const tool of ['citadel-android', 'citadel-wait', 'citadel-job', 'citadel-job.ts', 'citadel-job-run.sh', 'citadel-dev-copy', 'ci-failures', 'citadel-test', 'who-touches', 'who-uses', 'stale-docs', 'citadel-android-mic.ts', 'citadel-build-cache', 'heavy-ci.ts', 'mem-room', 'citadel-callgrind']) {
+  // citadel-android, the shared headless emulator (#381), citadel-wait, the one blocking command a turn waits with (#481), citadel-dev-copy, a dev copy of Citadel from the turn's worktree (#482), ci-failures, what failed in a CI run (#644), citadel-test, a few test files with only the failures shown (#641), who-touches, which other worktrees change a path (#1159), who-uses, who imports or calls a file or symbol and which tests reach it (#1781), and stale-docs, which finds dead paths in instruction files and stale shared-folder files (#1164), on every turn's PATH the same way; citadel-android-mic.ts, the emulator's synthetic mic (#843), sits beside citadel-android, which runs it; citadel-build-cache shows and clears the shared build caches (#1153); heavy-ci.ts sits beside citadel-heavy, which sends heavy jobs to the scheme's CI through it (#1160), and heavy-builds.ts, to a machine's Builds role (H2), as mem-room does, which tells it how much memory is free (#1340, #1863); citadel-callgrind counts a program's instructions despite perigee's AVX-512 glibc (#1397).
+  for (const tool of [
+    'citadel-android',
+    'citadel-wait',
+    'citadel-job',
+    'citadel-job.ts',
+    'citadel-job-run.sh',
+    'citadel-dev-copy',
+    'ci-failures',
+    'citadel-test',
+    'who-touches',
+    'who-uses',
+    'stale-docs',
+    'citadel-android-mic.ts',
+    'citadel-build-cache',
+    'heavy-ci.ts',
+    'heavy-builds.ts',
+    'mem-room',
+    'citadel-callgrind',
+  ]) {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }
@@ -175,6 +194,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   if (existsSync(REPLAY_BIN)) cpSync(REPLAY_BIN, join(MCP_DIR, 'bin', 'citadel-replay'));
   // citadel-where (#1122): "show me where" links; its shim runs the pinned show-parts.ts beside it.
   pinnedCopy('show-parts.ts');
+  // A cloud turn's driver (#2153), run in claude's place by the turn's wrapper.
+  pinnedCopy('cloud-turn.mjs');
   const WHERE_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-where');
   if (existsSync(WHERE_BIN)) cpSync(WHERE_BIN, join(MCP_DIR, 'bin', 'citadel-where'));
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
@@ -672,6 +693,8 @@ export interface TurnFacts {
   folders: { files: string | null; shared: string | null; memory: string | null; tmp: string | null; tickets: string; data: string; openTickets?: string[] };
   /** The machines lending it their tools. */
   machines: TurnMachine[];
+  /** The tools the server runs for its scheme (src/server-tools.ts, #2179). */
+  serverTools?: ServerTool[];
   model: string | null;
   effort: string | null;
   /** Set when it runs on Codex: the thread it resumes, or null for a new one. */
@@ -819,6 +842,9 @@ export async function launchPlan(facts: TurnFacts): Promise<LaunchPlan> {
   for (const m of machines) {
     for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
   }
+  // Tools the server runs itself (src/server-tools.ts, #2179), through the same proxy as a machine's, keyed tool-<name>.
+  const tools = facts.serverTools ?? [];
+  for (const t of tools) servers[t.name] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), serverToolKey(t.name), t.name, 'mcp'] };
   // The pooled Windows tools (Build 7 M5): the app picks the machine when the session opens (routes/machines.ts). A machine
   // named `windows` before the name was kept for them keeps its own tools there.
   const windows = machines.some((m) => m.screen) && !servers[POOLED_WINDOWS];
@@ -833,6 +859,7 @@ export async function launchPlan(facts: TurnFacts): Promise<LaunchPlan> {
     const http: Record<string, object> = { [role]: pool('/mcp', role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) };
     if (windows) http[POOLED_WINDOWS] = pool(`/machine/${POOLED_WINDOWS}/ws?name=${POOLED_WINDOWS}`);
     for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}${s.server === 'mcp' && m.lent ? `&lent=${encodeURIComponent(m.lent)}` : ''}`);
+    for (const t of tools) http[t.name] = pool(`/machine/${serverToolKey(t.name)}/mcp?name=${encodeURIComponent(t.name)}`);
     files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: http }) });
     files.push({ name: 'mcp-stdio.json', text: JSON.stringify({ mcpServers: servers }) });
   } else {

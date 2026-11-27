@@ -61,6 +61,13 @@ src/mcp.ts: test/boot-check.test.ts
 src/mcp-minions.ts: test/boot-check.test.ts
 src/routes/files.ts: test/boot-check.test.ts
 src/turn-launch.ts: test/boot-check.test.ts
+# runner.ts's split-out parts (#2045): the launch is built by the boot check, and view() reads the other four, which
+# the list routes count and the reader threads' stand-in Runner (src/reader.ts) must carry (test/front.test.ts caught a miss).
+src/launch-build.ts: test/boot-check.test.ts
+src/turn-refs.ts: test/list-reads.test.ts test/front.test.ts
+src/turn-progress.ts: test/list-reads.test.ts test/front.test.ts
+src/turn-spend.ts: test/list-reads.test.ts test/front.test.ts
+src/plan-usage.ts: test/list-reads.test.ts test/front.test.ts
 src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).

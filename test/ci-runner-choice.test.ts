@@ -124,7 +124,7 @@ test("a ship's run burns in its new and changed tests before the full suite, in 
 // desktop never runs two checks at once. Its numbers aren't kept as a land's.
 test("a ship's own check runs only on the check runner, in its own group, and keeps no land numbers", () => {
   const yml = read('.github/workflows/tests.yml');
-  assert.match(yml, /branches: \['land\/\*\*', 'check\/\*\*', 'early\/\*\*'\]/);
+  assert.match(yml, /branches: \['land\/\*\*', 'check\/\*\*', 'early\/\*\*', 'pre\/\*\*'\]/);
   assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/check\/'\) && 'citadel-check'/);
   assert.match(runsOn(yml), /runs-on: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/check\/'\) && fromJSON\('\["self-hosted", "citadel-ci-linux-check"\]'\) \|\|/, 'before the hosted-runner switch, so it never goes to GitHub');
   assert.match(yml, /if: \$\{\{ success\(\) && !startsWith\(github\.ref, 'refs\/heads\/check\/'\) && !startsWith\(github\.ref, 'refs\/heads\/early\/'\) \}\}/);
@@ -182,7 +182,7 @@ test('a flake proof does not make the desktop busy for an own check or the early
 // the nightly and land.sh's fallback (where=desktop) run on the desktop as before, and CI_RUNNER=desktop sends ships back.
 test("a ship's push runs 20 shards on GitHub's runners, and everything else the desktop job", () => {
   const yml = read('.github/workflows/tests.yml');
-  const onGh = "inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop')";
+  const onGh = "inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') || startsWith(github.ref, 'refs/heads/pre/')";
   const times = yml.slice(yml.indexOf('\n  times:\n'), yml.indexOf('\n  shard:\n'));
   const shard = yml.slice(yml.indexOf('\n  shard:\n'));
   assert.ok(times.includes(`    if: \${{ ${onGh} }}\n    runs-on: ubuntu-latest\n`), "only a ship's push, or a run asked for there");
@@ -206,4 +206,16 @@ test("a ship's push runs 20 shards on GitHub's runners, and everything else the 
   for (const step of ['- name: the full suite', '- *rerun', '- *systemd', '- *devdeps']) assert.ok(shard.includes(step), step);
   assert.match(yml, /where:\n(.*\n)*? +options: \[desktop, github\]\n +default: desktop/, "a dispatch with no where (land.sh's fallback, a person's) runs on the desktop");
   assert.match(landText(), /'inputs\[where\]=desktop'/);
+});
+
+// #2210 (Cara, 2026-11-27: "Run any minion that is waiting for a "Ship it" through the full suite on github"): a pre-ship
+// push (src/pre-ship.ts) runs the same 20 shards with the burn-in, whatever CI_RUNNER says, in a group per branch where a
+// newer push cancels the older run.
+test('a pre-ship push runs the 20 shards on GitHub with the burn-in, the newest only', () => {
+  const yml = read('.github/workflows/tests.yml');
+  assert.match(yml, /group: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/pre\/'\) && format\('citadel-pre-\{0\}', github\.ref_name\) \|\|/, 'before the per-run GitHub group');
+  assert.match(yml, /cancel-in-progress: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/pre\/'\) \}\}/);
+  const shard = yml.slice(yml.indexOf('\n  shard:\n'));
+  assert.match(shard, /name: burn in new and changed tests\n +if: \$\{\{ strategy\.job-index == 0 && \(.*startsWith\(github\.ref, 'refs\/heads\/pre\/'\)\) \}\}/);
+  assert.match(shard, /CITADEL_TEST_SHARD_HEAD: .*'refs\/heads\/pre\/'\)\) && '60'/);
 });

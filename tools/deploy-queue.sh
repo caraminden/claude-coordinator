@@ -419,7 +419,7 @@ ci_busy() {
   local st n
   [ ! -e "$state/hold-off" ] || return 1
   for st in in_progress queued; do
-    n=$("$1" gh api "repos/$2/actions/runs?status=$st&per_page=100" --jq '[.workflow_runs[] | select((.path | test("/(tests|citadel-heavy)\\.yml")) and (.status != "queued" or (.created_at | fromdateiso8601) > now - 3600))] | length' 2>/dev/null) || n=''
+    n=$("$1" gh api "repos/$2/actions/runs?status=$st&per_page=100" --jq '[.workflow_runs[] | select((.path | test("/(tests|citadel-heavy)\\.yml")) and (.head_branch | test("^pre/") | not) and (.status != "queued" or (.created_at | fromdateiso8601) > now - 3600))] | length' 2>/dev/null) || n=''
     [[ ! $n =~ ^[1-9][0-9]*$ ]] || return 0
   done
   return 1

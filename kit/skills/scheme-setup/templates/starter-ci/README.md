@@ -45,3 +45,14 @@ CI has no real data to start on, and Citadel does restart, so fix the app. A rep
 No `CI_RUNNER` switch, unlike `references/push-guard.md`'s `runs-on`: GitHub's runners cost Actions minutes and need
 a person's yes (`citadel:ci-store`), and a nightly can wait.
 While Cara's PC is off or she is logged off, runs wait in GitHub's queue.
+
+## The full suite before the ship go (public repos)
+
+While a minion waits for a person's go to ship (an open ship card, or a "Ship it" reply), Citadel pushes its branch,
+squashed onto main, to `pre/<branch>` (and main as `pre-base/<branch>`), and tells the minion how that push's runs ended:
+a red wakes it (#2210, Citadel's `src/pre-ship.ts`). It does so only for a public repo whose scheme doesn't set GitHub's
+runners to never, and only once a workflow on main names `pre/**`. To take it, add `'pre/**'` to a workflow's
+`push: branches:` and give that push GitHub's own runners, which cost nothing on a public repo, so it never takes a
+lent PC from ships: `runs-on: ${{ startsWith(github.ref, 'refs/heads/pre/') && 'ubuntu-latest' || fromJSON('["self-hosted", "<scheme-slug>-ci-linux"]') }}`.
+A new commit pushes over the last, so put `cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/pre/') }}` in its
+`concurrency`. A private repo gets none: GitHub's runners spend Actions minutes there.

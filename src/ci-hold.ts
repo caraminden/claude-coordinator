@@ -212,6 +212,7 @@ export function kindOf(run: GhRun, own: boolean): HoldKind | 'ship' | null {
   if (/^land\//.test(b)) return 'ship';
   if (/^check\//.test(b)) return 'check';
   if (/^early\//.test(b)) return 'early';
+  if (/^pre\//.test(b)) return null; // a pre-ship run is on GitHub's runners, and src/pre-ship.ts yields it to ships (#2210)
   return b === 'main' ? 'main' : 'suite';
 }
 

@@ -162,6 +162,7 @@ ci_gate() {
     online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || { [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }; }
     [[ $online =~ ^[0-9]+$ ]] || [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
     [ -n "$ci_gh" ] || [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
+    [ -z "$ci_gh" ] || : >"$state/pre-yield.$$"
     ci_pushed=$tip ci_pushed_at=$SECONDS # before the push: a stop can end it once GitHub has it
     # Forced on purpose: land/ and land-base/ branches are scratch only this script writes. Atomic: the burn-in needs the base.
     hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; ci_pushed_at=''; return 2; }

@@ -11,12 +11,16 @@
 # ship's run in line too when its commit comes out the same.
 # The early next train (#1568, land.sh's early_next): while a train's run goes, land.sh pushes the train that comes next,
 # stacked on it, to early/<branch>; a ship's run in every step, niced, on a ship runner, and never on GitHub's own runners.
+# A pre-ship run (#2210, src/pre-ship.ts): while a minion waits for a person's go to ship, Citadel pushes its branch
+# squashed onto main to pre/<branch> (main beside it as pre-base/<branch>, for the burn-in). It is the 20 shards of a ship's
+# run on GitHub's runners, whatever CI_RUNNER says, and never the desktop's; a newer push cancels the older run. A ship's
+# run goes first: Citadel cancels pre-ship runs as land.sh pushes a ship's run (its pre-yield mark), and reruns them after.
 # A land that touches no pipeline file leaves out the pipeline's own test files (#581, tools/pipeline-files.txt), so the
 # whole suite also runs on main every night, pipeline tests included.
 name: tests
 on:
   push:
-    branches: ['land/**', 'check/**', 'early/**']
+    branches: ['land/**', 'check/**', 'early/**', 'pre/**']
   schedule:
     - cron: '30 13 * * *' # the quietest hour for lands: no commit reached main at 13:xx UTC in the 14 days to 2026-11-12
   workflow_dispatch:
@@ -39,8 +43,9 @@ on:
 # on a ship runner").
 concurrency:
   # A run on GitHub's runners is a group of its own: the shards take the account's slots, not the desktop (#2209).
-  group: ${{ (inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop')) && format('citadel-github-{0}', github.run_id) || startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || (startsWith(github.ref, 'refs/heads/check/') && 'citadel-check' || (startsWith(github.ref, 'refs/heads/early/') && format('citadel-early-{0}', github.ref_name) || 'citadel-off-land')) }}
-  cancel-in-progress: false
+  group: ${{ startsWith(github.ref, 'refs/heads/pre/') && format('citadel-pre-{0}', github.ref_name) || (inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') || startsWith(github.ref, 'refs/heads/pre/')) && format('citadel-github-{0}', github.run_id) || startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || (startsWith(github.ref, 'refs/heads/check/') && 'citadel-check' || (startsWith(github.ref, 'refs/heads/early/') && format('citadel-early-{0}', github.ref_name) || 'citadel-off-land')) }}
+  # A pre-ship run's branch is a newer commit's once Citadel pushes again: the older run is no use (#2210).
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/pre/') }}
 
 permissions:
   contents: read
@@ -49,7 +54,7 @@ permissions:
 jobs:
   test:
     # On the desktop: everything but a ship's push and a run started with where=github, which the shards below take.
-    if: ${{ !(inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop')) }}
+    if: ${{ !(inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') || startsWith(github.ref, 'refs/heads/pre/')) }}
     # A land's run takes either Linux runner; any other (the nightly, one started by hand) only the one with the side
     # label, as flake-proof.yml's proofs do, so the other is always free for a land (#1240). A ship's own
     # check takes only the runner with the check label, never GitHub's own nor a land's. An
@@ -279,7 +284,7 @@ jobs:
   # One times file and one main for every shard, so all 20 work out the same split: each restoring the cache itself, one
   # starting after ci-cache.yml saved new times (or seeing a newer main, which changes the tier) would leave files unrun.
   times:
-    if: ${{ inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') }}
+    if: ${{ inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') || startsWith(github.ref, 'refs/heads/pre/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -341,7 +346,7 @@ jobs:
           cache: restore
       - *systemd
       - name: burn in new and changed tests
-        if: ${{ strategy.job-index == 0 && (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/')) }}
+        if: ${{ strategy.job-index == 0 && (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/') || startsWith(github.ref, 'refs/heads/pre/')) }}
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
         run: |
@@ -356,7 +361,7 @@ jobs:
         env:
           CITADEL_TEST_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
           # The burn-in's usual time on shard 0 (a starting value; it is capped at land.sh's CI_BURN).
-          CITADEL_TEST_SHARD_HEAD: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/')) && '60' || '0' }}
+          CITADEL_TEST_SHARD_HEAD: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') || startsWith(github.ref, 'refs/heads/early/') || startsWith(github.ref, 'refs/heads/pre/')) && '60' || '0' }}
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
         run: |
           rc=0

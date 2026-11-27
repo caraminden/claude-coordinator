@@ -1,6 +1,6 @@
 // A ship's run on GitHub's runners and its desktop fallback (#2209, ADR 0043), beside the land tests' parts (#2208).
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { git, setup, ci, write } from './land-fixture.ts';
@@ -20,6 +20,8 @@ test("a ship's run on GitHub needs no desktop runner online, and lands on its gr
   assert.match(res.stderr, /the full suite on GitHub's runners, 20 ways .*CI passed on \w+ in \d+s \(https:\/\/ci\/7\)/s);
   assert.doesNotMatch(c.calls(), /dispatches|cancel/);
   assert.equal(c.localRuns(), 0);
+  // #2210: before its push the landing marks itself (pre-yield.<its pid>), so Citadel's pre-ship runs give it GitHub's slots.
+  assert.equal(readdirSync(join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy')).filter((f) => /^pre-yield\.\d+$/.test(f)).length, 1);
 });
 
 test("a ship's run on GitHub with shards not started, or failed before any test, goes to the desktop and lands on its run", () => {

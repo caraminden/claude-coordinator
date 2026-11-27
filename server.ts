@@ -5,7 +5,7 @@ import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { thrown } from './src/thrown.ts';
 import { fireArmed, fireLive, fireProof } from './src/armed-handoff.ts';
@@ -148,8 +148,9 @@ import { GrowthStop } from './src/growth-stop.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, taskmastersFor, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
+import { git as preGit, PreShip, TICK_MS as PRE_TICK_MS, yieldingIn } from './src/pre-ship.ts';
 import { Incidents, readCiRuns, readDeploys, readJournal, writeReport } from './src/incidents.ts';
-import { ghGet, ghHelpers, ghTally } from './src/gh-api.ts';
+import { ghGet, ghHelpers, ghPost, ghTally } from './src/gh-api.ts';
 import { ciEvidence } from './src/flake-evidence.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
@@ -2323,6 +2324,26 @@ const ciHold = new CiHold({
   publish: (state) => writeHold(join(DATA_DIR, 'projects', '.heavy'), state),
 });
 runner.heldLine = (id) => ciHold.noteFor(id);
+// The full suite on GitHub while a minion waits for its go to ship (#2210, src/pre-ship.ts): every scheme with a public repo.
+const preShip = new PreShip({
+  store,
+  as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
+  get: ghGet,
+  post: ghPost,
+  git: preGit,
+  send: (id, text, fyi) => runner.send(id, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
+  yielding: () => (deployState ? yieldingIn(deployState) : Promise.resolve(false)),
+});
+if (!BOOT_CHECK && !PREVIEW) {
+  every('pre-ship runs', PRE_TICK_MS, () => preShip.tick(), 2 * 60_000);
+  // A landing's mark, the moment it pushes a ship's run: the pre-ship runs give it GitHub's slots now, not at the next tick.
+  if (deployState)
+    try {
+      watch(deployState, (_e, name) => void (String(name ?? '').startsWith('pre-yield.') && preShip.tick().catch((e) => console.error('Pre-ship:', e)))).unref();
+    } catch (err) {
+      console.error(`Pre-ship: can't watch ${deployState}:`, err);
+    }
+}
 // After the first read of the long jobs: before it, a held one would look free to start again in the day.
 if (!BOOT_CHECK && !PREVIEW) void longJobs.refresh().then(() => ciHold.start());
 // One Peek build while Citadel ships (#1902; Josh, 2026-11-25, "Yes, use labels"). His pick is for Peek alone.

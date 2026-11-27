@@ -171,11 +171,12 @@ export function machinesFor<T extends Pick<Machine, 'owner_id'>>(who: Pick<Sessi
  * switched on and its list of schemes has this one (#438's one list, a list per role since M1), whoever owns the
  * scheme. A person's own (#306, Josh: "any scheme they are in ... can use their machine to do stuff on their behalf")
  * also needs its owner to have asked for the turn and to be in the scheme; for CI runners, which no turn asks for,
- * only to be in it. A CI runner host lends nothing but its runners (ci-runner.ts mayFetch).
+ * only to be in it. A CI runner host lends nothing but its runners (ci-runner.ts mayFetch). Builds (H2) are as CI runners:
+ * a build runs no Claude, so another member's minion's build may run there (spec section 3, "Who runs on whose machine").
  */
 export function lendsRole(store: Store, machine: Machine, role: Role, project: Project, askers: readonly number[] = []): boolean {
   if (!store.roleGrants(machine.id, role, project.id)) return false;
-  if (role === 'ci') return machine.owner_id === null || ownerAsked(store, machine.owner_id, [machine.owner_id], project.id);
+  if (role === 'ci' || role === 'builds') return machine.owner_id === null || ownerAsked(store, machine.owner_id, [machine.owner_id], project.id);
   if (storedCheck(machine)?.runners) return false;
   return machine.owner_id === null || ownerAsked(store, machine.owner_id, askers, project.id);
 }

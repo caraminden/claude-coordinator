@@ -105,6 +105,15 @@ export function balance(i: BalanceIn): Plan {
   return { workers, runners, ci, start, late, why: whys.length ? whys.join('; ') : null };
 }
 
+/**
+ * Threads free there now for one more heavy job (H2's place()): what the ships, every heavy job held or waiting, the CI
+ * that fits and the turns running leave. Never below 0.
+ */
+export function freeThreads(i: BalanceIn): number {
+  const heavy = i.heavy.reduce((n, h) => n + h.size, 0);
+  return Math.max(0, i.threads - (i.ship ? COST.ship : 0) - heavy - balance(i).ci * COST.ci - i.running * COST.turn);
+}
+
 /** A machine as the ranking sees it: its owner's order (null: none), and the room it has now. */
 export interface Rankable {
   id: number;
@@ -176,6 +185,19 @@ export class MachineBalancer {
     let gone = false;
     for (const key of [...(jobs?.keys() ?? [])]) if (key.startsWith(prefix) && key !== keep) gone = jobs!.delete(key) || gone;
     if (gone) this.d.changed([machineId]);
+  }
+
+  /**
+   * Threads free there for one more heavy job (freeThreads), and no more than `cap` less what jobs whose key starts with
+   * `prefix` hold or wait for there (a role's own threads cap); null where the balancer has no say.
+   */
+  free(machineId: number, cap: number | null = null, prefix = ''): number | null {
+    const input = this.d.input(machineId);
+    if (!input || input.threads <= 0) return null;
+    const heavy = [...(this.heavy.get(machineId)?.values() ?? [])];
+    const free = freeThreads({ ...input, heavy, now: this.d.now() });
+    if (cap === null) return free;
+    return Math.max(0, Math.min(free, cap - heavy.filter((h) => h.key.startsWith(prefix)).reduce((n, h) => n + h.size, 0)));
   }
 
   /** The plan as the last step (or a heavy job's ask) left it: what the line reads, many times a second, without asking the store. */

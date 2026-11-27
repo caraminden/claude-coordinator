@@ -161,7 +161,8 @@ export interface MachineJob {
   run_when: 'hours' | 'now';
   reason: string;
   state: string;
-  go: 'hours' | 'now' | 'always' | 'standing' | null;
+  /** 'builds': a build job (H2), whose go is its machine's Builds role switch. */
+  go: 'hours' | 'now' | 'always' | 'standing' | 'builds' | null;
   go_by: string | null;
   /** Why it is paused: 'owner' (a person's click), 'hours' (job hours ended) or 'machine' (the whole-machine Pause). */
   paused_by: string | null;

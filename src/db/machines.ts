@@ -118,8 +118,8 @@ export const machineQueries = {
     this.db.prepare(`UPDATE machine_jobs SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   },
 
-  /** Jobs matching one of these: a machine's, a minion's, a contraption's, or in some states; newest first, at most `limit`. */
-  machineJobs(this: Store, where: { machine?: number; ticket?: number; contraption?: number; states?: readonly string[]; endedBefore?: number }, limit = 100): MachineJob[] {
+  /** Jobs matching all of these: a machine's, a minion's, a contraption's, a scheme's, of a kind, or in some states; newest first, at most `limit`. */
+  machineJobs(this: Store, where: { machine?: number; ticket?: number; contraption?: number; project?: number; kindName?: string; states?: readonly string[]; endedBefore?: number }, limit = 100): MachineJob[] {
     const conds: string[] = [];
     const args: (number | string)[] = [];
     if (where.machine !== undefined) {
@@ -133,6 +133,14 @@ export const machineQueries = {
     if (where.contraption !== undefined) {
       conds.push('contraption_id = ?');
       args.push(where.contraption);
+    }
+    if (where.project !== undefined) {
+      conds.push('project_id = ?');
+      args.push(where.project);
+    }
+    if (where.kindName !== undefined) {
+      conds.push('kind_name = ?');
+      args.push(where.kindName);
     }
     if (where.states) {
       conds.push(`state IN (${where.states.map(() => '?').join(', ')})`);

@@ -56,7 +56,7 @@ import { MachinePools } from './src/machine-pools.ts';
 import { MachineCopies, wireCopies } from './src/machine-away.ts';
 import { awayTick, machineLink, workerInfo } from './src/machine-turn.ts';
 import { imageFile, WorkerJoin } from './src/worker-join.ts';
-import { RoleSetups } from './src/role-setup.ts';
+import { RoleSetups, shippedImages } from './src/role-setup.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
@@ -100,6 +100,7 @@ import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
+import { BuildPlacer, buildsReady } from './src/heavy-builds.ts';
 import type { GhJob } from './src/gh-bodies.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
@@ -773,10 +774,34 @@ const sendRunnerPlans = () => {
 };
 if (!BOOT_CHECK) every('runner plans', MachineBalancer.TICK_MS, sendRunnerPlans);
 machines.agentUrl = MACHINES_URL?.origin ?? null;
+// Where citadel-heavy sends a heavy job (H2, src/heavy-builds.ts): a Builds role's container job, the scheme's CI, or perigee's line.
+const buildsRole = (id: number) => store.machineRoles(id).find((r) => r.role === 'builds');
+const buildPlacer = new BuildPlacer({
+  machines: () =>
+    store
+      .listMachines()
+      .filter((m) => m.owner_id !== null && machines.isOnline(m.id))
+      .map((m) => ({ id: m.id, name: m.name, priority: m.priority ?? null })),
+  builds: (id, projectId) => {
+    const m = store.getMachine(id);
+    const p = store.getProject(projectId);
+    const role = buildsRole(id);
+    return !!(m && p && role?.on && lendsRole(store, m, 'builds', p) && buildsReady(role.setup, shippedImages()));
+  },
+  ci: (id, projectId) => {
+    const m = store.getMachine(id);
+    const p = store.getProject(projectId);
+    return !!(m && p && lendsCi(store, m, p));
+  },
+  free: (id, how) => (how === 'ci' ? balancer.free(id) : balancer.free(id, buildsRole(id)?.caps.threads ?? null, 'build:')),
+  warm: (projectId, kind) => store.machineJobs({ project: projectId, kindName: kind, states: ['done'] }, 1)[0]?.machine_id ?? null,
+});
 const jobs = new MachineJobs({
   store,
   broadcast,
   room: (id, job) => balancer.ask(id, job),
+  heavyDone: (key) => balancer.done(key),
+  buildsMay: (job) => buildPlacer.buildsMay(job.machine_id, job.project_id),
   freed: (id, keep) => balancer.release(id, 'gpu:', keep),
   send: (id, msg) => machines.sendJob(id, msg),
   online: (id) => machines.isOnline(id),
@@ -2664,6 +2689,7 @@ const app: App = {
   ciHold,
   runnerCap,
   heavy: heavyPlacer,
+  buildPlacer,
   chunked,
   claude: claudeLink,
   codex: codexLink,

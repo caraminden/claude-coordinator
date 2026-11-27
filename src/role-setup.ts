@@ -123,7 +123,7 @@ export function buildImages(text: string | Error = SHIPPED_IMAGES): BuildImages 
 }
 
 /** The images this release pulls, or none while they aren't all published. */
-const shippedImages = (text?: string) => {
+export const shippedImages = (text?: string) => {
   try {
     return buildImages(text).images;
   } catch {

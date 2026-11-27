@@ -509,7 +509,8 @@ export async function collect(out: string): Promise<number> {
   } catch {
     result = null;
     // Not pushed at all is a session that never delivered; pushed but unreadable is a blip to try again.
-    const pushed = spawnSync('git', ['-C', h.cwd, 'ls-remote', '--exit-code', 'origin', `refs/heads/${h.branch}`], { stdio: 'ignore', timeout: 60_000 }).status === 0;
+    // ls-remote --exit-code says 2 only for a missing ref; any other failure (a network blip) means we can't tell, so treat it as pushed.
+    const pushed = spawnSync('git', ['-C', h.cwd, 'ls-remote', '--exit-code', 'origin', `refs/heads/${h.branch}`], { stdio: 'ignore', timeout: 60_000 }).status !== 2;
     if (pushed) {
       missing.length = 0;
       try {

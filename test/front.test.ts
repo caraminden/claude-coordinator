@@ -207,6 +207,17 @@ const readyAgain = () => logged().split('Reader thread started again').length - 
 // A hung reader's other requests go to another after 1 s, the reader replaced after 3 s (2 s and 10 s live).
 const KNOBS = { CITADEL_READER_ANSWER_MS: '1000', CITADEL_READER_STUCK_MS: '3000' };
 // The minion page too: it waits for main's first pass over every minion (src/reader-live.ts).
+/**
+ * A reader's answer to `path`. The front thread passes a read on to the main thread while a snapshot change main posted
+ * is still on its way to it (caughtUp, src/front.ts; main posts one whenever the Status inputs or a minion's view moved),
+ * so any one ask may be main's, more often on a loaded machine (#2251): that ask is asked again. A route no reader
+ * answers still fails, at the deadline.
+ */
+const fromReader = (s: Booted, path: string, cookie = s.cookie) =>
+  until(`a reader to answer ${path}`, async () => {
+    const got = await get(s, path, cookie);
+    return got.reader && got;
+  });
 const readerAnswers = (s: Booted) => until('a reader answers', async () => (await get(s, PATHS[0], s.cookie)).reader && (await get(s, `/api/tickets/${M1.id}`, s.cookie)).reader);
 
 test('through the front thread, readers give every caller the same answers and refusals as the main thread', { timeout: 120_000 }, async () => {
@@ -334,21 +345,24 @@ test('a reader that dies mid-request is replaced, and its request answered by th
   assert.equal(died.reader, false);
   assert.equal(died.body, viaMain[`cara ${PATHS[0]}`].body);
   await until('the dead reader is replaced', () => readyAgain() === 1);
-  for (let i = 0; i < 6; i++) assert.ok((await get(srv, PATHS[0], srv.cookie)).reader);
+  for (let i = 0; i < 6; i++) await fromReader(srv, PATHS[0]);
 });
 
 test('a reader that hangs: its request gets a 503 the page retries, the other reader answers, and the thread is replaced', { timeout: 60_000 }, async () => {
   await readerAnswers(srv);
   const hanging = get(srv, `${PATHS[0]}?citadel-test-reader=hang`, srv.cookie, true);
   // Meanwhile the other reader answers, those asked of the hung one first included.
-  for (const got of await Promise.all(Array.from({ length: 4 }, () => get(srv, PATHS[0], srv.cookie)))) assert.ok(got.reader);
+  await Promise.all(Array.from({ length: 4 }, () => fromReader(srv, PATHS[0])));
   const hung = await hanging;
   assert.equal(hung.status, 503);
   assert.equal(JSON.parse(hung.body).retry, true);
   // Two replacements so far: the dead one's, then this one's.
   await until('the hung reader is replaced', () => /Reader thread silent for \d+ s: replacing it/.test(logged()) && readyAgain() === 2);
-  const all = await Promise.all(Array.from({ length: 8 }, () => get(srv, PATHS[0], srv.cookie)));
-  assert.ok(all.every((g) => g.reader && g.status === 200));
+  const all = await Promise.all(Array.from({ length: 8 }, () => fromReader(srv, PATHS[0])));
+  assert.deepEqual(
+    all.map((g) => g.status),
+    all.map(() => 200),
+  );
 });
 
 /** One raw answer (no fetch, which would undo the gzip): status, the headers both threads should agree on, the bytes. */
@@ -604,7 +618,7 @@ test("a running turn, a queued message and an approval card: the readers' list, 
     for (const [who, cookie] of Object.entries(callers))
       for (const p of [`/api/tickets/${t.id}`, `/api/projects/${project.id}`, `/api/projects/${project.id}?tickets=open`, '/api/status']) {
         // The reader first, so its copy can't have been refreshed by main's answer to the same page.
-        const reader = await page(p, false, cookie);
+        const reader = await fromReader(live, p, cookie);
         const main = await page(p, true, cookie);
         assert.ok(reader.reader && !main.reader, `${who} ${p}`);
         assert.equal(reader.status, main.status, `${who} ${p}`);

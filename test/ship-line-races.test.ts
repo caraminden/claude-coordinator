@@ -282,8 +282,19 @@ for (const [what, line, want] of [
     // The server's flock says so when the lock is taken, before it waits for it.
     command(join(dir, 'held'), 'flock', `"$REAL" -n "$3" true || : >${dir}/waiting`);
     renameSync(join(dir, 'held', 'bin'), join(dir, 'server'));
-    const p = spawnSync('bash', ['-c', `source ${queueSh}\nqueue_lock ${dir} ticket/1-c`], { env: { PATH: `${bin}:${PATH}`, HOME: dir, QUEUE_KEEP: join(q, '0000000001'), DEPLOY_QUEUE_POLL: '0.1' }, encoding: 'utf8', timeout: 60_000 });
-    assert.equal(p.status, 0, p.stderr);
+    // Another ship holds the deploy lock until the drag is written, then #2 and #3 leave: #1 stays a waiter in the line
+    // meanwhile, as a real retry does. Without it #1 took the lock and left as its script ended, and a drag that read
+    // the line again a moment late (a loaded box) no longer found it (#2178).
+    const holder = spawn('flock', [join(dir, 'lock'), 'bash', '-c', `: >${dir}/locked; until [ -e ${dir}/done ] || [ -e ${dir}/release ]; do read -rt 0.05 <> <(:) || :; done; rm -f ${q}/000000000[23]`], { env: { PATH }, stdio: 'ignore' });
+    const released = new Promise((ok) => holder.on('close', ok));
+    try {
+      await until('the deploy lock held', () => existsSync(join(dir, 'locked')));
+      const p = spawnSync('bash', ['-c', `source ${queueSh}\nqueue_lock ${dir} ticket/1-c`], { env: { PATH: `${bin}:${PATH}`, HOME: dir, QUEUE_KEEP: join(q, '0000000001'), DEPLOY_QUEUE_POLL: '0.1' }, encoding: 'utf8', timeout: 60_000 });
+      assert.equal(p.status, 0, p.stderr);
+    } finally {
+      writeFileSync(join(dir, 'release'), '');
+      await released;
+    }
     assert.ok(existsSync(join(dir, 'dragged')), 'the drag came between the read of the order and its write');
     await until('the drag written', () => existsSync(join(dir, 'done')));
     assert.equal(readFileSync(join(dir, 'done'), 'utf8').trim(), '0', readFileSync(join(dir, 'drag.log'), 'utf8'));

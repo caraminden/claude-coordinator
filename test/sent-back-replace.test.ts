@@ -28,10 +28,13 @@ const tool = (name: string) => ({ type: 'assistant', message: { content: [{ type
 const feedback = (text = `Stop hook feedback:\n${SENT_BACK}\n- /x/a.png: no such file`) => ({ type: 'user', message: { content: [{ type: 'text', text }] } });
 const result = { type: 'result', subtype: 'success', is_error: false, result: 'done' };
 
+/** One stream line through the runner, with the callback that gets the turn's result text. */
+const turn1 = (id: number, l: object, onResult: (r: string | null) => void) => (runner as any).handleLine(id, JSON.stringify(l), (_e: boolean, r: string | null) => onResult(r));
+
 /** Run one turn's stream lines through the runner, then each reply's text and whether it was replaced. */
 function turn(lines: object[]) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-  for (const l of lines) (runner as any).handleLine(t.id, JSON.stringify(l), () => {});
+  for (const l of lines) turn1(t.id, l, () => {});
   return store
     .listEvents(t.id)
     .filter((e) => e.kind === 'claude')
@@ -102,7 +105,7 @@ test("only this turn counts: an earlier turn's send-back is left as it was", () 
 test("a bare KEEP never shows as the minion's latest line, its result or the reply a card carries", () => {
   const t = store.createTicket({ project_id: project.id, title: 'K', permission_mode: 'default', created_by: 'Cara' });
   const results: (string | null)[] = [];
-  const run = (l: object) => (runner as any).handleLine(t.id, JSON.stringify(l), (_e: boolean, r: string | null) => results.push(r));
+  const run = (l: object) => turn1(t.id, l, (r) => results.push(r));
   for (const l of [say('Done: ![x](a.png)'), feedback(), say('KEEP'), { ...result, result: 'KEEP' }]) run(l);
   assert.equal(store.getTicket(t.id)!.last_activity, 'Done: ![x](a.png)');
   assert.equal(results.at(-1), 'Done: ![x](a.png)');

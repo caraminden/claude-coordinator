@@ -206,6 +206,30 @@ test('Stop ends the helper and the cloud job: the deleted source branch makes th
   assert.equal(cloudBranches(), '', 'no result pushed after the stop');
 });
 
+test("a Stop that lands between the runner's check and its beat push leaves no beat branch (#2230)", async () => {
+  const ref = 'cloud/src-t7-race';
+  const beat = 'cloud/t7-race-beat';
+  git(work, 'push', '-q', 'origin', `${head}:refs/heads/${ref}`);
+  // A `git` that deletes the source branch the moment the runner pushes its beat: the helper's Stop, at the worst moment.
+  const bin = join(root, 'race-bin');
+  mkdirSync(bin, { recursive: true });
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  writeFileSync(
+    join(bin, 'git'),
+    `#!/bin/sh
+case "$*" in *"push -q -f origin"*"refs/heads/${beat}"*) ${realGit} --git-dir=${origin} update-ref -d refs/heads/${ref};; esac
+exec ${realGit} "$@"
+`,
+  );
+  chmodSync(join(bin, 'git'), 0o755);
+  const dir = join(root, 'race-run');
+  const arg = Buffer.from(JSON.stringify({ ref, branch: 'cloud/t7-race', beat, cmd: 'sleep 60', minutes: 5, files: [] })).toString('base64');
+  mkdirSync(dir, { recursive: true });
+  execFileSync(process.execPath, [join(import.meta.dirname, '../src/cloud-run-vm.mjs'), '--child', arg], { cwd: work, env: { ...env, PATH: `${bin}:${process.env.PATH}`, CITADEL_RUN_DIR: dir, CITADEL_RUN_BEAT_MS: '300' }, timeout: 20_000 });
+  assert.equal(readFileSync(join(dir, 'code'), 'utf8'), 'stopped');
+  assert.equal(cloudBranches(), '', 'the beat pushed after the delete is deleted again, and nothing else is left');
+});
+
 test('parse: the two kinds, and a bad call is a usage error', () => {
   const r = parse(['run', '--minutes', '40', '--files', 'a,b', '--', 'npm', 'test']);
   assert.equal(typeof r, 'object');

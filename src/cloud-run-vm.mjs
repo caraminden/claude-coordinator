@@ -118,20 +118,28 @@ async function child(job) {
     } catch {}
   }, job.minutes * 60_000);
   let stopped = false;
+  const gone = () => spawnSync('git', ['ls-remote', '--exit-code', 'origin', `refs/heads/${job.ref}`], { stdio: 'ignore' }).status === 2;
+  const stop = () => {
+    stopped = true;
+    try {
+      if (p.pid) process.kill(-p.pid, 'SIGKILL');
+    } catch {}
+  };
   const beat = async () => {
     // ls-remote's exit 2: the branch is gone, so the helper was stopped (a network error is 128, and the job goes on).
-    if (spawnSync('git', ['ls-remote', '--exit-code', 'origin', `refs/heads/${job.ref}`], { stdio: 'ignore' }).status === 2) {
-      stopped = true;
-      try {
-        if (p.pid) process.kill(-p.pid, 'SIGKILL');
-      } catch {}
-      return;
-    }
+    if (gone()) return stop();
     try {
       const last = tail(3).split('\n').at(-1)?.slice(0, 300) ?? '';
       push(commitOf({}, `${SKIP} ${minutes()} min${last ? `: ${last}` : ''}`), job.beat);
     } catch (err) {
       writeFileSync(join(DIR, 'beat-error'), String(err));
+      return;
+    }
+    // The helper's Stop deletes the source, then the beat branch: a Stop between the check above and this push would
+    // leave the beat branch on origin for good, so look again and delete it ourselves (#2230).
+    if (gone()) {
+      spawnSync('git', ['push', '-q', 'origin', '--delete', job.beat], { stdio: 'ignore' });
+      stop();
     }
   };
   await beat();

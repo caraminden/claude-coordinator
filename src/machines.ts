@@ -212,7 +212,7 @@ interface Agent {
   /** It posts v 2 (#439): it reports what it found and serves what is ticked. Otherwise it lends what its own command line says. */
   managed: boolean;
   found: FoundServer[];
-  workspaces: { name: string }[];
+  workspaces: AgentWorkspace[];
   problems: string[];
   /** The programs its owner lets marked minions start there (Build 7 T8, src/host-reach.ts), and the config file that lists them. */
   programs?: HostProgram[];
@@ -325,8 +325,11 @@ function within<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
+/** A workspace an agent reports, as cleanWorkspaces keeps it. */
+type AgentWorkspace = { name: string; path: string; read: string[]; git_sync: boolean; tasks: { name: string; run: string[]; about: string; args: boolean }[] };
+
 /** The workspaces an agent reports, cut down to what the Machines page shows. */
-function cleanWorkspaces(v: unknown): { name: string }[] {
+function cleanWorkspaces(v: unknown): AgentWorkspace[] {
   const text = (x: unknown, max = 500) => (typeof x === 'string' ? x.slice(0, max) : '');
   const list = (x: unknown) => (Array.isArray(x) ? x.slice(0, 50) : []);
   return list(v).map((w: { name?: unknown; path?: unknown; read?: unknown; git_sync?: unknown; tasks?: unknown } | null) => ({
@@ -544,9 +547,9 @@ export class MachineRelay {
     };
   }
 
-  /** Proof of a GPU beside the agent's report: its jobs block lends one. */
+  /** Proof of a GPU beside the agent's report, as the card takes it (public/machine-role-cards.js hasGpu): its jobs block lends one, or a workspace has a run-gpu task. */
   gpuFound(machine: Machine): boolean {
-    return !!storedOffer(machine)?.gpu;
+    return !!storedOffer(machine)?.gpu || !!this.agents.get(machine.id)?.workspaces.some((w) => w.tasks.some((t) => t.name === 'run-gpu'));
   }
 
   /** Send a job message (#857) to a machine's agent, if one with a jobs block is connected. */

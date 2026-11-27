@@ -374,15 +374,21 @@ test("the admin command for the agent's elevate script is the same fixed line wh
   assert.deepEqual(cleanAdmin({ needs: ['runner', 'wsl'] }), { needs: ['wsl'], pm: null });
   assert.equal(cleanAdmin({ needs: ['worker'], pm: 'apt' }), null);
   assert.equal(cleanAdmin({ needs: ['podman'], pm: 'apt', script: true })?.script, undefined, 'script only with a need the script holds');
+  // Where the agent wrote it, so an administrator signed in as someone else runs the right file; only a plain path.
+  assert.equal(adminCommand({ needs: ['runner'], pm: null, script: true, at: 'C:\\Users\\Kid Name\\coordinator-agent\\elevate.ps1' })!.command, "powershell -NoProfile -ExecutionPolicy Bypass -File 'C:\\Users\\Kid Name\\coordinator-agent\\elevate.ps1'");
+  assert.equal(adminCommand({ needs: ['worker'], pm: null, script: true, at: '/home/kid/coordinator-agent/elevate.sh' })!.command, "sudo bash '/home/kid/coordinator-agent/elevate.sh'");
+  for (const at of ["C:\\Users\\x'; calc; '\\coordinator-agent\\elevate.ps1", 'C:\\Users\\$env:X\\coordinator-agent\\elevate.ps1', 'C:\\Users\\kid\\elsewhere.ps1', '/home/kid/coordinator-agent/elevate.sh'])
+    assert.equal(adminCommand({ needs: ['runner'], pm: null, script: true, at })!.command, win.command, `${at} is refused for the fixed line`);
+  assert.equal(cleanAdmin({ needs: ['podman'], pm: 'apt', at: '/home/kid/coordinator-agent/elevate.sh' })?.at, undefined, 'a path only with a script');
 });
 
 test('CI runners with an agent that does Set up: it writes the elevate script, then Citadel waits for the runner agent and tests it', async () => {
   const t = world();
-  t.store.setMachineRole(t.machine().id, 'turns', { on: true });
+  t.store.setMachineRole(t.machine().id, 'turns', { on: true, caps: { workers: 2 } });
   t.store.setMachineRole(t.machine().id, 'ci', { on: true });
   const run = t.setups.start(t.machine(), 'ci', 'setup', t.josh);
   assert.equal(run.worker_install, false, 'no install lines to paste by hand');
-  assert.deepEqual(t.sent, [{ setup: { id: run.id, role: 'ci', kind: 'setup', also: ['turns'] } }], 'Minion turns is on with no worker yet: its needs go in the same script');
+  assert.deepEqual(t.sent, [{ setup: { id: run.id, role: 'ci', kind: 'setup', turns_caps: { workers: 2 }, also: ['turns'] } }], 'Minion turns is on with no worker yet: its needs go in the same script, with its caps');
   t.setups.heard(t.machine(), { id: run.id, admin: { needs: ['runner', 'wsl'], script: true }, step: { n: 0, text: 'Run the administrator command below on this PC', state: 'running' } });
   t.setups.heard(t.machine(), { id: run.id, done: { ok: true } });
   let kept = t.run('ci')!;

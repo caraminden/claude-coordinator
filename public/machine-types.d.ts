@@ -232,6 +232,8 @@ export interface SetupAdmin {
   pm: string | null;
   /** The agent wrote its elevate script with these needs (public/role-setup.js SCRIPT_NEEDS): the card shows the one line that runs it. */
   script?: true;
+  /** Where it wrote the script, when that is a plain path (public/role-setup.js ELEVATE_AT): the card's line names it. */
+  at?: string;
 }
 
 /** A role's Set up or Test run, in the role's setup.run (src/role-setup.ts Run). */

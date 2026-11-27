@@ -35,7 +35,7 @@ export const MAX_SHOT = 20 * 1024 * 1024;
 export type SetupRole = 'tools' | 'screen' | 'turns' | 'gpu' | 'ci' | 'builds';
 export type StepState = 'waiting' | 'running' | 'ok' | 'fail';
 export type Step = { text: string; state: StepState };
-export type Admin = { needs: string[]; pm: string | null; script?: true };
+export type Admin = { needs: string[]; pm: string | null; script?: true; at?: string };
 /** One Set up or Test, as the card shows it. */
 export type Run = {
   id: string;
@@ -226,7 +226,9 @@ export class RoleSetups {
       const caps = this.d.store.machineRoles(machine.id).find((r) => r.role === role)?.caps ?? {};
       const { ticks: _, ...own } = caps;
       const also = this.waitingOnAdmin(machine.id, role);
-      if (!this.d.send(machine.id, { setup: { id: run.id, role, kind, ...(role === 'turns' || role === 'builds' ? { caps: own } : {}), ...(images ? { builds: images } : {}), ...(also.length ? { also } : {}) } })) this.finish(a, false, `${machine.name} went offline`);
+      // The elevate script installs a waiting worker too, with Minion turns' own caps.
+      const turnsCaps = also.includes('turns') ? (({ ticks: _t, ...c }) => c)(this.d.store.machineRoles(machine.id).find((r) => r.role === 'turns')?.caps ?? {}) : null;
+      if (!this.d.send(machine.id, { setup: { id: run.id, role, kind, ...(role === 'turns' || role === 'builds' ? { caps: own } : {}), ...(turnsCaps ? { turns_caps: turnsCaps } : {}), ...(images ? { builds: images } : {}), ...(also.length ? { also } : {}) } })) this.finish(a, false, `${machine.name} went offline`);
     } else if (phase === 'test' && role === 'ci') void this.ciTest(a, machine);
     else if (phase === 'test') this.startTest(a, machine);
     else if (role === 'tools') void this.tools(a);

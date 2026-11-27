@@ -516,3 +516,13 @@ test("a followed job ends on its report's head, not on box words its own output 
   assert.match(next.wakes[0].text, /no longer lent to this scheme, so the job left the line/);
   assert.equal(next.relay.minionStopped(next.minion.id), 0, 'nothing left to stop');
 });
+
+test("gpuFound (One kind of machine H2): a workspace's run-gpu task counts as a GPU, as the card's check does", () => {
+  const { relay, box } = world();
+  assert.equal(relay.gpuFound(box), false, 'no agent, no jobs block');
+  relay.connectAgent(box, stream(), { host: 'h', command: '', managed: true });
+  relay.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run', run: ['run.ps1'] }] }] });
+  assert.equal(relay.gpuFound(box), false);
+  relay.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run-gpu', run: ['gpu.ps1'] }] }] });
+  assert.equal(relay.gpuFound(box), true);
+});

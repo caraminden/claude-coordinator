@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { elevateScript, exec, runSetup } from '../public/role-setup-agent.mjs';
+import { elevateScript, exec, HELD, runSetup } from '../public/role-setup-agent.mjs';
+import { SCRIPT_NEEDS } from '../public/role-setup.js';
 
 // The agent's side of a role's Set up and Test (Build 7 M4): what it runs, what it writes and what it says back.
 const dir = mkdtempSync(join(tmpdir(), 'role-setup-agent-'));
@@ -196,7 +197,7 @@ test('Builds on Windows runs podman in citadel-workers as its worker user, and s
   assert.ok(!missing.ran.some((r) => r.includes('pull')));
   const noWsl = pc({ platform: 'win32', role: 'builds', ask: BUILDS, answers: {} });
   await noWsl.run();
-  assert.deepEqual(noWsl.said.find((s) => s.admin)?.admin, { needs: ['wsl'], script: true }, 'WSL goes in the one elevate script');
+  assert.deepEqual(noWsl.said.find((s) => s.admin)?.admin, { needs: ['wsl'], pm: null, script: true, at: join(noWsl.ctx.home, 'coordinator-agent', 'elevate.ps1') }, 'WSL goes in the one elevate script');
   assert.match(readFileSync(join(noWsl.ctx.home, 'coordinator-agent', 'elevate.ps1'), 'utf8'), /wsl\.exe --install --no-distribution/);
 });
 
@@ -218,23 +219,26 @@ test('Builds with no podman on Linux asks for it as fixed words; Test pulls noth
 test('CI Set up on Windows writes elevate.ps1 with the runner agent and, when Minion turns waits on it, WSL; the card gets the needs only', async () => {
   const p = pc({ platform: 'win32', role: 'ci', ask: { also: ['turns'] }, answers: {} });
   await p.run();
-  assert.deepEqual(p.said.find((s) => s.admin)?.admin, { needs: ['runner', 'wsl'], script: true });
+  assert.deepEqual(p.said.find((s) => s.admin)?.admin, { needs: ['runner', 'wsl'], pm: null, script: true, at: join(p.ctx.home, 'coordinator-agent', 'elevate.ps1') });
   assert.equal(p.done().ok, true, 'Citadel waits for the runner agent from here');
   const text = readFileSync(join(p.ctx.home, 'coordinator-agent', 'elevate.ps1'), 'utf8');
   assert.match(text, /IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/, 'it stops unless elevated');
   assert.match(text, /iwr|Invoke-WebRequest "\$u\/ci-runner\/install-runner-agent\.ps1"/);
   assert.ok(text.includes(`-CitadelUrl $u -MachineToken '${TOKEN}'`));
   assert.ok(text.indexOf('install-runner-agent') < text.indexOf('wsl.exe --install'), 'WSL last: it asks for a restart');
+  assert.ok(text.indexOf('winget.exe install --id Git.Git') < text.indexOf('install-runner-agent'), 'Git for Windows first, when bash.exe is missing: the runner installer refuses without it');
+  assert.match(text, /\$failed \+= 'the CI runner agent'/, 'a failed runner install still lets WSL install');
+  assert.match(text, /if \(\$failed\) \{[^\n]*exit 1 \}/, 'and the script ends with 1 when anything failed');
   // WSL already there: not in the script.
   const has = pc({ platform: 'win32', role: 'ci', ask: { also: ['builds'] }, answers: { 'wsl.exe --version': ok('WSL version: 2.3.26.0') } });
   await has.run();
-  assert.deepEqual(has.said.find((s) => s.admin)?.admin, { needs: ['runner'], script: true });
+  assert.deepEqual(has.said.find((s) => s.admin)?.admin, { needs: ['runner'], pm: null, script: true, at: join(has.ctx.home, 'coordinator-agent', 'elevate.ps1') });
 });
 
 test("Linux: CI and Minion turns write one elevate.sh, root's only, with the worker's caps; as root the agent runs it itself", async () => {
   const p = pc({ role: 'turns', ask: { also: ['ci'], caps: { workers: 4, threads: 8, memory_gb: 'lots' } } });
   await p.run();
-  assert.deepEqual(p.said.find((s) => s.admin)?.admin, { needs: ['runner-linux', 'worker'], script: true });
+  assert.deepEqual(p.said.find((s) => s.admin)?.admin, { needs: ['runner-linux', 'worker'], pm: null, script: true, at: join(p.ctx.home, 'coordinator-agent', 'elevate.sh') });
   assert.equal(p.done().ok, true);
   const file = join(p.ctx.home, 'coordinator-agent', 'elevate.sh');
   const text = readFileSync(file, 'utf8');
@@ -268,4 +272,25 @@ test("the script holds only the agent's own address and a real token; a Mac's CI
   const mac = pc({ platform: 'darwin', role: 'ci' });
   await mac.run();
   assert.match(mac.done().why!, /Windows or Linux/);
+});
+
+test("Linux: Builds' podman and a waiting helper are one paste, package line first; CI's Set up carries Minion turns' caps", async () => {
+  assert.deepEqual([...HELD].sort(), [...SCRIPT_NEEDS].sort(), 'the fetched agent file and the page agree on what the script holds');
+  // Builds pressed with CI waiting: podman's line, then the script with the runner agent.
+  const b = pc({ role: 'builds', ask: { ...BUILDS, also: ['ci'] }, answers: { 'apt-get --version': ok('apt 2.7') } });
+  await b.run();
+  assert.deepEqual(b.said.find((s) => s.admin)?.admin, { needs: ['podman', 'runner-linux'], pm: 'apt', script: true, at: join(b.ctx.home, 'coordinator-agent', 'elevate.sh') });
+  assert.equal(b.done().ok, false, 'Set up again once it ran');
+  const script = readFileSync(join(b.ctx.home, 'coordinator-agent', 'elevate.sh'), 'utf8');
+  assert.match(script, /install-runner-agent\.sh/);
+  assert.ok(!script.includes('podman'), "podman is the card's own line, not the script's");
+  // CI pressed with Builds waiting and no podman: the same paste.
+  const c = pc({ role: 'ci', ask: { also: ['builds', 'turns'], turns_caps: { workers: 3 } }, answers: { 'dnf --version': ok('dnf 4') } });
+  await c.run();
+  assert.deepEqual(c.said.find((s) => s.admin)?.admin, { needs: ['podman', 'runner-linux', 'worker'], pm: 'dnf', script: true, at: join(c.ctx.home, 'coordinator-agent', 'elevate.sh') });
+  assert.match(readFileSync(join(c.ctx.home, 'coordinator-agent', 'elevate.sh'), 'utf8'), /bash "\$f" "\$u" --workers 3\n/, "the worker gets Minion turns' caps, sent along");
+  // Nothing else waiting: podman alone, as before.
+  const alone = pc({ role: 'builds', ask: BUILDS, answers: { 'apt-get --version': ok('apt 2.7') } });
+  await alone.run();
+  assert.deepEqual(alone.said.find((s) => s.admin)?.admin, { needs: ['podman'], pm: 'apt' });
 });

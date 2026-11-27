@@ -168,11 +168,7 @@ async function gpu(ctx, say, end) {
   const listed = cdi.code === 0 && /nvidia\.com\/gpu=all/.test(cdi.out);
   await say(n++, listed ? 'Containers can find the GPU (nvidia.com/gpu=all)' : "Containers can't find the GPU yet: its device list (CDI) isn't written", listed ? 'ok' : 'fail');
   if (!listed) needs.push('cdi');
-  if (needs.length) {
-    const pm = (await ctx.exec('apt-get', ['--version'])).code === 0 ? 'apt' : (await ctx.exec('dnf', ['--version'])).code === 0 ? 'dnf' : null;
-    await ctx.post({ id: ctx.ask.id, admin: { needs, pm } });
-    return end(false, { why: 'Run the administrator command on the card on this PC, then press Set up again.' });
-  }
+  if (needs.length) return askPackages(ctx, say, n, needs, end);
   if (ctx.ask.kind === 'setup') {
     const { raw, why } = readConfig(ctx.configFile);
     if (!raw) return say(n, why, 'fail').then(() => end(false, { why }));
@@ -268,9 +264,7 @@ async function builds(ctx, say, end) {
   if (version.code !== 0) {
     await say(n, win ? `podman doesn't answer in ${BUILDS_DISTRO}: ${tail(version.out) || 'no output'}` : 'podman is not installed', 'fail');
     if (win) return end(false, { why: `podman in ${BUILDS_DISTRO} is missing or broken: press Set up on Minion turns to put it back, then press this Set up again.` });
-    const pm = (await ctx.exec('apt-get', ['--version'])).code === 0 ? 'apt' : (await ctx.exec('dnf', ['--version'])).code === 0 ? 'dnf' : null;
-    await ctx.post({ id: ctx.ask.id, admin: { needs: ['podman'], pm } });
-    return end(false, { why: 'Run the administrator command on the card on this PC, then press Set up again.' });
+    return askPackages(ctx, say, n, ['podman'], end);
   }
   await say(n++, `${first(version.out)}${win ? ` in ${BUILDS_DISTRO}` : ''}`, 'ok');
   const sizes = [];
@@ -375,6 +369,10 @@ async function ci(ctx, say, end) {
 
 // ---------- the elevate script: one administrator paste for every role (Cara, 2026-11-26, "One agent, helpers hidden") ----------
 
+/** The needs the elevate script itself holds: public/role-setup.js SCRIPT_NEEDS (this file is fetched on its own, so it can't import it). */
+export const HELD = ['wsl', 'runner', 'runner-linux', 'worker'];
+/** The Linux package manager the card's package lines are for, or null (neither apt nor dnf). */
+const packageManager = async (ctx) => ((await ctx.exec('apt-get', ['--version'])).code === 0 ? 'apt' : (await ctx.exec('dnf', ['--version'])).code === 0 ? 'dnf' : null);
 const TOKEN = /^ccm_\d+_[\w-]{43}$/;
 const ORIGIN = /^https?:\/\/[A-Za-z0-9.:-]+$/;
 /** The worker's caps as install-worker.sh takes them. */
@@ -394,9 +392,11 @@ export async function scriptNeeds(ctx, own) {
   } else {
     if (also.includes('ci')) needs.add('runner-linux');
     if (also.includes('turns')) needs.add('worker');
+    // Builds' podman goes in the same paste, as the card's package line before the script.
+    if (also.includes('builds') && !needs.has('podman') && (await ctx.exec('podman', ['--version'])).code !== 0) needs.add('podman');
   }
-  // The runner agent first, WSL last: its install asks for a restart.
-  const order = ['runner', 'runner-linux', 'worker', 'wsl'];
+  // Packages first (the card's lines before the script), then the runner agent, WSL last: its install asks for a restart.
+  const order = ['podman', 'nvidia-toolkit', 'cdi', 'runner', 'runner-linux', 'worker', 'wsl'];
   return [...needs].sort((a, b) => order.indexOf(a) - order.indexOf(b));
 }
 
@@ -419,17 +419,31 @@ export function elevateScript({ platform, appUrl, token, needs, caps = {}, at = 
       "if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'elevate: open PowerShell with Run as administrator and run this again.' -ForegroundColor Red; exit 1 }",
       `$u = '${u}'`,
     ];
+    // Each install goes ahead even when one before it failed, so one paste does all it can; it ends with 1 if any did.
+    lines.push('$failed = @()');
     if (needs.includes('runner'))
       lines.push(
+        // The runners' bash steps need Git for Windows, which a fresh PC lacks: the runner installer refuses without it.
+        "if (-not (Test-Path 'C:\\Program Files\\Git\\bin\\bash.exe')) {",
+        "  Write-Host 'elevate: installing Git for Windows (the CI runners need its bash)'",
+        // winget is App Installer's, which an account can lack: then the runner installer says what to install.
+        '  try { & winget.exe install --id Git.Git --exact --silent --accept-package-agreements --accept-source-agreements; if ($LASTEXITCODE) { throw \'the lines above say why\' } } catch { Write-Host "elevate: Git for Windows did not install: $_" -ForegroundColor Red }',
+        '}',
         "Write-Host 'elevate: installing the CI runner agent'",
         "$f = Join-Path $env:TEMP 'citadel-install-runner-agent.ps1'",
-        'Invoke-WebRequest "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile $f',
-        `& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f -CitadelUrl $u -MachineToken '${token}'`,
-        "if ($LASTEXITCODE) { Write-Host 'elevate: the CI runner agent did not install: the lines above say why.' -ForegroundColor Red; exit 1 }",
+        'try {',
+        '  Invoke-WebRequest "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile $f',
+        `  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f -CitadelUrl $u -MachineToken '${token}'`,
+        "  if ($LASTEXITCODE) { throw 'the lines above say why' }",
+        '} catch { Write-Host "elevate: the CI runner agent did not install: $_" -ForegroundColor Red; $failed += \'the CI runner agent\' }',
       );
     if (needs.includes('wsl'))
-      lines.push("Write-Host 'elevate: installing WSL 2'", '& wsl.exe --install --no-distribution', "if ($LASTEXITCODE) { Write-Host 'elevate: WSL did not install: the lines above say why.' -ForegroundColor Red; exit 1 }", "Write-Host 'elevate: restart this PC, then press Set up again on the Machines page.'");
-    lines.push("Write-Host 'elevate: done.'");
+      lines.push(
+        "Write-Host 'elevate: installing WSL 2'",
+        '& wsl.exe --install --no-distribution',
+        "if ($LASTEXITCODE) { Write-Host 'elevate: WSL did not install: the lines above say why.' -ForegroundColor Red; $failed += 'WSL' } else { Write-Host 'elevate: restart this PC, then press Set up again on the Machines page.' }",
+      );
+    lines.push('if ($failed) { Write-Host "elevate: not installed: $($failed -join \', \'). Fix what the lines above say, then run this again." -ForegroundColor Red; exit 1 }', "Write-Host 'elevate: done.'");
     return `${lines.join('\r\n')}\r\n`;
   }
   const lines = ['#!/usr/bin/env bash', `# ${head}`, '# Run it with sudo; running it again updates what it installed.', 'set -euo pipefail', `[[ $(id -u) == 0 ]] || { echo 'elevate: run it with sudo' >&2; exit 1; }`, `u='${u}'`, `export CC_MACHINE_TOKEN='${token}'`, 'f=$(mktemp)', 'trap \'rm -f "$f"\' EXIT'];
@@ -438,6 +452,25 @@ export function elevateScript({ platform, appUrl, token, needs, caps = {}, at = 
   lines.push("echo 'elevate: done.'");
   return `${lines.join('\n')}\n`;
 }
+
+/**
+ * A Linux role's missing packages: the card's package lines, and, when CI runners or Minion turns wait on an
+ * administrator too (not as root), the elevate script after them in the same paste. Ends the run: Set up again after.
+ */
+async function askPackages(ctx, say, n, needs, end) {
+  const root = ctx.root ?? process.getuid?.() === 0;
+  const helpers = root ? [] : (await scriptNeeds(ctx, [])).filter((x) => HELD.includes(x));
+  if (helpers.length) {
+    if (!(await elevate(ctx, say, n, needs))) return false;
+  } else await ctx.post({ id: ctx.ask.id, admin: { needs, pm: await packageManager(ctx) } });
+  return end(false, { why: 'Run the administrator command on the card on this PC, then press Set up again.' });
+}
+
+/** Minion turns' caps for the worker's install: the ask's own on its Set up, else the ones sent along when it waits (`turns_caps`). */
+const workerCaps = (ask) => {
+  const caps = ask.role === 'turns' ? ask.caps : ask.turns_caps;
+  return caps && typeof caps === 'object' ? caps : {};
+};
 
 /** Where the script goes: the folder Connect a computer puts the agent in (public/role-setup.js ELEVATE says it to the card). */
 export const elevateFile = (platform, home = homedir()) => join(home, 'coordinator-agent', platform === 'win32' ? 'elevate.ps1' : 'elevate.sh');
@@ -448,11 +481,16 @@ export const elevateFile = (platform, home = homedir()) => join(home, 'coordinat
  * True when it is written (or ran), false once it has posted the run's failed end.
  */
 async function elevate(ctx, say, n, own) {
-  const needs = await scriptNeeds(ctx, own);
+  // An agent from before version 5 doesn't say whether it is root.
+  const root = ctx.platform !== 'win32' && (ctx.root ?? process.getuid?.() === 0);
+  const all = await scriptNeeds(ctx, own);
+  // Packages (Linux: podman, the GPU toolkit) are the card's own lines; run as root, the role's own Set up installs them.
+  const packages = all.filter((x) => !HELD.includes(x));
+  const needs = root ? all.filter((x) => HELD.includes(x)) : all;
   const file = elevateFile(ctx.platform, ctx.home);
   let text;
   try {
-    text = elevateScript({ platform: ctx.platform, appUrl: ctx.appUrl, token: ctx.token, needs, caps: ctx.ask.role === 'turns' && ctx.ask.caps && typeof ctx.ask.caps === 'object' ? ctx.ask.caps : {} });
+    text = elevateScript({ platform: ctx.platform, appUrl: ctx.appUrl, token: ctx.token, needs: needs.filter((x) => HELD.includes(x)), caps: workerCaps(ctx.ask) });
     mkdirSync(dirname(file), { recursive: true });
     // It holds the token.
     writeFileSync(file, text, { mode: 0o600 });
@@ -463,7 +501,7 @@ async function elevate(ctx, say, n, own) {
     await ctx.post({ id: ctx.ask.id, done: { ok: false, why } });
     return false;
   }
-  if (ctx.platform !== 'win32' && ctx.root) {
+  if (root) {
     await say(n, 'Running the install as root (this agent runs as root)', 'running');
     let last = 0;
     const r = await ctx.exec('bash', [file], {
@@ -483,7 +521,7 @@ async function elevate(ctx, say, n, own) {
     await say(n, 'Installed', 'ok');
     return true;
   }
-  await ctx.post({ id: ctx.ask.id, admin: { needs, script: true } });
+  await ctx.post({ id: ctx.ask.id, admin: { needs, pm: packages.length ? await packageManager(ctx) : null, script: true, at: file } });
   await say(n, `Run the administrator command below on this PC (it installs ${needs.length > 1 ? 'everything listed' : 'it'} in one go)`, 'running');
   return true;
 }

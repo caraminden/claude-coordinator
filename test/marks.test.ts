@@ -9,7 +9,7 @@ import { imageSize } from '../src/image-size.ts';
 import { marksTitle, parseMarks } from '../public/ui/marks.js';
 import { renderMarkdown } from '../public/ui/markdown.js';
 import { markImage } from '../src/routes/files.ts';
-import { promptMessage } from '../src/prompts.ts';
+import { loadImages, promptMessage } from '../src/prompts.ts';
 
 // 37x21 gradients made by ImageMagick: lossy WebP (VP8), lossless (VP8L) and lossy with alpha (VP8X).
 const IMAGES: Record<string, string> = {
@@ -143,8 +143,9 @@ test("mark_image refuses marks it can't draw and pictures it can't reach, saying
   await refused({ image: '../projects/2/uploads/77/0123456789abcdef01234567.png' }, /pasted in this chat/);
 });
 
-test('a pasted picture reaches the turn with its path and size, for mark_image', () => {
-  const prompt = JSON.parse(promptMessage([{ author: 'Cara', text: 'Where is it?', images: [{ path: pasted, mediaType: 'image/png', name: 'a.png' }] } as never]));
+test('a pasted picture reaches the turn with its path and size, for mark_image', async () => {
+  const batch = [{ author: 'Cara', text: 'Where is it?', images: [{ path: pasted, mediaType: 'image/png', name: 'a.png' }] }] as never;
+  const prompt = JSON.parse(promptMessage(batch, await loadImages(batch)));
   assert.deepEqual(
     prompt.message.content.map((c: { type: string; source: { media_type: string }; text: string }) => (c.type === 'image' ? c.source.media_type : c.text)),
     ['[Cara]: Where is it?', 'image/png', `(Cara's picture, 37x21: ${pasted})`],

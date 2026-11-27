@@ -3031,7 +3031,7 @@ export class Runner {
       step === 'compact'
         ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
         : keepalive
-          ? promptMessage(batch)
+          ? promptMessage(batch, await loadImages(batch))
           : promptMessage(
               [
                 ...(context ? [{ author: 'System', text: context, images: [] }] : []),

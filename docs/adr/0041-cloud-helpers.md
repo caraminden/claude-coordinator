@@ -24,6 +24,14 @@ Picked on #2200's card, 2026-11-27 (all four as recommended):
   session link, the latest output, then done or fell back home.
 - **Wait or carry on: "Both, by length".** The minion waits in its turn; a step that outlasts the wait is handed to the
   server (#1890's minion jobs) and wakes the minion with its result.
+- **Where a job runs: "Helper checks first"** (2026-11-27). Cara's priorities, in her order: "1. Keep perigee not under
+  heavy load so it can be responsive at all times 2. No overload machines that are running time sensitive jobs that could
+  get flakey if more is offloaded to them 3. Not put tasks that will be WAY slower on the cloud VMs into the cloud 4. Not
+  use cloud sessions when a free github runner would do the same task". The minion still calls the helper; before it
+  starts anything, the helper asks the server, which reads the live state minions can't see (perigee's CPU pressure,
+  each connected machine's balancer: a ship's tests or CI waiting there count as time-sensitive, whether the repo is
+  public, and the job's measured cloud slowdown), and runs a command job in the first place that passes: a connected
+  machine with room, then GitHub's free runners on a public repo, then a cloud session, then perigee's small slot.
 
 Why non-delivery is caught in minutes: on 2026-11-26 a session (ticket 4254) never pushed its result branch. Its
 follow-up started a 25-30 minute test run in the background and ended its turn; the cloud environment's own Stop hook

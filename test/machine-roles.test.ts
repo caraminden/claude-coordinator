@@ -91,9 +91,9 @@ test('the migration grants every turn, tool and runner token exactly as before, 
   for (const [i, m] of s.listMachines().entries()) assert.ok(sameLend(s.machineLend(m.id), lends[i]), `${m.name}: lends what it did`);
   // The roles as the spec maps them.
   const roles = (name: string) => Object.fromEntries(s.machineRoles(s.listMachines().find((m) => m.name === name)!.id).map((r) => [r.role, r.on]));
-  assert.deepEqual(roles('cara-desktop-linux'), { tools: false, screen: false, ci: true, turns: false, gpu: true });
-  assert.deepEqual(roles('josh-worker'), { tools: true, screen: false, ci: false, turns: true, gpu: true });
-  assert.deepEqual(roles('gpu-off-box'), { tools: true, screen: false, ci: false, turns: false, gpu: false });
+  assert.deepEqual(roles('cara-desktop-linux'), { tools: false, screen: false, ci: true, turns: false, gpu: true, builds: false });
+  assert.deepEqual(roles('josh-worker'), { tools: true, screen: false, ci: false, turns: true, gpu: true, builds: false });
+  assert.deepEqual(roles('gpu-off-box'), { tools: true, screen: false, ci: false, turns: false, gpu: false, builds: false });
   assert.ok(Number(s.getSetting('schema_version')) >= 121, 'the roles migration ran'); // later builds add their own numbers
   s.db.close();
 });
@@ -114,12 +114,12 @@ test('every write keeps the old columns as a rollback reads them, and an older r
   s.db.close();
   const again = new Store(join(dir, 'rollback.db'));
   row = again.getMachine(box.id)!;
-  assert.deepEqual(Object.fromEntries(again.machineRoles(box.id).map((r) => [r.role, r.on ? r.projects : 'off'])), { tools: [1, 3], screen: 'off', ci: 'off', turns: 'off', gpu: 'off' }, 'its roles are migrated again from what the older release left');
+  assert.deepEqual(Object.fromEntries(again.machineRoles(box.id).map((r) => [r.role, r.on ? r.projects : 'off'])), { tools: [1, 3], screen: 'off', ci: 'off', turns: 'off', gpu: 'off', builds: 'off' }, 'its roles are migrated again from what the older release left');
   // An older release makes it a CI runner host (a runner agent connecting during a rollback): the next boot gives it CI.
   again.db.prepare('UPDATE machines SET last_check = ? WHERE id = ?').run(JSON.stringify({ at: 2, results: [], runners: true }), box.id);
   again.db.close();
   const third = new Store(join(dir, 'rollback.db'));
-  assert.deepEqual(Object.fromEntries(third.machineRoles(box.id).map((r) => [r.role, r.on ? r.projects : 'off'])), { tools: 'off', screen: 'off', ci: [1, 3], turns: 'off', gpu: 'off' });
+  assert.deepEqual(Object.fromEntries(third.machineRoles(box.id).map((r) => [r.role, r.on ? r.projects : 'off'])), { tools: 'off', screen: 'off', ci: [1, 3], turns: 'off', gpu: 'off', builds: 'off' });
   assert.equal(mayFetch(third, third.getMachine(box.id)!, third.getProject(3)!), true, 'its tokens go where the older release sent them');
   third.db.close();
   const fourth = new Store(join(dir, 'rollback.db'));
@@ -276,4 +276,43 @@ test('rolesFromLegacy and legacyFromRoles round-trip every lend shape', () => {
     assert.ok(sameLend(back.lend, lend as never), JSON.stringify(lend));
     assert.deepEqual(back.projects, [1, 3]);
   }
+});
+
+test('the Builds role round-trips through machine_roles: on, its schemes and its threads cap; starts off for an old machine', async () => {
+  const s = new Store(join(dir, 'builds.db'));
+  const josh = s.createUser({ name: 'Josh', login: 'josh' });
+  const a = s.createProject('a', null, josh.id);
+  const b = s.createProject('b', null, josh.id);
+  const m = s.createMachine('josh-pc', '', 'Josh', josh.id);
+  assert.deepEqual(
+    s.machineRoles(m.id).find((r) => r.role === 'builds'),
+    { role: 'builds', on: false, caps: {}, setup: null, projects: [] },
+  );
+  const app = {
+    store: s,
+    machines: { rolesChanged: () => {}, endSessionsWhere: () => {}, list: () => [], view: () => ({}) },
+    runner: { turnLine: { pump: () => {} } },
+    jobs: { drop: () => {} },
+    broadcast: () => {},
+  } as unknown as Parameters<typeof patchRoles>[0];
+  const on = await patchRoles(app, { uid: josh.id, admin: false } as Parameters<typeof patchRoles>[1], m, { role: 'builds', on: true, caps: { threads: 6 } });
+  assert.deepEqual(
+    on.roles.find((r) => r.role === 'builds'),
+    { role: 'builds', on: true, caps: { threads: 6 }, setup: null, projects: [a.id, b.id], name: 'Builds' },
+  );
+  s.db.close();
+  const again = new Store(join(dir, 'builds.db'));
+  assert.deepEqual(
+    again.machineRoles(m.id).find((r) => r.role === 'builds'),
+    { role: 'builds', on: true, caps: { threads: 6 }, setup: null, projects: [a.id, b.id] },
+  );
+  assert.deepEqual(
+    again
+      .machineRoles(m.id)
+      .filter((r) => r.on)
+      .map((r) => r.role),
+    ['tools', 'gpu', 'builds'],
+    'Tools and GPU jobs as before, and Builds',
+  );
+  again.db.close();
 });

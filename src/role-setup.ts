@@ -8,12 +8,15 @@
 // a job and GitHub for each lent scheme's runners there.
 // The last run of each role is kept in its machine_roles.setup, as `run`, beside what else is there (CI's runner_agent).
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cleanAdmin, SETUP_ROLES } from '../public/role-setup.js';
 import { type Listed, onHost, schemeLabels } from './ci-runner.ts';
 import type { Machine, Project, Store } from './db.ts';
 import { HttpError } from './http.ts';
+import { IMAGE } from './machine-jobs.ts';
 import { storedReport } from './machine-join.ts';
 import { ROLE_NAMES, type Role } from './machine-roles.ts';
 import type { CheckResult } from './machines.ts';
@@ -29,7 +32,7 @@ const MAX_STEPS = 30;
 /** The most bytes of the screen test's screenshot. */
 export const MAX_SHOT = 20 * 1024 * 1024;
 
-export type SetupRole = 'tools' | 'screen' | 'turns' | 'gpu' | 'ci';
+export type SetupRole = 'tools' | 'screen' | 'turns' | 'gpu' | 'ci' | 'builds';
 export type StepState = 'waiting' | 'running' | 'ok' | 'fail';
 export type Step = { text: string; state: StepState };
 export type Admin = { needs: string[]; pm: string | null };
@@ -74,9 +77,46 @@ export type RoleSetupDeps = {
     listed(project: Project): Promise<Listed[]>;
   };
   shotDir: string;
+  /** The build image list's text a Builds Set up reads (tests give their own); the shipped file's by default. */
+  buildImages?: string;
   changed(): void;
   now(): number;
 };
+
+/** What a Builds Set up pulls and makes: tools/build-images/images.json, each image pinned by digest. */
+export type BuildImages = { images: Record<string, string>; volumes: string[] };
+export const BUILD_IMAGES_FILE = fileURLToPath(new URL('../tools/build-images/images.json', import.meta.url));
+/** That file as this release shipped it, read once at load (a ship that changes it restarts the server). */
+const SHIPPED_IMAGES = (() => {
+  try {
+    return readFileSync(BUILD_IMAGES_FILE, 'utf8');
+  } catch (err) {
+    return err as Error;
+  }
+})();
+
+/**
+ * The build images to pull, from the file's text. Throws a 409 while the Android one, the self-test's, isn't published,
+ * and a 500 when the file is broken.
+ */
+export function buildImages(text: string | Error = SHIPPED_IMAGES): BuildImages {
+  let raw: { images?: Record<string, { image?: unknown } | null>; volumes?: unknown };
+  try {
+    if (text instanceof Error) throw text;
+    raw = JSON.parse(text);
+  } catch (err) {
+    throw new HttpError(500, `Citadel's build image list (tools/build-images/images.json) can't be read: ${(err as Error).message}`);
+  }
+  const images: Record<string, string> = {};
+  for (const [kind, v] of Object.entries(raw.images ?? {})) {
+    if (v?.image == null) continue;
+    if (!/^[a-z]+$/.test(kind) || typeof v.image !== 'string' || !IMAGE.test(v.image)) throw new HttpError(500, `Citadel's build image list has a bad ${kind} image: each is pinned by digest`);
+    images[kind] = v.image;
+  }
+  if (!images.android) throw new HttpError(409, "Citadel's build images aren't published yet, so there's nothing to pull: try again once they are");
+  const volumes = Array.isArray(raw.volumes) ? raw.volumes.filter((v): v is string => typeof v === 'string' && /^citadel-[a-z]+$/.test(v)) : [];
+  return { images, volumes };
+}
 
 export const isSetupRole = (v: unknown): v is SetupRole => typeof v === 'string' && SETUP_ROLES.includes(v);
 const clean = (v: unknown, n: number) =>
@@ -123,6 +163,7 @@ export class RoleSetups {
     const online = this.d.online(machine.id);
     let phase: Phase = 'server';
     let workerInstall = false;
+    let images: BuildImages | null = null;
     if (role === 'ci') {
       // The runner agent is its own program (as administrator), so the machine agent may be off or absent.
       if (!this.d.ci) throw new HttpError(503, 'No CI runners here');
@@ -151,6 +192,8 @@ export class RoleSetups {
         if (!fresh) throw new HttpError(409, `${machine.name}'s agent is from before Set up: press Update on its row, run that command there, then press it again`);
         if (role === 'screen' && report?.os !== 'windows') throw new HttpError(409, `The Windows screen needs a Windows PC, and ${machine.name} runs ${report?.os_name || report?.os || 'something else'}`);
         if (role === 'gpu' && report?.os === 'macos') throw new HttpError(409, 'GPU jobs need Linux or WSL with an NVIDIA GPU');
+        if (role === 'builds' && report?.os === 'macos') throw new HttpError(409, 'Builds need Linux, or Windows with WSL');
+        if (role === 'builds') images = buildImages(this.d.buildImages);
         phase = 'agent';
       }
     }
@@ -162,8 +205,10 @@ export class RoleSetups {
     else if (workerInstall) run.steps.push({ text: 'Run the install command below on that PC, as its owner', state: 'running' }, { text: "The worker connects to Citadel (it's waited for up to 30 minutes)", state: 'waiting' });
     this.save(machine.id, run);
     if (phase === 'agent') {
-      const caps = this.d.store.machineRoles(machine.id).find((r) => r.role === 'turns')?.caps ?? {};
-      if (!this.d.send(machine.id, { setup: { id: run.id, role, kind, ...(role === 'turns' ? { caps } : {}) } })) this.finish(a, false, `${machine.name} went offline`);
+      // Minion turns' caps go to the worker's install; Builds' threads cap to its self-test.
+      const caps = this.d.store.machineRoles(machine.id).find((r) => r.role === role)?.caps ?? {};
+      const { ticks: _, ...own } = caps;
+      if (!this.d.send(machine.id, { setup: { id: run.id, role, kind, ...(role === 'turns' || role === 'builds' ? { caps: own } : {}), ...(images ? { builds: images } : {}) } })) this.finish(a, false, `${machine.name} went offline`);
     } else if (phase === 'test' && role === 'ci') void this.ciTest(a, machine);
     else if (phase === 'test') this.startTest(a, machine);
     else if (role === 'tools') void this.tools(a);

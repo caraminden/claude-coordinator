@@ -15,7 +15,7 @@ type Said = { id: string; step?: { n: number; text: string; state: string }; adm
 type Out = { code: number; out: string };
 
 /** A fake PC: `answers` says what each program prints (by "program arg"), anything missing isn't installed. */
-function pc(o: { platform?: string; role: string; kind?: string; answers?: Record<string, Out>; config?: unknown; capture?: (file: string, window: string) => Promise<string>; busy?: boolean }) {
+function pc(o: { platform?: string; role: string; kind?: string; ask?: Record<string, unknown>; answers?: Record<string, Out>; config?: unknown; capture?: (file: string, window: string) => Promise<string>; busy?: boolean }) {
   const home = join(dir, `pc-${n++}`);
   const configFile = join(home, 'machine-agent.json');
   rmSync(home, { recursive: true, force: true });
@@ -25,7 +25,7 @@ function pc(o: { platform?: string; role: string; kind?: string; answers?: Recor
   const ran: string[] = [];
   const uploads: Buffer[] = [];
   const ctx = {
-    ask: { id: 'r1', role: o.role, kind: o.kind ?? 'setup' },
+    ask: { id: 'r1', role: o.role, kind: o.kind ?? 'setup', ...o.ask },
     platform: o.platform ?? 'linux',
     configFile,
     appUrl: 'http://citadel.test',
@@ -144,4 +144,68 @@ test('exec gives a missing program a non-zero code and hears lines as they come'
   const r = await exec(process.execPath, ['-e', 'console.log("one"); console.error("two")'], { onLine: (l: string) => lines.push(l) });
   assert.equal(r.code, 0);
   assert.deepEqual(lines.sort(), ['one', 'two']);
+});
+
+const ANDROID = `ghcr.io/caraminden/citadel-build-android@sha256:${'a'.repeat(64)}`;
+const NODE = `ghcr.io/caraminden/citadel-build-node@sha256:${'b'.repeat(64)}`;
+const BUILDS = { caps: { threads: 4 }, builds: { images: { android: ANDROID, node: NODE }, volumes: ['citadel-gradle', 'citadel-npm'] } };
+const no: Out = { code: 1, out: '' };
+const BUILDS_OK = {
+  'podman --version': ok('podman version 4.9.3'),
+  'podman image exists': no,
+  'podman pull': ok('Copying blob sha256:1\nWriting manifest to image destination'),
+  'podman image inspect': ok('2345000000'),
+  'podman volume exists': no,
+  'podman volume create': ok('citadel-gradle'),
+  'podman run': ok('BUILD SUCCESSFUL in 1m 2s\napk 12345'),
+};
+
+test('Builds Set up on Linux pulls each image by digest, makes the volumes, then builds the hello APK under the threads cap', async () => {
+  const p = pc({ role: 'builds', ask: BUILDS, answers: BUILDS_OK });
+  await p.run();
+  assert.deepEqual(p.done(), { ok: true, report: 'Hello-world APK built; images android 2.3 GB, node 2.3 GB' });
+  assert.ok(p.ran.includes(`podman pull ${ANDROID}`) && p.ran.includes(`podman pull ${NODE}`));
+  assert.ok(p.ran.includes('podman volume create citadel-gradle') && p.ran.includes('podman volume create citadel-npm'));
+  assert.ok(p.ran.includes(`podman run --rm --security-opt label=disable --cpus 4 -v citadel-gradle:/cache/gradle ${ANDROID} citadel-hello-apk`));
+  assert.match(p.steps().join('\n'), /ok Pulled citadel-build-android \(2\.3 GB\)\n.*\n.*ok Cache volumes citadel-gradle, citadel-npm \(made citadel-gradle, citadel-npm\)\n.*running Building a hello-world APK.*\n.*ok Built a hello-world APK \(12 KB\)/s);
+});
+
+test("a hello APK that doesn't build fails on its own step with the build's last lines", async () => {
+  const p = pc({ role: 'builds', ask: BUILDS, answers: { ...BUILDS_OK, 'podman run': { code: 1, out: 'FAILURE: Build failed with an exception.\nCould not resolve com.android.tools.build:gradle:8.13.0.' } } });
+  await p.run();
+  assert.equal(p.done().ok, false);
+  assert.match(p.done().why!, /hello-world APK didn't build: FAILURE.*Could not resolve/);
+  assert.match(p.steps().at(-1)!, /fail The hello-world APK didn't build/);
+});
+
+test('Builds on Windows runs podman in citadel-workers as its worker user, and says to set up Minion turns when the distro is missing', async () => {
+  const utf16 = (s: string) => s.split('').join('\0');
+  const win = { 'wsl.exe --version': ok('WSL version: 2.3.26.0'), 'wsl.exe -l -q': ok(utf16('Ubuntu\r\ncitadel-workers\r\n')) };
+  const via = 'wsl.exe -d citadel-workers -u citadel-worker --exec /bin/sh -c XDG_RUNTIME_DIR=/run/user/$(id -u) exec podman "$@" podman';
+  const answers = Object.fromEntries([...Object.entries(win), ...Object.entries(BUILDS_OK).map(([k, v]) => [`${via} ${k.slice('podman '.length)}`, v])]);
+  const p = pc({ platform: 'win32', role: 'builds', ask: BUILDS, answers });
+  await p.run();
+  assert.equal(p.done().ok, true, JSON.stringify(p.said));
+  assert.ok(p.ran.includes(`${via} pull ${ANDROID}`));
+  const missing = pc({ platform: 'win32', role: 'builds', ask: BUILDS, answers: { ...win, 'wsl.exe -l -q': ok(utf16('Ubuntu\r\n')) } });
+  await missing.run();
+  assert.match(missing.done().why!, /citadel-workers WSL distro.*press Set up on Minion turns/);
+  assert.ok(!missing.ran.some((r) => r.includes('pull')));
+  const noWsl = pc({ platform: 'win32', role: 'builds', ask: BUILDS, answers: {} });
+  await noWsl.run();
+  assert.deepEqual(noWsl.said.find((s) => s.admin)?.admin, { needs: ['wsl'] });
+});
+
+test('Builds with no podman on Linux asks for it as fixed words; Test pulls nothing and says to press Set up', async () => {
+  const p = pc({ role: 'builds', ask: BUILDS, answers: { 'apt-get --version': ok('apt 2.7') } });
+  await p.run();
+  assert.deepEqual(p.said.find((s) => s.admin)?.admin, { needs: ['podman'], pm: 'apt' });
+  assert.equal(p.done().ok, false);
+  const t = pc({ role: 'builds', kind: 'test', ask: BUILDS, answers: BUILDS_OK });
+  await t.run();
+  assert.match(t.done().why!, /citadel-build-android isn't pulled on this PC: press Set up/);
+  assert.ok(!t.ran.some((r) => r.includes('pull')));
+  const none = pc({ role: 'builds', ask: { builds: { images: {}, volumes: [] } }, answers: BUILDS_OK });
+  await none.run();
+  assert.match(none.done().why!, /no Android build image/);
 });

@@ -8,7 +8,7 @@ import { Store } from '../src/db.ts';
 import { router } from '../src/http.ts';
 import type { CheckResult } from '../src/machines.ts';
 import { agentRoutes } from '../src/routes/machines.ts';
-import { QUIET_MS, RoleSetups, storedRun, WORKER_WAIT_MS, type RoleSetupDeps } from '../src/role-setup.ts';
+import { BUILD_IMAGES_FILE, buildImages, QUIET_MS, RoleSetups, storedRun, WORKER_WAIT_MS, type RoleSetupDeps } from '../src/role-setup.ts';
 import type { SelfTest } from '../src/worker-join.ts';
 import type { Listed } from '../src/ci-runner.ts';
 import type { Project } from '../src/db.ts';
@@ -63,7 +63,7 @@ function world(o: { os?: 'windows' | 'linux' | 'macos'; agent?: number; online?:
   const setups = new RoleSetups(deps);
   const machine = () => store.getMachine(m.id)!;
   const as = (u: typeof josh) => ({ id: u.id, name: u.name, admin: !!u.admin });
-  return { store, setups, deps, sent, w, ci, machine, josh: as(josh), mike: as(mike), cara: as(cara), tick: (ms = 0) => ((now += ms), setups.tick()), run: (role: 'tools' | 'screen' | 'turns' | 'gpu' | 'ci') => storedRun(store, m.id, role) };
+  return { store, setups, deps, sent, w, ci, machine, josh: as(josh), mike: as(mike), cara: as(cara), tick: (ms = 0) => ((now += ms), setups.tick()), run: (role: 'tools' | 'screen' | 'turns' | 'gpu' | 'ci' | 'builds') => storedRun(store, m.id, role) };
 }
 
 const settle = () => new Promise((r) => setImmediate(r));
@@ -302,4 +302,50 @@ test("CI runners' Test fails on a runner GitHub shows offline, a GitHub refusal 
     ],
   );
   assert.equal(kept.ok, false);
+});
+
+const digest = (c: string) => `sha256:${c.repeat(64)}`;
+const imagesFile = (images: Record<string, { image: string | null; mb: number | null }>) => JSON.stringify({ images, volumes: ['citadel-gradle', 'citadel-cargo', 'citadel-npm', 'not a volume'] });
+
+test('Builds Set up sends the images by digest, the volumes and its threads cap to the agent; a failed step shows on the role', () => {
+  const t = world({ os: 'linux' });
+  t.deps.buildImages = imagesFile({ android: { image: `ghcr.io/caraminden/citadel-build-android@${digest('a')}`, mb: 2500 }, node: { image: `ghcr.io/caraminden/citadel-build-node@${digest('b')}`, mb: 300 }, rust: { image: null, mb: null } });
+  t.store.writeMachineRoles(t.machine().id, (roles) => roles.map((r) => (r.role === 'builds' ? { ...r, on: true, caps: { threads: 4 } } : r)));
+  const run = t.setups.start(t.machine(), 'builds', 'setup', t.josh);
+  assert.deepEqual(t.sent, [
+    {
+      setup: {
+        id: run.id,
+        role: 'builds',
+        kind: 'setup',
+        caps: { threads: 4 },
+        builds: { images: { android: `ghcr.io/caraminden/citadel-build-android@${digest('a')}`, node: `ghcr.io/caraminden/citadel-build-node@${digest('b')}` }, volumes: ['citadel-gradle', 'citadel-cargo', 'citadel-npm'] },
+      },
+    },
+  ]);
+  t.setups.heard(t.machine(), { id: run.id, step: { n: 0, text: 'podman version 4.9.3', state: 'ok' } });
+  t.setups.heard(t.machine(), { id: run.id, step: { n: 1, text: "The hello-world APK didn't build: Could not resolve com.android.tools.build:gradle:8.13.0", state: 'fail' }, done: { ok: false, why: "The hello-world APK didn't build: Could not resolve com.android.tools.build:gradle:8.13.0" } });
+  const kept = t.run('builds')!;
+  assert.equal(kept.ok, false);
+  assert.deepEqual(kept.steps.at(-1), { text: "The hello-world APK didn't build: Could not resolve com.android.tools.build:gradle:8.13.0", state: 'fail' });
+  assert.match(kept.why!, /Could not resolve/);
+});
+
+test("Builds refuses a Mac, and images that aren't published or aren't pinned by digest", () => {
+  const mac = world({ os: 'macos' });
+  assert.throws(() => mac.setups.start(mac.machine(), 'builds', 'setup', mac.josh), /Linux, or Windows with WSL/);
+  const t = world({ os: 'linux' });
+  t.deps.buildImages = imagesFile({ android: { image: null, mb: null } });
+  assert.throws(() => t.setups.start(t.machine(), 'builds', 'setup', t.josh), /aren't published yet/);
+  assert.equal(t.sent.length, 0);
+  assert.throws(() => buildImages(imagesFile({ android: { image: 'ghcr.io/caraminden/citadel-build-android:latest', mb: 1 } })), /pinned by digest/);
+  // The shipped file reads: published or not, it is the shape both sides take.
+  try {
+    const shipped = buildImages();
+    assert.ok(Object.values(shipped.images).every((i) => /^ghcr\.io\/caraminden\/citadel-build-[a-z]+@sha256:[a-f0-9]{64}$/.test(i)));
+    assert.deepEqual(shipped.volumes, ['citadel-gradle', 'citadel-cargo', 'citadel-npm']);
+  } catch (err) {
+    assert.match((err as Error).message, /aren't published yet/);
+  }
+  assert.ok(JSON.parse(readFileSync(BUILD_IMAGES_FILE, 'utf8')).images.android);
 });

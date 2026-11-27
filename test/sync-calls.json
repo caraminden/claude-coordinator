@@ -277,6 +277,9 @@
   "repoRubrics": ["boot",5,"importAllRubrics once per database at startup"],
   "kitLine": ["boot",2,"never on the server: the runner passes an out map, so no file is written; only a CLI and tests write"]
  },
+ "src/role-setup.ts": {
+  "SHIPPED_IMAGES": ["boot",1,"tools/build-images/images.json read at module load before listen"]
+ },
  "src/routes/reviews.ts": {
   "kitAgent": ["rare",1,"Reviews page GET"]
  },

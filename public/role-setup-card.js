@@ -21,6 +21,7 @@ const ABOUT = {
   screen: 'Turns screenshots on in its machine-agent.json, then takes a screenshot and opens and closes Notepad.',
   turns: 'Installs the worker (a WSL distro of its own on Windows), then runs its self-test.',
   gpu: 'Checks the GPU, podman and NVIDIA’s container toolkit, turns GPU jobs on, then runs nvidia-smi in a container.',
+  builds: 'Checks podman (on Windows, in the citadel-workers WSL distro that Minion turns set up), pulls Citadel’s Android, Node and Rust build images, makes their cache volumes, then builds a hello-world APK in the Android image.',
   ci: 'Shows the command that installs the CI runner agent (as administrator; on Windows, the Linux one in WSL too), waits for it to join this row, then tests it. Each scheme ticked here gets its runner here by itself when its CI first needs one.',
 };
 

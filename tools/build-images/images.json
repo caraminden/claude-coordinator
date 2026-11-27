@@ -1,0 +1,9 @@
+{
+  "about": "Citadel's build images for the Builds role (H1, tools/build-images/README.md), pinned by digest. .github/workflows/build-images.yml prints these lines after each push; the server reads this file and hands it to a machine's agent in each Builds Set up. null: not published yet.",
+  "images": {
+    "android": { "image": null, "mb": null },
+    "node": { "image": null, "mb": null },
+    "rust": { "image": null, "mb": null }
+  },
+  "volumes": ["citadel-gradle", "citadel-cargo", "citadel-npm"]
+}

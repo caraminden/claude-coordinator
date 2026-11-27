@@ -29,7 +29,7 @@ export type WorkerPlace = Pick<WorkerMachine, 'id' | 'name' | 'used' | 'size' | 
 // The role cards and worker row.
 
 /** A role's name on a machine (src/machine-roles.ts Role). */
-export type MachineRoleKey = 'tools' | 'screen' | 'ci' | 'turns' | 'gpu';
+export type MachineRoleKey = 'tools' | 'screen' | 'ci' | 'turns' | 'gpu' | 'builds';
 
 /** The caps an owner sets on a role's card (src/machine-roles.ts Caps, without the Tools ticks machines.ts view takes out). */
 export interface MachineRoleCaps {
@@ -231,7 +231,7 @@ export interface SetupAdmin {
 /** A role's Set up or Test run, in the role's setup.run (src/role-setup.ts Run). */
 export interface SetupRun {
   id: string;
-  role: 'tools' | 'screen' | 'turns' | 'gpu' | 'ci';
+  role: 'tools' | 'screen' | 'turns' | 'gpu' | 'ci' | 'builds';
   kind: 'setup' | 'test';
   at: number;
   by: string;

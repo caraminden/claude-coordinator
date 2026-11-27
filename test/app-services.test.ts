@@ -1282,12 +1282,14 @@ test('a roll back past a migration brings back the snapshot its code reads, and 
 });
 
 test('snapshots keep the newest few within a size cap, never the ones a step just took or restored (#1137)', async () => {
-  const { takeSnapshot, prune, listSnapshots } = await import('../src/app-snapshots.ts');
+  const { takeSnapshot, prune, listSnapshots, sizeOf } = await import('../src/app-snapshots.ts');
   const data = join(home, 'data');
   const snaps = join(home, 'snaps');
   mkdirSync(data, { recursive: true });
+  // du counts a folder's own blocks: 0 on btrfs, 4096 on ext4 (#2248). The numbers below are file bytes on top of that.
+  const dirBytes = await sizeOf(data);
   writeFileSync(join(data, 'f'), Buffer.alloc(1000));
-  const cap = { keep: 2, maxBytes: 2500 };
+  const cap = { keep: 2, maxBytes: 2 * dirBytes + 2500 };
   for (let i = 1; i <= 3; i++) await takeSnapshot(data, snaps, { commit: `c${i}`.padEnd(40, '0'), why: 'test' }, cap, i * 1000);
   assert.deepEqual(
     (await listSnapshots(snaps)).map((s) => s.commit.slice(0, 2)),

@@ -23,7 +23,7 @@ giant file. Josh then picked #2045 on #2027's gaps card, after runner.ts had gro
    - So after #1840, a change to `src/closing.ts` picked none of the seven, only the generic always-tests. The same
      went for the other eight modules #1840 made[^map].
    - #2045 met this at the line. CI refused it at 22:04 PST Nov 26 on `test/front.test.ts`, because `src/reader.ts`'s
-     stand-in Runner lacked the moved helpers[^land]. Only then did #2045 add map rows for its own five files. #1840's
+     stand-in Runner lacked the moved helpers (the refusal's time from [^land], the test from [^r2045]). Only then did #2045 add map rows for its own five files. #1840's
      nine stayed unmapped, and every one of #1840's hand-offs said "affected-map not fixed (pipeline file)"[^r1840].
    - **Shipped here:** the nine modules take runner.ts's rows in `tools/affected-map.txt`, plus a comment there saying
      a module moved out of a mapped file takes its rows. A change to `src/closing.ts` now picks `closed-cleanup` again[^map].

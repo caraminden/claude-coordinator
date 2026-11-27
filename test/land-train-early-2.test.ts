@@ -275,6 +275,51 @@ test('light check: no verdict joins the line; with the side runner busy, or LAND
   }
 });
 
+// #2242: on a public repo the light check's runner is GitHub's own, free there: the side runner busy, offline or held by
+// another ship's light check doesn't stop it; GitHub not taking it is no runner, and the ship joins the line saying so.
+test("light check: on a public repo it runs on GitHub's own runners whatever the side runner is doing, with the wait in its retro line; no runner there joins the line unchecked (#2242)", async () => {
+  for (const [extra, said, logged] of [
+    [{ FAKE_QUEUED: '14' }, /land: light check: green in \d+ s, so it joins the line/, ['light check · ticket/2-x · green · Ns · runner after Ns']],
+    [
+      { FAKE_NO_RUNNER: "GitHub's runners didn't take it within 360 s (its queue is full), so the CI run is cancelled" },
+      /land: light check: no runner on GitHub's own runners took it \(GitHub's runners didn't take it within 360 s \(its queue is full\), so the CI run is cancelled\), so this joins the line unchecked/,
+      ["light check · ticket/2-x · skipped: no runner on GitHub's own runners (GitHub's runners didn't take it within Ns (its queue is full), so the CI run is cancelled) · Ns"],
+    ],
+  ] as [Record<string, string>, RegExp, string[]][]) {
+    let holder: ReturnType<typeof spawn> | undefined;
+    let side: ReturnType<typeof spawn> | undefined;
+    try {
+      // The side runner offline (FAKE_SIDE_RUNNERS 0) and another ship's light check holding its lock.
+      const l = await line(
+        [{}, {}],
+        (d) => ({ ...light(d), FAKE_SIDE_RUNNERS: '0', FAKE_REPO_PRIVATE: 'false', ...extra }),
+        (r) => {
+          holder = busyCheck(r);
+          side = spawn('flock', [join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'light-check.lock'), 'cat'], { stdio: ['pipe', 'ignore', 'ignore'] });
+        },
+      );
+      await until('the check lock is held', () => lockHeld(l.state));
+      await until('the light check lock is held', () => spawnSync('flock', ['-n', join(l.state, 'light-check.lock'), 'true']).status === 1);
+      const done = await l.go();
+      done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+      assert.match(done[1].stderr, /land: light check: its own and affected test files run now on GitHub's own runners instead, on [0-9a-f]{7,}/);
+      assert.match(done[1].stderr, said);
+      const calls = heavyCalls(l.r.dir);
+      assert.match(calls, /^github 1$/m, "it asks heavy-ci.ts for GitHub's runners");
+      assert.match(calls, /^ship 1$/m);
+      assert.deepEqual(
+        retro(l.r.dir, 'light check · ').map((x) => x.replace(/\b\d+ ?s\b/g, 'Ns')),
+        logged,
+      );
+      assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2']);
+      l.done();
+    } finally {
+      holder?.stdin?.end();
+      side?.stdin?.end();
+    }
+  }
+});
+
 // #1417: the front's restart held for a starved box (deploy.sh's <state>/hold) tells each rider when it expects to be
 // live, and an urgent fix riding the train (the land tool's outage: true) marks that restart to skip the hold.
 test('riders of a restart held for a starved box say when it expects to be live; only an urgent rider marks it to skip the hold (#1417)', async () => {

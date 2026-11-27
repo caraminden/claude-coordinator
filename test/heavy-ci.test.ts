@@ -284,6 +284,22 @@ test("a CI job's history line says runner only when the run waited a minute for 
   assert.equal(waited('2026-11-20T09:59:30Z'), 'none');
 });
 
+test("CITADEL_HEAVY_QUEUED_FILE gets the seconds from the run's dispatch to a runner starting it, for the light check's retro line (#2242)", () => {
+  const r = repo();
+  const f = join(r.gh, 'queued-secs');
+  assert.equal(run(r, 'busy', { CITADEL_HEAVY_CI_POLL: '0.2', FAKE_GH_CREATED: '2026-11-20T09:59:46Z', CITADEL_HEAVY_CI_QUEUE: '60', CITADEL_HEAVY_QUEUED_FILE: f }).status, 3);
+  assert.equal(readFileSync(f, 'utf8'), '14\n');
+});
+
+test("a ship's light check on GitHub's runners isn't kept waiting by GitHub's queue: past the limit it is cancelled as no runner (#2242)", () => {
+  const r = repo();
+  // busy: other runs are in progress, which keeps any other job waiting (the test above); this one goes.
+  const res = run(r, 'busy', { CITADEL_HEAVY_CI_QUEUE: '0.1', CITADEL_HEAVY_SHIP: '1', CITADEL_HEAVY_GITHUB: '1' });
+  assert.match(res.stderr, /GitHub's runners didn't take it within 0\.1 s \(its queue is full\), so the CI run is cancelled/);
+  assert.ok(existsSync(join(r.gh, 'cancelled')), 'the queued run is cancelled, so it never runs late');
+  assert.equal(JSON.parse(readFileSync(join(r.gh, 'dispatch.json'), 'utf8'))['inputs[id]'].startsWith('shipgh-'), true, 'named so the CI hold leaves it alone');
+});
+
 test("a ship's CI run goes first: a new heavy job waits for it before it is dispatched, and never runs on perigee", () => {
   const r = repo();
   const res = run(r, 'ship', { CITADEL_HEAVY_CI_POLL: '0.05' });
@@ -408,6 +424,7 @@ test("a job for GitHub's own runners (citadel-cloud's pick, #2200) asks for them
   assert.equal(res.status, 3, res.stderr);
   assert.equal(res.stdout, 'hello from CI\n');
   assert.equal(JSON.parse(readFileSync(join(r.gh, 'dispatch.json'), 'utf8'))['inputs[runner]'], 'github');
+  assert.match(JSON.parse(readFileSync(join(r.gh, 'dispatch.json'), 'utf8'))['inputs[id]'], /^gh-/, 'named so the CI hold and ci_busy leave it alone (#2242)');
   assert.equal(jobs(r).length, 0, 'not handed to Citadel');
 });
 

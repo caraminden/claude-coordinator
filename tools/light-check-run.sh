@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The light check's run (#1620; tools/light-check.sh starts it): on CI's side runner, through heavy-ci.ts, in a snapshot of
 # a ship's branch rebased onto main. Args: <main's commit>. Runs the ship's own and affected test files once
-# (citadel-test --affected against main), then each file that failed alone, on this commit and on main, as land.sh's
+# (citadel-test --affected against main; with a public/ change, test/instant-open-browser.test.ts too), then each file that failed alone, on this commit and on main, as land.sh's
 # train_alone does. Its last line is the verdict light-check.sh reads:
 #   light check: green
 #   light check: red: <file>, <file>       failed in the run, failed again alone here, and pass alone on main (or main
@@ -30,7 +30,11 @@ fi
 rc=0
 # The wide pick (#1928): a citadel-test from before --wide existed picks it by itself.
 wide=--affected; grep -q -- '--wide' "$ct" 2>/dev/null && wide=--wide
-nice -n 10 "$ct" "$wide" --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" >"$out" 2>&1 </dev/null || rc=$?
+# A ship touching public/ runs the front end's browser test too (#2242; Cara, 2026-11-27, "Go, with both changes" on
+# #1912's count): the map leaves it out for its 41 CPU-s, and it went red in burn-in on front-end ships twice.
+extra=()
+git diff --name-only --no-renames "$base" HEAD | grep -q '^public/' && [ -e test/instant-open-browser.test.ts ] && extra+=(test/instant-open-browser.test.ts)
+nice -n 10 "$ct" "$wide" --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" "${extra[@]}" >"$out" 2>&1 </dev/null || rc=$?
 tail -n 60 "$out"
 case $rc in
   0) verdict green ;;

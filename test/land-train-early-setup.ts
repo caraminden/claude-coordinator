@@ -91,7 +91,10 @@ export function busyCheck(r: ReturnType<typeof setup>) {
   writeFileSync(
     join(r.dir, 'bin', 'fake-heavy'),
     `#!/usr/bin/env bash
-{ echo "pwd $(pwd)"; echo "head $(git rev-parse HEAD)"; echo "ship \${CITADEL_HEAVY_SHIP:-}"; echo "args $*"; echo "log $(git log --format=%s -3 | tr '\\n' '|')"; } >>"${join(r.dir, 'heavy-calls')}"
+{ echo "pwd $(pwd)"; echo "head $(git rev-parse HEAD)"; echo "ship \${CITADEL_HEAVY_SHIP:-}"; echo "github \${CITADEL_HEAVY_GITHUB:-}"; echo "args $*"; echo "log $(git log --format=%s -3 | tr '\\n' '|')"; } >>"${join(r.dir, 'heavy-calls')}"
+# FAKE_QUEUED: the seconds it waited for a runner; FAKE_NO_RUNNER: heavy-ci.ts's no-runner exit, with that reason.
+[ -z "\${FAKE_QUEUED:-}" ] || echo "$FAKE_QUEUED" >"$CITADEL_HEAVY_QUEUED_FILE"
+[ -z "\${FAKE_NO_RUNNER:-}" ] || { echo "$FAKE_NO_RUNNER" >"$CITADEL_HEAVY_FALLBACK_FILE"; exit 120; }
 printf '%b\\n' "\${FAKE_LIGHT_OUT:-light check: green}"
 `,
     { mode: 0o755 },

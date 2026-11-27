@@ -328,7 +328,8 @@ async function main(argv: string[]): Promise<number> {
   const ship = process.env.CITADEL_HEAVY_SHIP === '1'; // a ship's own light check (#1620): stopped only, never handed over
   // GitHub's own runners (#2200, citadel-cloud's pick on a public repo): the PCs' ships and holds don't touch them.
   const github = process.env.CITADEL_HEAVY_GITHUB === '1';
-  const id = `${ship ? 'ship' : ''}${newId()}`;
+  // gh- marks a run on GitHub's own runners, which the CI hold and ci_busy leave alone: they are not the desktop's (#2242).
+  const id = `${ship ? 'ship' : ''}${github ? 'gh-' : ''}${newId()}`;
   const ref = `refs/citadel-heavy/${id}`;
   let sha: string;
   try {
@@ -451,6 +452,14 @@ async function main(argv: string[]): Promise<number> {
       if (!started && run.status !== 'completed' && Date.now() - queued >= queueLimit * 1000) {
         // Busy runners mean wait (Josh: "things slow down, but perigee is fine"); only a CI running nothing at all,
         // the desktop off, sends the job back here. Reading the runners themselves needs admin, so other runs tell.
+        // A ship's light check on GitHub's runners (#2242) doesn't wait out GitHub's queue: its ship goes on without it.
+        if (ship && github) {
+          if (!cancel()) {
+            say(`GitHub's runners didn't take the job and GitHub wouldn't cancel the run (${run.html_url}); nothing runs here`);
+            return 1;
+          }
+          throw new Fallback(`GitHub's runners didn't take it within ${queueLimit} s (its queue is full), so the CI run is cancelled`);
+        }
         if (gh<{ total_count: number }>([`repos/${slug}/actions/runs?status=in_progress&per_page=1`], 'reading the runs').total_count > 0) {
           queued = Date.now();
         } else if (await heldByCitadel(slug, runId)) {
@@ -480,7 +489,10 @@ async function main(argv: string[]): Promise<number> {
     started = true;
     const took = Math.round((Date.parse(job?.completed_at ?? '') - Date.parse(job?.started_at ?? '')) / 1000);
     // For the history line (#2109): a minute or more from the run's dispatch to a runner starting it is a wait for one.
-    if (Date.parse(job?.started_at ?? '') - Date.parse(run.created_at ?? '') >= 60_000 && process.env.CITADEL_HEAVY_WAITED_FILE) writeFileSync(process.env.CITADEL_HEAVY_WAITED_FILE, 'runner');
+    const waited = Date.parse(job?.started_at ?? '') - Date.parse(run.created_at ?? '');
+    if (waited >= 60_000 && process.env.CITADEL_HEAVY_WAITED_FILE) writeFileSync(process.env.CITADEL_HEAVY_WAITED_FILE, 'runner');
+    // The light check's retro line says how long its ship waited for a runner (#2242).
+    if (waited >= 0 && process.env.CITADEL_HEAVY_QUEUED_FILE) writeFileSync(process.env.CITADEL_HEAVY_QUEUED_FILE, `${Math.round(waited / 1000)}\n`);
     if (took >= 0 && process.env.CITADEL_HEAVY_RAN_FILE) writeFileSync(process.env.CITADEL_HEAVY_RAN_FILE, `${took}\n`);
     const out = job ? commandOutput(ghText(`repos/${slug}/actions/jobs/${job.id}/logs`, 'reading the log'), run.conclusion) : { lines: [], code: null };
     if (out.lines.length) process.stdout.write(out.lines.join('\n') + '\n');

@@ -203,7 +203,9 @@ export function kindOf(run: GhRun, own: boolean): HoldKind | 'ship' | null {
     .split('@')[0]
     .split('/')
     .pop();
-  // A ship's own light check (#1620) is named "heavy ship…" by heavy-ci.ts.
+  // A ship's own light check (#1620) is named "heavy ship…" by heavy-ci.ts, and a job on GitHub's own runners "heavy gh-…"
+  // or "heavy shipgh-…": the hold is for the CI desktop, so it leaves those alone (#2242).
+  if (file === 'citadel-heavy.yml' && /^heavy (ship)?gh-/.test(run.display_title ?? '')) return null;
   if (file === 'citadel-heavy.yml') return !/^heavy ship/.test(run.display_title ?? '') ? 'heavy' : own ? 'check' : null;
   if (!own) return null;
   if (file === 'flake-proof.yml') return 'proof';

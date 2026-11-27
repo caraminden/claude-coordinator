@@ -72,6 +72,32 @@ test("light-check-run: green, red that is the ship's own, flakes, main's own red
   }
 });
 
+// #2242 (Cara, 2026-11-27, "Go, with both changes" on #1912's count): the map leaves the browser test out for its cost,
+// so a ship touching public/ names it; one that doesn't, doesn't. Its name in parts: this test reads only the name, not
+// the file (test/pipeline-files.test.ts takes a whole path as an import).
+const browser = ['instant-open-browser', 'test', 'ts'].join('.');
+test('light-check-run: a ship touching public/ runs the browser test (instant-open-browser) too; one that does not, does not (#2242)', () => {
+  const r = repo();
+  try {
+    const ct = join(r.dir, 'new-ct');
+    writeFileSync(ct, '#!/usr/bin/env bash\n# knows --wide\necho "args $*"\n', { mode: 0o755 });
+    // The ship's test-only change (repo's own fixture), with the browser test in the tree.
+    writeFileSync(join(r.dir, 'test', browser), pass);
+    git(r.dir, 'add', '-A');
+    git(r.dir, 'commit', '-qm', 'browser test');
+    assert.match(r.run(0, '', { LIGHT_CHECK_TEST: ct }).out, new RegExp(`^args --wide --base ${r.base} --timeout 240$`, 'm'), 'no public/ change: the pick alone');
+    mkdirSync(join(r.dir, 'public'));
+    writeFileSync(join(r.dir, 'public', 'app.js'), 'export {};\n');
+    git(r.dir, 'add', '-A');
+    git(r.dir, 'commit', '-qm', 'front end');
+    const front = r.run(0, '✔ 1 passed', { LIGHT_CHECK_TEST: ct });
+    assert.match(front.out, new RegExp(`^args --wide --base ${r.base} --timeout 240 test/${browser.replaceAll('.', '\\.')}$`, 'm'), 'a public/ change: the browser test too');
+    assert.equal(front.verdict, 'light check: green');
+  } finally {
+    r.done();
+  }
+});
+
 test('light-check-run: installs packages when the lockfile changed, once (#1789)', () => {
   const r = repo();
   try {

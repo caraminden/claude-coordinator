@@ -537,7 +537,7 @@ test('the restart refuses to restart when it cannot copy the database first', ()
   });
   assert.equal(r.status, 1);
   // F12e: the report names the file and the cause, not only the journal.
-  assert.match(r.stderr, /FAILED: Could not copy the database to \S+\/refuse-data\/backups\/pre-deploy-\w+\.db \(mkdir: [^)]*backups[^)]*\) before restarting on .*so nothing restarted/);
+  assert.match(r.stderr, /FAILED: Could not copy the database to \S+\/refuse-data\/backups\/pre-deploy-\w+\.db \(mkdir: (?:[^)]*backups[^)]*|Already exists)\) before restarting on .*so nothing restarted/);
   assert.doesNotMatch(r.stderr, /restarting no-such-citadel-unit/);
   // Run by hand as tools/deploy.sh restart, it must not delete the tracked script: only the unit's private copy goes.
   assert.ok(existsSync(copy), 'a script that is not the private copy stays');

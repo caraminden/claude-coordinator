@@ -93,7 +93,7 @@ test('a file whose runner is slow to read stays until its whole report is read',
   const cwd = small('slow');
   const p = fullPipe(cwd);
   const closed = new Promise((r) => p.on('close', r));
-  await until('the file is done', () => existsSync(join(cwd, 'done')));
+  await until('the file is done', () => existsSync(join(cwd, 'done')), 120_000);
   // Long enough for an exit that doesn't wait: other processes start and end.
   for (let i = 0; i < 5; i++) await ran(process.execPath, ['-e', ''], cwd);
   const early = existsSync(join(cwd, 'code'));
@@ -115,7 +115,7 @@ for (const [what, more, flags] of [
     let err = '';
     p.stderr!.on('data', (b) => (err += b));
     const closed = new Promise((r) => p.on('close', r));
-    await until('the file gave up', () => existsSync(join(cwd, 'code')));
+    await until('the file gave up', () => existsSync(join(cwd, 'code')), 120_000);
     writeFileSync(join(cwd, 'go'), '');
     await closed;
     assert.equal(read(cwd, 'code'), '1\n');

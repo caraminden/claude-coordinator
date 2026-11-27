@@ -26,13 +26,29 @@ Yes, but not the land gate itself. I ran Citadel's whole suite here to find out 
    - Files that fail there but not on the desktop are flake suspects, and they feed `known-flakes`.
    - That extends the nightly flake sweep already being built.
 4. **Bisecting a red main** (`tools/land/blame.sh`): one session per suspect commit, each running only the failing files.
-5. **The `CI FALLBACK` when the desktop is offline**, sharded across about 4 sessions instead of loading perigee. Worth it only if C1a shows a full run fits.
+5. **The `CI FALLBACK` when the desktop is offline**, sharded across about 4 sessions instead of loading perigee. C1a's numbers: about 9 min a shard across 4 sessions, so it's slower than the desktop but better than loading perigee.
 
 **Not the land gate.** Lands go one at a time, and the desktop runs the suite in 196 s. A slower gate makes every land slower. Keep the gate on the desktop.
 
 ### C1a. The full suite on this VM [measured 2026-11-27]
 
-SUITE_RESULT
+I ran `node --test test/` on Node 26.13.1 here: 4 vCPU, Node's default concurrency, as one background command, and with a mingw install, a wine install and a Rust build competing for the CPU part of the time.
+
+- **It finished in 2,022 s (33.7 min)**: 7,551 tests, 7,084 passed, 46 failed, 421 skipped. The desktop takes 196 s, so this VM is **about 10× slower** for Citadel's suite.
+- **The failures I checked were this environment, not the code:**
+  - **It runs as root (uid 0).** The "a lock or temp file that can't be opened" tests (deploy and restart locks, the test-run temp file, the jobs rider) assume permissions can deny, and for root they don't.
+  - **A shallow clone** (`--is-shallow-repository` true, 53 commits). That breaks `.git-blame-ignore-revs`, the review bench's commits, the blame cases and "the last release's Store".
+  - **No `sqlite3` CLI.** All nine backup and off-box tests, and the prune tests.
+  - **No biome**, so the format check fails.
+  - **systemd user units** (runner add and remove).
+  - Fixes: run the suite as a non-root user, `git fetch --unshallow`, and `apt-get install sqlite3`, plus biome from npm.
+  - I didn't rerun with those fixes, so I can't say all 46 clear.
+- **The VM didn't pause** during a 34-minute background command. That answers my earlier open question for at least that length.
+
+**What it means:**
+- **A whole run in one session** fits easily inside 2 h, but at about 34 min it's no gate.
+- **Sharded across 4 sessions:** about 9 min each plus about 1–2 min of start, so roughly the land timeout. That's too slow for every land, but fine as the offline fallback, and good for nightly runs and burn-ins.
+- **Single files and burn-ins of a few files** take seconds to minutes. That's the sweet spot.
 
 ## C2. "Rust being there should mean we can do peek auras builds?"
 

@@ -6,6 +6,152 @@ Research only: no code was changed. I read `src/cloud-pool.ts` and `src/cloud-tu
 
 > **Read Part A first.** It was added after Cara's follow-ups that night: at 23:20 PST, "oh, this might be useless then, if we cant have the sessions operate remotely", and at 23:40 PST, "The goal needs to be to find any uses for the cloud sessions that can look IDENTICAL to a Citadel user to a local (or on our own machines) session". Cloud sessions are off until this is figured out. Part A re-ranks everything by that test. Part B, from "Top 3 (first pass)" on, is the first report, unchanged except for its labels.
 
+> **Part C (Cara's six questions, 2026-11-27) comes first and supersedes A and B where they disagree.** Her calls: the claude CLI only, so no endpoint, connector or Tailscale; and no per-person setup to babysit.
+
+---
+
+# Part C: answers to Cara's six questions (added 2026-11-27)
+
+## C1. "2 hours is a LOT longer, we could definitely do some test runs or something to help our CI pipeline?"
+
+Yes, but not the land gate itself. I ran Citadel's whole suite here to find out (numbers in C1a).
+
+**Where cloud test runs help CI**, best first:
+1. **Mutation runs** (5.9 h a week, one waited 70 min for a slot). They're long, CPU-only and parallel: the best fit there is.
+2. **Big burn-ins before a ship joins the line.**
+   - Today's burn-in is 10 runs, capped at 2.5 min. The Build 7 retro had four test files called "racy" that were plain reds.
+   - A cloud burn-in of a ship's new and changed test files, run 50× during the minion's own turn, catches real races *before* the train. Plain reds show up as 50/50 failures, not "racy".
+   - The 4 vCPU box is a harsher timing shape than the desktop, which is good for this.
+3. **Nightly "different machine" full runs, 3 in parallel sessions.**
+   - Files that fail there but not on the desktop are flake suspects, and they feed `known-flakes`.
+   - That extends the nightly flake sweep already being built.
+4. **Bisecting a red main** (`tools/land/blame.sh`): one session per suspect commit, each running only the failing files.
+5. **The `CI FALLBACK` when the desktop is offline**, sharded across about 4 sessions instead of loading perigee. C1a's numbers: about 9 min a shard across 4 sessions, so it's slower than the desktop but better than loading perigee.
+
+**Not the land gate.** Lands go one at a time, and the desktop runs the suite in 196 s. A slower gate makes every land slower. Keep the gate on the desktop.
+
+### C1a. The full suite on this VM [measured 2026-11-27]
+
+I ran `node --test test/` on Node 26.13.1 here: 4 vCPU, Node's default concurrency, as one background command, and with a mingw install, a wine install and a Rust build competing for the CPU part of the time.
+
+- **It finished in 2,022 s (33.7 min)**: 7,551 tests, 7,084 passed, 46 failed, 421 skipped. The desktop takes 196 s, so this VM is **about 10× slower** for Citadel's suite.
+- **The failures I checked were this environment, not the code:**
+  - **It runs as root (uid 0).** The "a lock or temp file that can't be opened" tests (deploy and restart locks, the test-run temp file, the jobs rider) assume permissions can deny, and for root they don't.
+  - **A shallow clone** (`--is-shallow-repository` true, 53 commits). That breaks `.git-blame-ignore-revs`, the review bench's commits, the blame cases and "the last release's Store".
+  - **No `sqlite3` CLI.** All nine backup and off-box tests, and the prune tests.
+  - **No biome**, so the format check fails.
+  - **systemd user units** (runner add and remove).
+  - Fixes: run the suite as a non-root user, `git fetch --unshallow`, and `apt-get install sqlite3`, plus biome from npm.
+  - I didn't rerun with those fixes, so I can't say all 46 clear.
+- **The VM didn't pause** during a 34-minute background command. That answers my earlier open question for at least that length.
+
+**What it means:**
+- **A whole run in one session** fits easily inside 2 h, but at about 34 min it's no gate.
+- **Sharded across 4 sessions:** about 9 min each plus about 1–2 min of start, so roughly the land timeout. That's too slow for every land, but fine as the offline fallback, and good for nightly runs and burn-ins.
+- **Single files and burn-ins of a few files** take seconds to minutes. That's the sweet spot.
+
+## C2. "Rust being there should mean we can do peek auras builds?"
+
+Mostly yes: builds and checks, not running the overlay.
+
+I couldn't read `caraminden/peek-auras` (it's private, and this session's GitHub access covers Citadel's repo only), so I tested the same shape of program [measured]:
+- `rustup target add x86_64-pc-windows-gnu`: **4.6 s**. Installing the mingw linker from Ubuntu's apt: **51 s**.
+- A crate using the `windows` crate (0.58) to make a layered, topmost, click-through overlay window cross-compiled to a real Windows `.exe` (PE32+ x86-64) in **10.6 s** (release).
+- The **MSVC** toolchain is out: Microsoft's SDK hosts (`download.visualstudio.microsoft.com`, `aka.ms`) are blocked, so `cargo-xwin` can't fetch the SDK. The GNU target catches nearly every compile error, but not MSVC-only linker or CRT differences, or `build.rs` steps that call MSVC tools.
+- **Running Windows tests:** wine is in Ubuntu's apt, but took 5 min to install, and my test binary crashed under it (`free(): invalid pointer`, SIGABRT). An overlay's real behaviour needs real Windows anyway.
+- The Linux side (`cargo check`, `clippy`, tests of crates that aren't Windows-only) works. #2147's trial ran a crate's `cargo test` in 8 min.
+
+**So for Peek Auras in the cloud:**
+- `cargo clippy --target x86_64-pc-windows-gnu`, `cargo build --target x86_64-pc-windows-gnu`, and the platform-free unit tests on Linux.
+- The Windows box keeps the MSVC release build and anything that runs the overlay.
+- Rust jobs were 509 jobs and 19.3 h last week across schemes. The check and clippy part of that can move.
+
+## C3. "Github actions are limited, cloud claude compute isnt, so why would we waste limited resources?"
+
+I disagree on both halves. The answer differs by repo.
+
+- **Cloud Claude compute is limited.**
+  - It "counts toward your plan's usage limits" and shares "rate limits with all other Claude and Claude Code usage within your account". That's the same 5-hour and weekly limits every Citadel minion turn on that login draws from. https://code.claude.com/docs/en/claude-code-on-the-web (2026-11-27).
+  - There's also an undisclosed cap on sessions at once ("at the limit for tasks Claude can work on at the same time", https://code.claude.com/docs/en/routines).
+  - The VM is free, but every cloud job is a model session.
+- **GitHub Actions is unlimited where it matters most here.**
+  - "The use of standard GitHub-hosted runners is free: In public repositories", and Actions is "free for standard GitHub-hosted runners in public repositories, and for self-hosted runners". From GitHub's docs source, `github/docs` → `content/billing/concepts/product-billing/github-actions.md` and `data/reusables/actions/actions-billing.md`, read 2026-11-27. docs.github.com itself is blocked from this VM.
+  - **`caraminden/claude-coordinator` is public** [checked 2026-11-27], so Citadel's own model-free jobs on GitHub's runners cost nothing scarce.
+  - **The scheme repos are private**: peek-auras, voiceanalyzer, transitiontracker, theory-of-crafting, transdata, twireader, cantrips, trippresenter, mandate, gamedevtest and others. Those draw from the account's included allowance ($0.006 a minute for standard Linux). I couldn't see that allowance or its use.
+
+**So:**
+- **Citadel's own heavy jobs:** GitHub runners (free, unlimited, and they spend none of anyone's Claude limits).
+- **Private schemes:** cloud sessions. Cara is right there, since Actions minutes are the scarcer pool for them.
+- Either way, make each cloud job cheap in tokens: one short brief, one batched command, wait, push. The model then mostly waits instead of thinking.
+
+## C4. "for the cloud env… I dont want to be babysitting these sessions, how often would we need to do this? … every Citadel user would need to do it"
+
+**Nobody needs to do it.** Drop per-person environments; that's my Part B idea 3 withdrawn.
+
+- What the environment was for is cheap to do inside every session [measured]:
+  - Node 26: **4.7 s** to download and unpack from nodejs.org.
+  - Citadel's `npm ci`: seconds.
+  - The Rust Windows target: 4.6 s. mingw: 51 s.
+- So the brief (or a committed `SessionStart` hook gated on `CLAUDE_CODE_REMOTE=true`, which runs in every user's cloud session with no setup) installs what the job needs. Zero per-person steps, nothing to babysit.
+- **If someone ever did make an environment:** the setup cache rebuilds itself about every 7 days and whenever the script changes. Still nothing to tend.
+- **The one thing only an environment fixes is Android's `dl.google.com`.** The network is per environment, per person. So Android stays home, as it is now.
+
+## C5. "I dont think any of those options for connecting to Citadel are viable, we should just use the claude CLI"
+
+Agreed. Here's what that means concretely:
+- **Start:** `claude --cloud "<brief>"`.
+- **Follow-up:** `claude -p "<msg>" --cloud <id>`.
+- **Results:** a pushed `cloud/…` branch, with `claude --teleport <id>` as the fallback read.
+- **The consequence:** a cloud session can't *be* a minion and look identical, because there are no mid-turn cards, live stream or shared folder. So only Part A's family 1 is left: **the minion stays home and uses the cloud as a backend for steps.** Every use in C1–C3 fits that.
+
+## C6. "Tell me more about the cloud-turn.mjs"
+
+### What it does today
+
+`src/cloud-turn.mjs` runs **in place of `claude` for one minion turn**. The turn wrapper (`src/turn-run.mjs`) starts it with a `cloud.json` job the runner wrote (`CloudPool.job` in `src/cloud-pool.ts`). It prints stream-json like a claude turn would, so the chat, Stop and liveness treat it as any turn. Step by step:
+
+1. **Reach check:** `git ls-remote origin HEAD` from the minion's checkout. If GitHub can't be reached, the result could never come back, so it ends without sending anything.
+2. **Start (first turn), under a fake terminal.**
+   - `claude --cloud` refuses `-p` (#2147), so it runs `claude --cloud "<brief>"` under util-linux `script`.
+   - `keyFor` presses Enter on the first-run screens it recognises by text: the theme, "Press enter", "Yes, proceed", and the trust prompt (down then Enter).
+   - It watches the screen until a `claude.ai/code/session_…` link shows (`sessionIn`), up to `startMs` (180 s).
+   - The brief comes from `cloudPrompt`: "you're minion #N's cloud session… write `.citadel/result.json`… push to `cloud/t<id>-<time>`".
+3. **Follow-ups (later turns):** `claude -p "<text>" --cloud <session> --output-format json`, which queues the message and returns `{ok,…}`.
+   - It first checks the *previous* turn's branch for a late answer (`lateResult`), pushed after a Stop or a timeout.
+   - A refusal drops the session, so the next turn runs at perigee.
+4. **Wait:** every `pollMs` (20 s) it runs `git ls-remote` on the turn's own branch, until a new commit shows or `limitMs` passes (90 min, or 30 min if the id never showed).
+5. **Read back** (`fetchResult`):
+   - Fetches the branch and reads `.citadel/result.json` (`readResult` checks its shape, since it comes from outside).
+   - Copies up to 20 files of up to 5 MB from `.citadel/out/` into the minion's files.
+   - Then deletes the branch. If any file couldn't come home, the branch stays.
+6. **Card:** a result's `card` is POSTed to Citadel's `/api/tickets/<id>/questions`, the same route `ask_question` uses. The answer comes back as the minion's next message, which becomes the next follow-up.
+7. **Fallback read:** if nothing was pushed by the limit, `claude --teleport <session>` runs in a throwaway clone, under the fake terminal again, and the result is read from between `CITADEL-RESULT-BEGIN`/`END` on screen.
+8. **End:** a `result` event with `cloud_cost_usd` (an estimate: $0.40 a start, $0.10 a follow-up). Stop kills the local driver only. The cloud session goes on, and its late push is shown next turn.
+
+### Its weak spots
+
+- **Screen scraping:** the start depends on recognising onboarding text and a link on a terminal screen. Any Claude Code UI change breaks it quietly. The 180 s start limit is mostly onboarding (55 s in #2147).
+- **The id that never shows:** it keeps watching the branch for 30 min, but a push after that is lost (the code's own `shortcut:` comment).
+- **Teleport is scraped too.** It's slow (up to 90 s) and needs the same fake terminal.
+- **The 120 s follow-up timeout is ambiguous:** "may have the message", so the person has to resend.
+- **Cost is a guess by turn,** not tokens. The real use is on the person's plan and never reaches Citadel.
+- **The cloud *is* the turn.** That's the root of Cara's "turn it off": no mid-turn cards, no live progress, no shared folder, no Citadel tools.
+
+### What changing it into a backend step looks like (S0 in Part A)
+
+Keep steps 1–5 and 7, which are the start, poll and read-back that work. Change what wraps them:
+
+- **A command, not a turn:** `citadel-cloud run --brief <file> [--minutes N] [--out <dir>]`, on every turn's PATH beside `citadel-job` and `citadel-heavy`.
+  - A home minion calls it in the middle of its own turn.
+  - It prints a progress line every minute or so ("cloud session session_…: running, 12 min, branch cloud/…") so the minion's stream stays alive and the person sees a step running.
+  - It prints the result's `reply` and the paths of its files on exit.
+  - Exit code 75 means "couldn't use the cloud", and the minion runs the step at home, as `citadel-heavy` does today.
+- **No cards from the backend:** a backend session has no person to ask. A `card` in its result goes back to the home minion as text, and the minion decides whether to ask the person itself, with a real card in its own turn.
+- **The home minion keeps everything else:** chat, live stream, cards, steering, Stop (which also stops the local driver; the session's late push is then discarded), the shared folder, and Citadel's tools.
+- **Sender pays:** it runs on the turn's own login (`turnPerson`), as today.
+- **A `cloud` place in `citadel-heavy`** for jobs marked cloud-friendly (C1's list, C2's checks), so minions don't have to choose. The line routes long and parallel jobs to it and keeps short ones home.
+- **Size:** M. Most of the code exists. The new parts are the CLI wrapper, progress lines, exit codes, the result-to-stdout shape, and the heavy place.
+
 ---
 
 # Part A: what looks identical to a local session (added 2026-11-27)

@@ -223,7 +223,8 @@ test("a container minion turn's start (its container's spec, folders and Gradle 
   const claude = join(data, 'bin', 'claude');
   await mkdir(dirname(claude), { recursive: true });
   await writeFile(claude, '');
-  const link = Object.assign(new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), data, claude, new Containers(run), 'citadel-claude-t-'), { home });
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), data, claude, new Containers(run), 'citadel-claude-t-');
+  Object.defineProperty(link, 'home', { value: home }); // its private home is the host's, homedir()
   const calls = await syncCallsUnder(data, () => link.ensure(person.id, true));
   assert.deepEqual(calls, []);
   // The start did its work: the person's volume has Gradle's defaults and the build cache's init script, and the container started.

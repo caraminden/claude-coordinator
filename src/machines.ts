@@ -205,6 +205,11 @@ export function storedCheck(m: Pick<Machine, 'last_check'>): StoredCheck | null 
 
 const SSE_HEADERS = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' };
 
+/** The jobs an agent's info says it holds, or null when it names none. */
+function cleanKnown(v: unknown): { id: number; state: string }[] | null {
+  return Array.isArray(v) ? v.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : [])) : null;
+}
+
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -410,7 +415,7 @@ export class MachineRelay {
   private startedAt = Date.now();
   private shown = '';
   /** The jobs queue's hooks (#857), set once by the server: an agent's report of the jobs it knows, and an agent gone. */
-  jobHooks: { info(machine: Machine, known: { id: number; state: string }[] | null, since: number): void; offline(machineId: number): void } | null = null;
+  jobHooks: { info(machine: Machine, known: { id: number; state: string }[] | null, since: number, builds?: { id: number; state: string }[] | null): void; offline(machineId: number): void } | null = null;
 
   constructor(store: Store, onChange: () => void) {
     this.store = store;
@@ -566,8 +571,10 @@ export class MachineRelay {
     const agent = this.agents.get(machineId);
     const machine = this.store.getMachine(machineId);
     if (!agent || !machine) return false;
-    // With no jobs block (a typo broke it) it hears only of a job it said it holds (2MA10), never of a new one.
-    if (!storedOffer(machine) && (msg.type === 'job.start' || !agent.jobs?.has(msg.id))) return false;
+    // With no jobs block (a typo broke it) it hears only of a job it said it holds (2MA10), never of a new one. A build
+    // job (H2) needs no block: the Builds role is its go, and the agent's BuildRunner takes it.
+    const build = this.store.getMachineJob(msg.id)?.go === 'builds';
+    if (!build && !storedOffer(machine) && (msg.type === 'job.start' || !agent.jobs?.has(msg.id))) return false;
     agent.res.write(`data: ${JSON.stringify({ job: msg })}\n\n`);
     return true;
   }
@@ -806,7 +813,7 @@ export class MachineRelay {
   }
 
   /** The agent says what it offers: its servers, and the workspaces in its config. False if it isn't connected. */
-  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown; programs?: unknown; config_file?: unknown; report?: unknown }): boolean {
+  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown; jobs?: unknown; known_jobs?: unknown; known_builds?: unknown; programs?: unknown; config_file?: unknown; report?: unknown }): boolean {
     const agent = this.agents.get(machine.id);
     // A runner agent posts no info: it offers no MCP server or workspaces.
     if (!agent) return false;
@@ -825,9 +832,11 @@ export class MachineRelay {
     // with no block (a typo in its config still leaves them running there); with no list at all nothing is taken as lost (MA1).
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
-    const known = Array.isArray(body.known_jobs) ? body.known_jobs.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : [])) : null;
-    agent.jobs = known && new Set(known.map((k) => k.id));
-    if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
+    const known = cleanKnown(body.known_jobs);
+    // Only the builds it holds (H2), when its GPU jobs folder can't be read yet: only build jobs are reconciled.
+    const builds = known ? null : cleanKnown(body.known_builds);
+    agent.jobs = (known ?? builds) && new Set((known ?? builds)!.map((k) => k.id));
+    if (offer || machine.jobs || known || builds) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since, builds);
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
       const prev = storedLend(this.store, machine);

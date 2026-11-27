@@ -11,7 +11,7 @@
 // its slot is free and asks place() again each minute meanwhile. --here, light and priority jobs never ask.
 // Pure but for BuildPlacer's reads.
 import { HEAVY_SIZES } from './heavy-place.ts';
-import { rank } from './machine-balancer.ts';
+import { type MachineBalancer, rank } from './machine-balancer.ts';
 
 export const HEAVY_KINDS = ['apk', 'cargo', 'suite', 'other'] as const;
 export type HeavyKind = (typeof HEAVY_KINDS)[number];
@@ -90,4 +90,15 @@ export class BuildPlacer {
 export function buildsReady(setup: Record<string, unknown> | null, shipped: Record<string, string>): boolean {
   const run = setup?.run as { role?: unknown; ok?: unknown; images?: unknown } | undefined;
   return run?.role === 'builds' && run.ok === true && Object.keys(shipped).length > 0 && JSON.stringify(run.images ?? {}) === JSON.stringify(shipped);
+}
+
+/**
+ * May a heavy job start on a machine now (the balancer's ask()), a build also kept under its Builds role's threads
+ * `cap`: place() only read the room, and two jobs placed at once must not both start past it. A build bigger than the
+ * cap starts when no other build runs there, so it never waits for ever.
+ */
+export function buildRoom(balancer: Pick<MachineBalancer, 'ask' | 'holding'>, machineId: number, job: { key: string; label: string; size: number }, cap: number | null): 'start' | 'late' | 'wait' {
+  const held = cap === null || !job.key.startsWith('build:') ? 0 : balancer.holding(machineId, 'build:');
+  if (cap !== null && held > 0 && held + job.size > cap) return 'wait';
+  return balancer.ask(machineId, job);
 }

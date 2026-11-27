@@ -99,8 +99,8 @@ usage() {
 usage: citadel-heavy [--here] [--heavy] [--back <path>]... <command> [args...]
        citadel-heavy --long <command> [args...]
   --here   run the command on this machine, never on the scheme's CI or another machine.
-  --back <path>  a file or folder the command makes that you need here (an APK, a binary), relative to the working
-           copy's top; repeat it for more. The job then runs on a machine with the Builds role when one has room, and
+  --back <path>  a file or folder the command makes that you need here (an APK, a binary), from this folder
+           (it must be inside the working copy); repeat it for more. The job then runs on a machine with the Builds role when one has room, and
            these come back into your working copy.
   --heavy  guess a command with no past runs is heavy (it is light by default); its own runs decide after.
   --long   run the command on the scheme's CI only (not with --here); a long job.
@@ -320,6 +320,11 @@ if [ -n "$hasci" ] && [ ${#back[@]} -eq 0 ]; then
     # 75: handed over to Citadel for ships, so it took no time here.
     [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000 + all - took))" "$took" "$status" >>"$dir/history"; } 2>/dev/null
     exit "$status"
+  fi
+  # CI gave it back (no runner took it): a machine with the Builds role still comes before perigee's line.
+  if [ -z "$here$first${CITADEL_HEAVY_NO_ELSEWHERE:-}" ] && [ -n "${COORDINATOR_API:-}" ] && [ -f "${builds[1]}" ]; then
+    elsewhere=1
+    run_elsewhere "$@"
   fi
 fi
 

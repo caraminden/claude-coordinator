@@ -8,7 +8,7 @@
 // file alone (src/turn-launch.ts): it imports only from heavy-ci.ts.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { FALLBACK, SECRETS } from './heavy-ci.ts';
 
@@ -19,16 +19,23 @@ const POLL_MS = Number(env.CITADEL_HEAVY_BUILD_POLL_MS) || 5_000;
 const AWAY_MS = Number(env.CITADEL_HEAVY_AWAY_MS) || 90_000;
 const INPUT_MAX = 2 * 1024 ** 3;
 
-/** The kind a command is (its image and size on the server): the first word past env settings and wrappers. */
-export function kindOf(argv: readonly string[]): 'apk' | 'cargo' | 'suite' | 'other' {
+/**
+ * The kind a command is (its image and size on the server): the first word past env settings and wrappers. Null for
+ * Citadel's own tools (citadel-node, citadel-test), which live only on perigee's turn PATH, not in a build image.
+ */
+export function kindOf(argv: readonly string[]): 'apk' | 'cargo' | 'suite' | 'other' | null {
   const words = [...argv];
   while (words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]) || ['env', 'nice', 'time', 'timeout', 'ionice'].includes(basename(words[0])) || /^-|^[0-9]+[smhd]?$/.test(words[0]))) words.shift();
   const cmd = basename(words[0] ?? '');
+  if (cmd.startsWith('citadel-')) return null;
   if (cmd === 'cargo') return 'cargo';
   if (cmd === 'gradlew' || cmd === 'gradle' || cmd === 'apk-build.ts') return 'apk';
-  if (['npm', 'npx', 'node', 'pnpm', 'yarn', 'citadel-node', 'citadel-test'].includes(cmd)) return 'suite';
+  if (['npm', 'npx', 'node', 'pnpm', 'yarn'].includes(cmd)) return 'suite';
   return 'other';
 }
+
+/** podman never ran the command there (public/machine-agent.mjs, BUILD_NEVER_RAN): it may run here. */
+const NEVER_RAN = "podman couldn't start the build";
 
 class Refused extends Error {
   status: number;
@@ -60,8 +67,9 @@ const place = (kind: string) => call<{ spots: Spot[] }>('POST', '', { do: 'place
 function snapshot(top: string, into: string): string {
   const file = join(into, 'snapshot.tgz');
   const list = execFileSync('git', ['-C', top, 'ls-files', '-z', '-co', '--exclude-standard', '--', ':/', ...SECRETS.map((g) => `:(top,exclude,glob)${g}`)], { maxBuffer: 256 << 20 });
-  // A file deleted since it was added is in the list but not on disk: left out, not an error.
-  const r = spawnSync('tar', ['-C', top, '--null', '--ignore-failed-read', '-czf', file, '-T', '-'], { input: list, stdio: ['pipe', 'ignore', 'pipe'] });
+  // A file deleted since it was added is in the list but not on disk: left out, not an error. --no-recursion: a
+  // checked-out submodule is listed as its folder, and its own .env and keys must not ride along inside it.
+  const r = spawnSync('tar', ['-C', top, '--null', '--no-recursion', '--ignore-failed-read', '-czf', file, '-T', '-'], { input: list, stdio: ['pipe', 'ignore', 'pipe'] });
   if (r.status !== 0 && r.status !== 1) throw new Error(`tar couldn't pack the working copy: ${String(r.stderr).trim().slice(-300)}`);
   if (statSync(file).size > INPUT_MAX) throw new Error('the working copy packs to over 2 GB');
   return file;
@@ -85,10 +93,24 @@ async function runOnce(kind: string, argv: string[], back: string[], top: string
       started = await call('POST', '', { do: 'start', machine: s.id, kind, argv, dir, back, snapshot: snap, ...(env.CITADEL_HEAVY_BUILD_MINUTES ? { minutes: Number(env.CITADEL_HEAVY_BUILD_MINUTES) } : {}) });
       break;
     } catch (e) {
-      if (!(e instanceof Refused) || e.status !== 409) throw e;
+      if (e instanceof Refused && e.status === 409) continue;
+      // Citadel's own refusal: nothing was queued. No answer at all: it may have been, so it never runs here too.
+      if (e instanceof Refused) throw e;
+      say(`no answer from Citadel on sending it to ${s.name} (${(e as Error).message}), so it may run there: nothing more runs here`);
+      return 1;
     }
   }
   if (!started) return fallback('the machines with room turned it down');
+  try {
+    return await follow(started, kind, back, top, scratch);
+  } catch (e) {
+    say(`lost track of job #${started.job} on ${started.machine} (${(e as Error).message}): nothing more runs here`);
+    return 1;
+  }
+}
+
+/** Follows a started job to its end: its log, its files back, its status. */
+async function follow(started: { job: number; machine: string }, kind: string, back: string[], top: string, scratch: string): Promise<number | 'away'> {
   const { job: id, machine } = started;
   say(`runs on ${machine} (job #${id}), in Citadel's ${kind} build image`);
   if (env.CITADEL_HEAVY_ON_FILE) writeFileSync(env.CITADEL_HEAVY_ON_FILE, machine);
@@ -113,7 +135,15 @@ async function runOnce(kind: string, argv: string[], back: string[], top: string
     if (j.state === 'running') ranFrom ??= Date.now();
     away = j.online ? null : (away ?? Date.now());
     if (away !== null && Date.now() - away >= AWAY_MS) {
-      await call('POST', '', { do: 'stop', job: id }).catch(() => {});
+      const stopped = await call('POST', '', { do: 'stop', job: id }).then(
+        () => true,
+        () => false,
+      );
+      // Still waiting there: it never started, so perigee's line takes it.
+      if (stopped && j.state === 'queued') {
+        await call('POST', '', { do: 'done', job: id }).catch(() => {});
+        return fallback(`${machine} went away before job #${id} started`);
+      }
       say(`${machine} went away mid-job, so job #${id} was stopped`);
       return 'away';
     }
@@ -126,22 +156,28 @@ async function runOnce(kind: string, argv: string[], back: string[], top: string
   if (env.CITADEL_HEAVY_RAN_FILE) writeFileSync(env.CITADEL_HEAVY_RAN_FILE, String(ran));
   const log = await call<Buffer>('GET', `/${id}/file?name=log`).catch(() => null);
   if (log) process.stdout.write(log);
-  // Refused before it ran (its role switched off, an image it lacks): nothing ran there, so it runs here.
-  if (j.state === 'refused' || (j.state === 'failed' && !ranFrom && j.exit_code === null)) {
+  // Refused before it ran (its role switched off), or podman never ran it (an image it couldn't get): it runs here.
+  if (j.state === 'refused' || (j.state === 'failed' && j.exit_code === null && (j.error ?? '').startsWith(NEVER_RAN))) {
     await call('POST', '', { do: 'done', job: id }).catch(() => {});
     return fallback(`${machine} didn't run it (${j.error ?? j.state})`);
   }
   if (back.length && j.exit_code !== null) {
     const tar = await call<Buffer>('GET', `/${id}/file?name=back`).catch(() => null);
-    if (!tar) say(`none of ${back.join(', ')} came back`);
-    else {
+    let why = tar ? null : "they couldn't be fetched";
+    if (tar) {
       const t = join(scratch, 'back.tar');
       writeFileSync(t, tar);
       // podman cp's tar holds back.tgz, the files as the command left them, relative to the working copy's top.
-      const r = spawnSync('sh', ['-c', 'tar -xOf "$1" back.tgz | tar -xzf - -C "$2"', 'sh', t, top], { stdio: ['ignore', 'inherit', 'pipe'] });
-      if (r.status !== 0) say(`the files that came back couldn't be unpacked: ${String(r.stderr).trim().slice(-300)}`);
-      else say(`brought back ${back.join(', ')} from ${machine}`);
+      const r = spawnSync('tar', ['-xf', t, '-C', scratch, 'back.tgz'], { stdio: ['ignore', 'inherit', 'pipe'] });
+      const u = r.status === 0 ? spawnSync('tar', ['-xzf', join(scratch, 'back.tgz'), '-C', top], { stdio: ['ignore', 'inherit', 'pipe'] }) : r;
+      if (u.status !== 0) why = `they couldn't be unpacked: ${String(u.stderr).trim().slice(-300)}`;
     }
+    if (why) {
+      // Kept on Citadel, so a second look can still get them; a green build without its files isn't green here.
+      say(`${back.join(', ')} didn't come back from ${machine}: ${why}; job #${id}'s results stay on Citadel`);
+      return j.exit_code || 1;
+    }
+    say(`brought back ${back.join(', ')} from ${machine}`);
   }
   await call('POST', '', { do: 'done', job: id }).catch(() => {});
   if (j.exit_code !== null) return j.exit_code;
@@ -161,12 +197,19 @@ export async function main(args: string[]): Promise<number> {
   args.shift();
   if (!args.length) return (say('usage: heavy-builds.ts [--place-only] [--back <path>]... -- <command> [args...]'), 2);
   const kind = kindOf(args);
+  if (!kind) return only ? 1 : fallback("Citadel's own tools are only here");
   if (only) return (await place(kind).catch(() => [])).length ? 0 : 1;
   let top: string;
   try {
     top = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return fallback('this folder is not a git working copy');
+  }
+  // --back paths are from here; the server and the image take them from the working copy's top.
+  for (const [i, b] of back.entries()) {
+    const rel = relative(top, resolve(b));
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return (say(`--back ${b} isn't inside the working copy`), 2);
+    back[i] = rel;
   }
   const scratch = mkdtempSync(join(env.TMPDIR || '/tmp', 'heavy-builds-'));
   try {

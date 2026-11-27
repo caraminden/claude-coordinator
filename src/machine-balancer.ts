@@ -179,6 +179,20 @@ export class MachineBalancer {
     return go;
   }
 
+  /** A job already running there (found again after a server restart) holds its size, whatever the plan. */
+  hold(machineId: number, job: { key: string; label: string; size: number }) {
+    const jobs = this.heavy.get(machineId) ?? new Map<string, HeavyJob>();
+    this.heavy.set(machineId, jobs);
+    if (jobs.get(job.key)?.running) return;
+    jobs.set(job.key, { ...job, since: this.d.now(), running: true });
+    this.d.changed([machineId]);
+  }
+
+  /** Threads that running jobs whose key starts with `prefix` hold there (a role's threads cap, checked at the start). */
+  holding(machineId: number, prefix: string): number {
+    return [...(this.heavy.get(machineId)?.values() ?? [])].filter((h) => h.running && h.key.startsWith(prefix)).reduce((n, h) => n + h.size, 0);
+  }
+
   /** Every job there whose key starts with `prefix` ended or stopped waiting, but `keep`. */
   release(machineId: number, prefix: string, keep: string | null) {
     const jobs = this.heavy.get(machineId);

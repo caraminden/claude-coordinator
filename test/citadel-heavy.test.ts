@@ -847,13 +847,14 @@ function elsewhere(env: NodeJS.ProcessEnv) {
   const log = join(root, `builds-asked-${n}`),
     room = join(root, `builds-room-${n}`),
     ci = join(root, `ci-on-${n}`),
-    ciRan = join(root, `ci-ran-${n}`);
+    ciRan = join(root, `ci-ran-${n}`),
+    ciBack = join(root, `ci-back-${n}`);
   mkdirSync(bin);
   writeFileSync(
     join(bin, 'citadel-node'),
     `#!/bin/sh
 case "$1" in
-  *heavy-ci.ts) [ -e '${ci}' ] || exit 1; [ "$2" = --repo ] && { echo o/r; exit 0; }; touch '${ciRan}'; exit 0 ;;
+  *heavy-ci.ts) [ -e '${ci}' ] || exit 1; [ "$2" = --repo ] && { echo o/r; exit 0; }; touch '${ciRan}'; [ -e '${ciBack}' ] && { echo none >"$CITADEL_HEAVY_FALLBACK_FILE"; exit 120; }; exit 0 ;;
   *heavy-builds.ts) shift; echo "$*" >>'${log}'
     case " $* " in *" --place-only "*) [ -e '${room}' ]; exit $? ;; esac
     if [ -e '${room}' ]; then printf "Josh's PC" >"$CITADEL_HEAVY_ON_FILE"; echo 3 >"$CITADEL_HEAVY_RAN_FILE"; echo remote-out; exit 7; fi
@@ -864,7 +865,7 @@ exec node "$@"
     { mode: 0o755 },
   );
   const asked = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
-  return { env: { ...env, CITADEL_HEAVY_HERE: undefined, COORDINATOR_API: 'http://citadel.invalid', CITADEL_HEAVY_REPLACE_S: '0', PATH: `${bin}:${process.env.PATH}` }, asked, room, ci, ciRan };
+  return { env: { ...env, CITADEL_HEAVY_HERE: undefined, COORDINATOR_API: 'http://citadel.invalid', CITADEL_HEAVY_REPLACE_S: '0', PATH: `${bin}:${process.env.PATH}` }, asked, room, ci, ciRan, ciBack };
 }
 
 test("with a machine's Builds role free it runs there: its output and status come back, and the history says on:<machine>", () => {
@@ -904,6 +905,20 @@ test('a log-only job in a scheme with CI goes to CI as before; one with --back g
   assert.equal(e.asked().length, 0);
   assert.equal(spawnSync(heavy, ['--back', 'out.apk', 'true'], { env: e.env, timeout: 30_000 }).status, 7);
   assert.equal(e.asked().length, 1);
+});
+
+test("a log-only job CI gives back (no runner took it) goes to the Builds role before perigee's line", () => {
+  const { dir, env } = folder(1);
+  const e = elsewhere(env);
+  writeFileSync(e.ci, '');
+  writeFileSync(e.ciBack, '');
+  writeFileSync(e.room, '');
+  const here = join(root, `ran-here-${n++}`);
+  assert.equal(spawnSync(heavy, ['sh', '-c', touch(here)], { env: e.env, timeout: 30_000 }).status, 7);
+  assert.ok(existsSync(e.ciRan), 'CI was asked first');
+  assert.equal(e.asked().length, 1);
+  assert.ok(!existsSync(here), 'nothing ran on perigee');
+  assert.equal(lastLine(dir)[3], "on:Josh's PC");
 });
 
 test("waiting in perigee's line with the slot busy and no machine free, it asks again and leaves the line once one has room", async () => {

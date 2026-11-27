@@ -114,7 +114,7 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   // Switched on: its workspace tools get their first check now.
   if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
   // A job already running there goes on to its end (its minion hears of it); one that hasn't started never will (2MA9).
-  if (projects !== undefined) app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, 'gpu', j.project_id));
+  if (projects !== undefined) app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, j.go === 'builds' ? 'builds' : 'gpu', j.project_id));
   if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return app.machines.view(app.store.getMachine(machine.id)!);
@@ -167,7 +167,7 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
   app.machines.rolesChanged(machine.id);
   if (role === 'turns') app.runner.turnLine.pump();
   // A job already running goes on to its end; one that hasn't started never will (2MA9). A turn mid-call loses the tools now.
-  app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, 'gpu', j.project_id));
+  app.jobs.drop(machine.id, `its scheme was taken off ${machine.name}`, (j) => (j.state === 'needs-go' || j.state === 'queued') && !app.store.roleGrants(machine.id, j.go === 'builds' ? 'builds' : 'gpu', j.project_id));
   if (role === 'tools') app.machines.endSessionsWhere(machine.id, (id) => !app.store.roleGrants(machine.id, 'tools', id));
   app.broadcast({ type: 'machines', machines: app.machines.list() });
   return { roles: rolesView(roles), machine: app.machines.view(app.store.getMachine(machine.id)!) };

@@ -100,7 +100,7 @@ import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
-import { BuildPlacer, buildsReady } from './src/heavy-builds.ts';
+import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import type { GhJob } from './src/gh-bodies.ts';
 import { handOver, standby } from './src/handover.ts';
 import { guardPipes, keepServing, safely } from './src/safely.ts';
@@ -794,8 +794,9 @@ const buildPlacer = new BuildPlacer({
 const jobs = new MachineJobs({
   store,
   broadcast,
-  room: (id, job) => balancer.ask(id, job),
+  room: (id, job) => buildRoom(balancer, id, job, job.key.startsWith('build:') ? (buildsRole(id)?.caps.threads ?? null) : null),
   heavyDone: (key) => balancer.done(key),
+  heavyHeld: (id, job) => balancer.hold(id, job),
   buildsMay: (job) => buildPlacer.buildsMay(job.machine_id, job.project_id),
   freed: (id, keep) => balancer.release(id, 'gpu:', keep),
   send: (id, msg) => machines.sendJob(id, msg),
@@ -821,7 +822,7 @@ const jobs = new MachineJobs({
     return c ? join(services.dataDir(c), 'jobs', String(job.id)) : null;
   },
 });
-machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
+machines.jobHooks = { info: (m, known, since, builds) => jobs.reconcile(m, known, since, builds), offline: (id) => jobs.offline(id) };
 // One row per PC (Build 7 M2b): a runner agent connecting to the row a merge keeps finishes that merge.
 machines.onRunner = (m) => void finishMerge(app, m).catch((err) => console.error(`Machine merge into ${m.name}:`, err));
 // A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).

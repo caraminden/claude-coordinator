@@ -2133,6 +2133,8 @@ const BUILD_VOLUMES = new Map([
   ['citadel-npm', '/cache/npm'],
 ]);
 /** podman as the Builds role runs it: on Windows in the citadel-workers distro as its worker user, as role-setup-agent.mjs's builds() does (keep the two the same). */
+/** The start of a build's error when podman never ran its command (tools/heavy-builds.ts reads it). */
+const BUILD_NEVER_RAN = "podman couldn't start the build";
 export const BUILDS_PODMAN = process.platform === 'win32' ? ['wsl.exe', '-d', 'citadel-workers', '-u', 'citadel-worker', '--exec', '/bin/sh', '-c', 'XDG_RUNTIME_DIR=/run/user/$(id -u) exec podman "$@"', 'podman'] : ['podman'];
 
 /** Why a build job.start must be refused, or null: one of Citadel's build images, its one snapshot in, nothing of the owner's read. */
@@ -2291,8 +2293,9 @@ export class BuildRunner extends JobRunner {
     await new Promise((done) => out.end(done));
     if (this.closed || this.jobs.get(job.id) !== job || job.final) return;
     if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error, code);
-    // podman's own failures (125 to 127) are the machine's, not the command's.
-    if (code === null || code >= 125) return this.finish(job, 'failed', `podman run failed (${code ?? 'no exit code'}): ${cleanLog(fileTail(logFile, 2000)).slice(-500)}`);
+    // podman's own failure (125: the image, the volume) means the command never ran: citadel-heavy runs it elsewhere on
+    // these words. Any other code is the command's (the script exits with its status; 137 is a kill), so it is kept.
+    if (code === null || code === 125) return this.finish(job, 'failed', `${BUILD_NEVER_RAN} (${code ?? 'no exit code'}): ${cleanLog(fileTail(logFile, 2000)).slice(-500)}`);
     await this.copyBack(job);
     return this.finish(job, code === 0 ? 'done' : 'failed', code === 0 ? null : `it exited with code ${code}`, code);
   }
@@ -2797,7 +2800,8 @@ async function main() {
         ...(host ? host.summary() : {}),
         problems: [...(host?.summary().problems ?? []), ...runner.leftover(), ...builds.leftover()],
         ...(jobs ? { jobs } : {}),
-        ...(runner.restored ? { known_jobs: [...runner.known(), ...builds.known()] } : {}),
+        // GPU jobs folder not read yet: only the builds, which the server reconciles alone.
+        ...(runner.restored ? { known_jobs: [...runner.known(), ...builds.known()] } : builds.restored ? { known_builds: builds.known() } : {}),
       }),
     })
       .then(async (res) => {

@@ -308,6 +308,8 @@ export interface JobDeps {
   freed?(machineId: number, keep: string | null): void;
   /** A build job (H2's builds lane) ended or stopped waiting: its key's room is free (the balancer's done()). */
   heavyDone?(key: string): void;
+  /** A build job the agent still runs holds its room again (the balancer's hold(), after a server restart). */
+  heavyHeld?(machineId: number, job: { key: string; label: string; size: number }): void;
   /** A build job may still start on its machine: its Builds role is on, lent to its scheme and set up green (the role's switch is its go). */
   buildsMay?(job: MachineJob): boolean;
   now?: () => number;
@@ -736,8 +738,7 @@ export class MachineJobs {
         this.ended(next.id, '');
         continue;
       }
-      const size = Number((JSON.parse(next.kind) as { threads?: number }).threads) || HEAVY.gpu;
-      if (this.d.room?.(machineId, { key: `build:${next.id}`, label: `${next.kind_name} build ${next.id}`, size }) === 'wait') return;
+      if (this.d.room?.(machineId, { key: `build:${next.id}`, label: `${next.kind_name} build ${next.id}`, size: buildThreads(next) }) === 'wait') return;
       this.startJob(next);
       // Not sent (the agent went): the rest wait for it to come back.
       if (this.store.getMachineJob(next.id)?.state === 'queued') return;
@@ -914,12 +915,14 @@ export class MachineJobs {
    * here, or that this server never started, is told to stop. Then start what may start. `known` is null when the info
    * named no jobs at all (an agent from before MA1 whose block broke): nothing is lost on that.
    */
-  reconcile(m: Machine, known: { id: number; state: string }[] | null, since: number) {
-    const knows = new Map((known ?? []).map((k) => [k.id, k.state]));
-    if (known)
+  reconcile(m: Machine, known: { id: number; state: string }[] | null, since: number, builds: { id: number; state: string }[] | null = null) {
+    // `builds`: an agent whose GPU jobs folder isn't read yet names only its builds (H2), so only builds can be lost.
+    const list = known ?? builds;
+    const knows = new Map((list ?? []).map((k) => [k.id, k.state]));
+    if (list)
       for (const j of this.store.machineJobs({ machine: m.id, states: ACTIVE }, 50)) {
         // One started on this connection may not be in the agent's list yet: only one from before it can be lost.
-        if (knows.has(j.id) || (j.started_at ?? 0) >= since) continue;
+        if (knows.has(j.id) || (j.started_at ?? 0) >= since || (!known && j.go !== 'builds')) continue;
         this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error: 'the machine restarted' });
         this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${m.name} failed: the machine restarted and lost it.`);
       }
@@ -930,6 +933,8 @@ export class MachineJobs {
         if (!(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
         continue;
       }
+      // A build still running there holds its threads again (the balancer's holds are lost on a server restart).
+      if (j.go === 'builds' && (j.state === 'running' || j.state === 'starting')) this.d.heavyHeld?.(m.id, { key: `build:${j.id}`, label: `${j.kind_name} build ${j.id}`, size: buildThreads(j) });
       // A stop asked while it was offline (stopJob and the limit set error), or a pause: tell it again.
       if (j.error && !(ENDED as readonly string[]).includes(state as JobState)) this.d.send(m.id, { type: 'job.stop', id });
       else if (j.state === 'paused' && (state === 'running' || state === 'starting')) this.d.send(m.id, { type: 'job.pause', id });
@@ -1015,6 +1020,9 @@ export class MachineJobs {
 }
 
 /** An output's path as the agent sends it, relative to /out: segments of safe names, no `..`, no absolute paths. */
+/** The threads a build job (H2) was sized at. */
+const buildThreads = (j: MachineJob) => Number((JSON.parse(j.kind) as { threads?: number }).threads) || HEAVY.gpu;
+
 export function safeRelPath(p: string): string {
   const parts = p
     .replace(/\\/g, '/')

@@ -13,12 +13,16 @@ const minion = { who: ['minion'], refuse: 'Only the minion itself places its hea
 /** The agent takes a command of at most 64 arguments; the recipe's own take six. */
 const MAX_ARGS = 58;
 const LIMIT_MIN = { default: 120, max: 12 * 60 };
-/** What the image runs: the snapshot unpacked, the command in the caller's folder, then the files to bring back into /tmp/back.tgz, which the agent copies out. */
-const SCRIPT = [
+/**
+ * What the image runs: the snapshot unpacked, the command in the caller's folder, then the files to bring back (paths
+ * from the working copy's top) into /tmp/back.tgz, which the agent copies out. Exported for its test.
+ */
+export const SCRIPT = [
   'set -e',
   'mkdir -p /tmp/work',
-  // The snapshot comes in on stdin (the agent's BuildRunner: nothing is bind-mounted).
-  'tar -xzf - -C /tmp/work',
+  // The snapshot comes in on stdin (the agent's BuildRunner: nothing is bind-mounted). Root with every capability
+  // dropped can't chown, so the files stay its own.
+  'tar --no-same-owner -xzf - -C /tmp/work',
   'cd "/tmp/work/$1"',
   'back=$2',
   'shift 2',
@@ -27,7 +31,7 @@ const SCRIPT = [
   'set +e',
   '"$@"',
   's=$?',
-  `[ -z "$back" ] || printf '%s\\n' "$back" | tar -czf /tmp/back.tgz --ignore-failed-read -T - || echo "citadel-heavy: some of the files to bring back could not be packed" >&2`,
+  `[ -z "$back" ] || printf '%s\\n' "$back" | tar -czf /tmp/back.tgz -C /tmp/work --ignore-failed-read -T - || echo "citadel-heavy: some of the files to bring back could not be packed" >&2`,
   'exit $s',
 ].join('\n');
 

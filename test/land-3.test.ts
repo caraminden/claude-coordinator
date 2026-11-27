@@ -18,7 +18,7 @@ test('CI with no answer and a perigee busy past the limit refuse the ship: main 
     mkdirSync(heavy);
     // A heavy job holding the slot is busy too, and named.
     writeFileSync(join(heavy, 'slot-0.who'), 'peek #9 cargo test');
-    const holder = spawn('flock', [join(heavy, 'slot-0'), 'sleep', '30'], { stdio: 'ignore' });
+    const holder = spawn('flock', [join(heavy, 'slot-0'), 'sleep', '30'], { stdio: 'ignore', detached: true });
     try {
       await until('the slot is held', () => spawnSync('flock', ['-n', join(heavy, 'slot-0'), 'true']).status !== 0);
       const res = c.run({ ...extra, ...procAt(r), LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2' });
@@ -29,7 +29,7 @@ test('CI with no answer and a perigee busy past the limit refuse the ship: main 
       assert.equal(c.localRuns(), 0);
       assert.equal(git(r.source, 'rev-parse', 'main'), main);
     } finally {
-      holder.kill();
+      process.kill(-(holder.pid as number), 'SIGKILL'); // flock's child, the sleep, goes too: it must not outlive the file
     }
   }
 });

@@ -98,7 +98,7 @@ src/properties.ts: test/access-matrix.test.ts
 src/machines.ts: test/access-matrix.test.ts
 src/appname.ts: test/access-matrix.test.ts
 test/helpers.ts: test/access-matrix.test.ts
-test/land-train-fixture.ts: test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts
+test/land-train-fixture.ts: test/land-train.test.ts test/land-train-2.test.ts test/land-train-3.test.ts test/land-train-4.test.ts test/land-train-riders.test.ts test/land-train-riders-2.test.ts test/land-train-riders-3.test.ts test/land-train-early.test.ts test/land-train-early-2.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/land-train-suspects-2.test.ts test/land-train-suspects-3.test.ts test/land-train-suspects-4.test.ts
 test/access-matrix.snapshot.json: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
@@ -131,13 +131,13 @@ test/format-own.test.ts: test/fmt.test.ts
 tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/runner-linux-scripts.test.ts test/runner-agent.test.ts
 .github/workflows/tests.yml: test/ci-runner-choice.test.ts
 .github/workflows/flake-proof.yml: test/ci-runner-choice.test.ts
-tools/own-check.sh: test/land-train-early.test.ts test/ci-runner-choice.test.ts
-tools/light-check.sh: test/land-train-early.test.ts
-tools/test-deps.sh: test/test-deps.test.ts test/land-train-early.test.ts test/land-deploy.test.ts test/run-tests.test.ts
-tools/test-alone.sh: test/land-train-early.test.ts test/land.test.ts test/land-verdicts.test.ts
+tools/own-check.sh: test/land-train-early.test.ts test/land-train-early-2.test.ts test/ci-runner-choice.test.ts
+tools/light-check.sh: test/land-train-early.test.ts test/land-train-early-2.test.ts
+tools/test-deps.sh: test/test-deps.test.ts test/land-train-early.test.ts test/land-train-early-2.test.ts test/land-deploy.test.ts test/run-tests.test.ts
+tools/test-alone.sh: test/land-train-early.test.ts test/land-train-early-2.test.ts test/land.test.ts test/land-2.test.ts test/land-3.test.ts test/land-4.test.ts test/land-verdicts.test.ts
 tools/light-check-run.sh: test/light-check-run.test.ts
-tools/land.sh: test/land-type-baseline.test.ts test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/script-env.test.ts test/land-size-list.test.ts
-tools/land/*.sh: test/land-type-baseline.test.ts test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/script-env.test.ts test/land-size-list.test.ts
+tools/land.sh: test/land-type-baseline.test.ts test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-2.test.ts test/land-train-3.test.ts test/land-train-4.test.ts test/land-train-riders.test.ts test/land-train-riders-2.test.ts test/land-train-riders-3.test.ts test/land-train-early.test.ts test/land-train-early-2.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/land-train-suspects-2.test.ts test/land-train-suspects-3.test.ts test/land-train-suspects-4.test.ts test/script-env.test.ts test/land-size-list.test.ts
+tools/land/*.sh: test/land-type-baseline.test.ts test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-2.test.ts test/land-train-3.test.ts test/land-train-4.test.ts test/land-train-riders.test.ts test/land-train-riders-2.test.ts test/land-train-riders-3.test.ts test/land-train-early.test.ts test/land-train-early-2.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/land-train-suspects-2.test.ts test/land-train-suspects-3.test.ts test/land-train-suspects-4.test.ts test/script-env.test.ts test/land-size-list.test.ts
 kit/skills/scheme-setup/templates/land.sh: test/land-size-list.test.ts test/land-numbers.test.ts
 tools/land.local.sh: test/land-type-baseline.test.ts test/land-size-list.test.ts test/land-numbers.test.ts
 tools/ship-numbers.attributes: test/land-type-baseline.test.ts test/land-size-list.test.ts test/land-numbers.test.ts
@@ -171,7 +171,7 @@ tools/heavy-ci.ts: test/heavy-ci.test.ts test/long-jobs.test.ts test/citadel-hea
 tools/who-touches: test/who-touches.test.ts
 tools/who-uses: test/who-uses.test.ts
 tools/affected.ts: test/affected.test.ts
-tools/affected-map.txt: test/affected.test.ts test/land.test.ts
+tools/affected-map.txt: test/affected.test.ts test/land-2.test.ts test/land-4.test.ts
 tools/always-tests.txt: test/citadel-test.test.ts
 src/backup.html: test/backup.test.ts
 src/backup.ts: test/backup.test.ts
@@ -204,7 +204,7 @@ test/turn-cost.json: test/turn-cost.test.ts
 # Tests that read a source file's text, so an edit to it alone can turn them red (#2037): test/pinned-tests.test.ts finds them.
 tools/land.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-setup-land-build.test.ts test/ship-core-parity.test.ts
 tools/land/*.sh: test/affected.test.ts test/scheme-setup-land.test.ts test/scheme-setup-land-build.test.ts test/ship-core-parity.test.ts
-tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts test/land.test.ts
+tools/always-tests.txt: test/affected.test.ts test/fmt.test.ts test/land-4.test.ts
 public/sw.js: test/backup.test.ts test/shell.test.ts
 tools/deploy-queue.sh: test/ci-runner-choice.test.ts
 deploy/claude-container/Containerfile: test/claude-container.test.ts test/worker-join.test.ts
@@ -216,8 +216,8 @@ deploy/citadel-heavy.slice: test/heavy-unit.test.ts
 kit/skills/writing-for-agents/HOOKS.md: test/kit-hooks.test.ts
 src/turn-launch.ts: test/kit-hooks.test.ts
 src/db.ts: test/land-numbers.test.ts
-public/sidebar.js: test/land-train.test.ts
-kit/skills/scheme-setup/templates/land.sh: test/land.test.ts test/scheme-setup-land-build.test.ts
+public/sidebar.js: test/land-train-4.test.ts
+kit/skills/scheme-setup/templates/land.sh: test/land-4.test.ts test/scheme-setup-land-build.test.ts
 public/style.css: test/media-browser.test.ts
 public/composer.js: test/model-effort.test.ts
 src/routes/machines.ts: test/off-thread-fs.test.ts

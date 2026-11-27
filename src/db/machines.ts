@@ -246,7 +246,7 @@ export const machineQueries = {
    * Switched on with no list, a role keeps the list it had, or with none is lent to `everyScheme` (the schemes its
    * owner is in: the caller finds them). Returns its roles after.
    */
-  setMachineRole(this: Store, machineId: number, role: Role, change: { on?: boolean; projects?: number[]; caps?: Record<string, number | null | Ticks>; setup?: Record<string, unknown> | null; everyScheme?: number[] }): RoleRow[] {
+  setMachineRole(this: Store, machineId: number, role: Role, change: { on?: boolean; projects?: number[]; caps?: Record<string, number | null | Ticks | true>; setup?: Record<string, unknown> | null; everyScheme?: number[] }): RoleRow[] {
     return this.writeMachineRoles(
       machineId,
       (roles) =>

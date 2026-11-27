@@ -309,11 +309,11 @@ export function sizeOfferPart(m, redraw) {
     'div',
     { class: 'cui-notice size-offer', 'data-tone': 'info' },
     h(
-      'span',
+      'p',
       { class: 'small' },
       `Still on the old starting caps (${WORKER_CAPS.workers} minions, ${WORKER_CAPS.threads} threads, ${WORKER_CAPS.memory_gb} GB). This PC has ${pc.threads} threads and ${pc.memory_gb} GB: its size is ${size.workers} minions, ${size.threads} threads, ${size.memory_gb} GB, keeping the rest for you and CI.`,
     ),
-    h('button', { type: 'button', class: 'small', onclick: use }, "Use this PC's size"),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', onclick: use }, "Use this PC's size")),
   );
 }
 

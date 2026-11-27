@@ -605,7 +605,7 @@ function machineRename(m) {
     const to = name.value.trim().toLowerCase();
     if (to && to !== m.name) patchMachine(m, { name: to }, `rename ${m.name}`, renderMachineList);
   };
-  return h('div', { class: 'row' }, name, save);
+  return h('div', { class: 'row machine-connect-name' }, name, save);
 }
 
 /** A machine's notes for minions: a collapsed editor that keeps an open draft through re-renders. */

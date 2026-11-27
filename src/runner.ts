@@ -26,14 +26,14 @@ import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
 import { track } from './settled.ts';
-import { claudeConfigDir, lastEffort, mergeTaskmasterMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
+import { claudeConfigDir, lastEffortLater, mergeTaskmasterMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Fresh, roleWord, type FreshState } from './fresh.ts';
 import { HeldMail } from './held-mail.ts';
 import { KeepaliveRun } from './keepalive-run.ts';
 import { Closing } from './closing.ts';
 import { Lanes } from './lanes.ts';
 import { DismissedCleanup } from './dismissed-cleanup.ts';
-import { buildBranch, landsBuilds, projectDir, surveyReports } from './workspace.ts';
+import { buildBranchLater, landsBuilds, projectDir, surveyReports } from './workspace.ts';
 import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
 import { KillWaves } from './kill-wave.ts';
@@ -44,8 +44,9 @@ import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
 import { accountDir, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
-import { runsRepo, type Chain } from './wake.ts';
+import { runsRepoLater, type Chain } from './wake.ts';
 import { dropTurnDir, makeTmpDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
+import { endFiles, STEER_PENDING, steerLater, unsentSteers, unsentSteersAtBoot, type EndFiles, type TurnFiles } from './turn-files.ts';
 import { size } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
@@ -53,7 +54,7 @@ import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
 import { cabalName, overseerOf } from './cabal-board.ts';
-import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
+import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, loadImages, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { awayLine, awayResume, nextMark } from './machine-away.ts';
@@ -80,7 +81,7 @@ import { readGrunts } from './grunts.ts';
 import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
-import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
+import { kitLine, readAgentFilesLater, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
 import { clockTime, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
@@ -226,8 +227,9 @@ export interface TurnState {
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
-export interface LiveTurn {
-  dir: string;
+export interface LiveTurn extends TurnFiles {
+  /** Its exit is being handled: finish reads its last files, then wraps it up. */
+  ending?: boolean;
   unit: string | null;
   offset: number;
   startedAt: number;
@@ -285,24 +287,6 @@ export { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, idleTex
 
 // Kept in src/account-pick.ts, which claude-link.ts reads them from too (#793).
 export { accountUsageKey, usageKey };
-
-/** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.mjs). */
-export function unsentSteers(turn: { steered?: Steer[]; dir?: string }): QueuedMessage[] {
-  if (!turn.steered?.length || !turn.dir) return [];
-  let text: string;
-  try {
-    text = readFileSync(join(turn.dir, 'steer.sent'), 'utf8');
-  } catch {
-    text = '0'; // none passed on
-  }
-  const sent = /^\d+$/.test(text) ? Number(text) : NaN;
-  // Unreadable (an older wrapper killed mid-write): some were passed on, so resending risks doubles.
-  if (Number.isNaN(sent)) {
-    console.error(`${turn.dir}: steer.sent reads ${JSON.stringify(text)}, so its turn's steers are taken as sent.`);
-    return [];
-  }
-  return turn.steered.filter((s) => s.end > sent).map((s) => s.msg);
-}
 
 // A scheme's standing gos to merge (#260), kept in settings so they outlive turns and restarts.
 const goesKey = (projectId: number) => `merge_goes:${projectId}`;
@@ -1469,7 +1453,7 @@ export class Runner {
           // With its record gone (a crash after the resume was owed), the owed resume's carry stands.
           const carry = turn ? { ...(turn.from ? { from: turn.from } : {}), ...(turn.parkedAs ? { parkedAs: turn.parkedAs } : {}), ...(status ? { status } : {}) } : (this.queue.owed(t.id)?.carry ?? {});
           // Steers it never passed on go back to the queue.
-          this.queue.endSteers(t.id, turn?.dir ? unsentSteers({ steered: this.queue.steers(t.id), dir: turn.dir }) : []);
+          this.queue.endSteers(t.id, turn?.dir ? unsentSteersAtBoot({ steered: this.queue.steers(t.id), dir: turn.dir }) : []);
           // A line read, or output it never read, says claude had its prompt (#1364): that turn resumes with its batch.
           // One cut off before claude wrote a line may never have had it, so its batch goes back and runs again as a
           // plain turn, not a resume of a session that may lack it. Not a stopped turn's batch (the stop dropped it),
@@ -2012,7 +1996,7 @@ export class Runner {
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
     // Nor a low-effort turn (#951) something other than a success notice: it waits for a turn at the minion's own effort.
-    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !turn.card && !otherPerson && !(turn.light && !light) && existsSync(join(live.dir, 'steer.jsonl')));
+    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !turn.card && !otherPerson && !(turn.light && !light) && !live.ending);
     // A minion waiting on its start card (#1674) holds everything, wakes and its chained brief too, until a person answers it.
     const parked = !!(!live && ticket && ((hold && this.parked(ticket)) || (!('answer' in extra) && this.store.getSetting(startHoldKey(ticketId)))));
     // A person's words to a minion waiting on a kept card stand in for its answer (#1916). A question card's answer isn't about it.
@@ -2061,11 +2045,15 @@ export class Runner {
       return { event: row, parked: true };
     }
     if (steers) {
-      const file = join(live!.dir, 'steer.jsonl');
-      appendFileSync(file, promptMessage([msg]));
+      // Noted as a steer first, then written off the server's thread (#2137): its end is known once it is in the file.
+      this.queue.steered(ticketId, { end: STEER_PENDING, msg });
+      steerLater(
+        live!,
+        async () => promptMessage([msg], await loadImages([msg])),
+        (end) => this.queue.steerEnd(ticketId, id, end),
+      );
       // A typed steer is a message the turn now answers too; a second person's leaves it no one's (#268).
       const typedBy = msg.typed && person && !extra.from ? (turn!.typedBy == null || turn!.typedBy === person ? person : 0) : turn!.typedBy;
-      this.queue.steered(ticketId, { end: statSync(file).size, msg });
       const row = line();
       this.heard(ticketId, ticket, msg);
       live!.unread = this.now();
@@ -2832,8 +2820,8 @@ export class Runner {
       this.broadcastTicket(ticket.id);
       return;
     }
-    // The worktree sweep removes dismissed minions' worktrees; a reopened one gets its back.
-    this.restoreDir(ticket, project);
+    // The worktree sweep removes dismissed minions' worktrees; a reopened one gets its back: looked for off the thread (#2137).
+    if (!ticket.cwd || !(await exists(ticket.cwd))) this.restoreDir(ticket, project);
     // With no folder it would run in the server's own (#899): the note above says why it can't.
     if (ticket.kind === 'ticket' && !ticket.cwd) {
       this.broadcastTicket(ticket.id);
@@ -2956,8 +2944,8 @@ export class Runner {
             args,
             files: plan.files,
             env,
-            pinned: treeHash(pins.MCP_DIR),
-            claude: claudeStamp(command, env.PATH),
+            pinned: await treeHash(pins.MCP_DIR),
+            claude: await claudeStamp(command, env.PATH),
             context: await contextText(
               ticket.cwd,
               configDir,
@@ -3044,17 +3032,20 @@ export class Runner {
         ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
         : keepalive
           ? promptMessage(batch)
-          : promptMessage([
-              ...(context ? [{ author: 'System', text: context, images: [] }] : []),
-              ...(github ? [{ author: 'System', text: github.line, images: [] }] : []),
-              ...(handoff ? [{ author: 'System', text: freshStartText(await this.fresh.opening(ticket, handoff)), images: [] }] : []),
-              ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []),
-              ...handBack,
-              ...cancelledLine,
-              ...digestLine,
-              ...stuckLine,
-              ...batch,
-            ]);
+          : promptMessage(
+              [
+                ...(context ? [{ author: 'System', text: context, images: [] }] : []),
+                ...(github ? [{ author: 'System', text: github.line, images: [] }] : []),
+                ...(handoff ? [{ author: 'System', text: freshStartText(await this.fresh.opening(ticket, handoff)), images: [] }] : []),
+                ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []),
+                ...handBack,
+                ...cancelledLine,
+                ...digestLine,
+                ...stuckLine,
+                ...batch,
+              ],
+              await loadImages(batch),
+            );
     await writeFile(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) await writeFile(join(dir, f), '');
     if (codex) {
@@ -3272,15 +3263,15 @@ export class Runner {
       if (!codex) await pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
       // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
       // Sticky once true (#1276): a `git cat-file` that fails under load would flip it off for one turn, and with it the system prompt.
-      const deploys = ticket.kind !== 'coordinator' && !!project.repo_dir && (this.deploysRepos.has(project.repo_dir) || (runsRepo(project.repo_dir, this.liveHead()) && !!this.deploysRepos.add(project.repo_dir)));
+      const deploys = ticket.kind !== 'coordinator' && !!project.repo_dir && (this.deploysRepos.has(project.repo_dir) || ((await runsRepoLater(project.repo_dir, this.liveHead())) && !!this.deploysRepos.add(project.repo_dir)));
       // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
       // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
-      const builds = landsBuilds(project.repo_dir);
+      const builds = await landsBuilds(project.repo_dir);
       const build =
         builds && ticket.kind !== 'coordinator' && ticket.build
           ? {
               build: ticket.build,
-              branch: buildBranch(project.repo_dir, ticket.build),
+              branch: await buildBranchLater(project.repo_dir, ticket.build),
               owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
               // Only this server's own scheme has build previews (src/previews.ts).
               preview: deploys ? `${publicAddress(this.noTurns) ?? ''}/${buildPreviewPath(ticket.build)}` : null,
@@ -3341,7 +3332,7 @@ export class Runner {
       await writeFile(join(dir, 'system-prompt.md'), system);
       // The scheme's review set (Build 4), fresh each turn so a page edit or a kit starter fix reaches the next turn's critics.
       const reviewDir = join(dir, 'review-set');
-      const reviews = withoutGoneAgents(this.store.reviews.list(project.id), readAgentFiles(project.repo_dir));
+      const reviews = withoutGoneAgents(this.store.reviews.list(project.id), await readAgentFilesLater(project.repo_dir));
       // Phase 3: people's recorded verdicts, and the minion's ask for entries that read the requester's words.
       const verdicts = this.store.reviews.verdicts(project.id);
       const reviewFiles = new Map<string, string>();
@@ -3364,7 +3355,7 @@ export class Runner {
       // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
       let tmp: string | null = null;
       try {
-        tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
+        tmp = await makeTmpDir(this.tmpRoot(project.id), ticket.id);
       } catch (err) {
         this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${thrown(err).message}` });
       }
@@ -3393,7 +3384,7 @@ export class Runner {
       // A host turn with no unit of its own (a side question) keeps its own helpers: a pool it started would live in the
       // server's cgroup and die on the next deploy restart, with every host turn's calls.
       // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
-      const plan = launchPlan({
+      const plan = await launchPlan({
         project,
         ticket,
         dir,
@@ -3738,17 +3729,24 @@ export class Runner {
 
   /** A turn's process has exited (exit is null when it was killed without recording how). */
   private finish(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
-    try {
-      this.wrapUp(ticketId, live, exit);
-    } catch (err) {
-      // Whatever failed, the turn is over: its lane must free up, or no message starts a turn again.
-      live.end();
-      throw err;
-    }
+    if (live.ending) return;
+    live.ending = true;
+    clearInterval(live.timer);
+    // What the wrap-up reads of the turn's folder is read off the server's thread first (#2137): nothing writes there now.
+    const read = endFiles(live).then((files) => {
+      if (this.turns.get(ticketId) !== live) return; // let go of meanwhile (a shutdown)
+      try {
+        this.wrapUp(ticketId, live, exit, files);
+      } catch (err) {
+        // Whatever failed, the turn is over: its lane must free up, or no message starts a turn again.
+        live.end();
+        console.error(`Ticket ${ticketId}: wrapping up its turn failed:`, err);
+      }
+    });
+    void track('turn ends', read);
   }
 
-  private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string; away?: AwayEnd } | null) {
-    clearInterval(live.timer);
+  private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string; away?: AwayEnd } | null, files: EndFiles) {
     this.unfollow(live);
     // A host turn's one line on what it wrote to its machine's folders (T8).
     const reach = live.machine;
@@ -3764,7 +3762,7 @@ export class Runner {
     const stopped = !!turn?.stopped;
     // Steers that came in as the turn's reply went out never reached claude: they start the next turn. Moved back into
     // the queue before the turn's record goes, which is what says which were passed on.
-    const unsent = turn && !stopped ? unsentSteers({ steered: this.queue.steers(ticketId), dir: turn.dir }) : [];
+    const unsent = turn && !stopped ? unsentSteers({ steered: this.queue.steers(ticketId), dir: turn.dir }, files.sent) : [];
     this.queue.endSteers(ticketId, unsent);
     // The save is owed before the turn's record goes, so a crash between finds one of them and never gives back the
     // batch this turn already answered (#1378): recover redoes the save, which takes it out of the queue.
@@ -3778,17 +3776,12 @@ export class Runner {
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
     }
     // A Codex turn's log joins its thread's, for the way back to Claude (#337); the turn's folder goes below.
-    if (turn?.codex) this.keepCodexLog(ticketId, live.dir);
+    if (turn?.codex) this.keepCodexLog(ticketId, files.codexLog);
     const code = exit?.code ?? null;
     const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
     if (startError && stopped) this.emit(ticketId, 'error', { text: startError });
     this.statuses.delete(ticketId);
-    let stderr: string[] = [];
-    try {
-      stderr = readFileSync(join(live.dir, 'stderr.log'), 'utf8').split('\n').filter(Boolean);
-    } catch {
-      // No stderr.
-    }
+    const stderr = (files.stderr ?? '').split('\n').filter(Boolean);
     this.approvals.endTurn(ticketId, stopped ? 'The turn was stopped while this waited.' : 'The turn ended while this waited.');
     const closing = this.closing.has(ticketId);
     const closeReason = this.closing.get(ticketId);
@@ -3857,18 +3850,18 @@ export class Runner {
     this.onFilesMayChange(ticketId, true);
     // The emulator lease (#1128) ends with the turn that took it.
     const endedTicket = this.store.getTicket(ticketId);
-    if (endedTicket) releaseEmulatorLease(join(this.dataDir, 'projects', '.heavy'), this.heavyEnv(endedTicket, endedTicket.person_id).CITADEL_HEAVY_WHO!);
+    const lease = endedTicket ? releaseEmulatorLease(join(this.dataDir, 'projects', '.heavy'), this.heavyEnv(endedTicket, endedTicket.person_id).CITADEL_HEAVY_WHO!) : null;
     this.compactWatch.ended(ticketId);
     this.onTurnEnd(ticketId);
     // Re-read the ticket: the turn may have given it its first (or a new) session id.
     const after = this.store.getTicket(ticketId);
     const project = after && this.store.getProject(after.project_id);
     // Only a turn that ran on Claude Code's default effort says what "Default" means for this thread.
-    const effort = after && !live.chosenEffort && lastEffort(after, live.configDir);
-    if (after && effort && effort !== after.last_effort) {
+    const effort = (after && !live.chosenEffort ? lastEffortLater(after, live.configDir) : Promise.resolve(null)).then((effort) => {
+      if (!effort || effort === after?.last_effort) return;
       this.store.updateTicketQuietly(ticketId, { last_effort: effort });
       this.broadcastTicket(ticketId);
-    }
+    });
     // The next turn may run on another person's login, which only has the session once this lands (#250):
     // the turn's step on its lane ends with the save, so the next step starts after it.
     if (!after || !project) {
@@ -3877,7 +3870,8 @@ export class Runner {
       return live.end();
     }
     // Messages queued during the turn wait in the queue for the save.
-    this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
+    // The lease and the effort are read off the server's thread (#2137); the step ends once they and the save have.
+    void Promise.allSettled([this.saveAfterTurn(ticketId, live.configDir, live.had), lease, effort]).then(live.end);
   }
 
   /**
@@ -4312,9 +4306,8 @@ export class Runner {
     const live = this.turns.get(ticketId);
     const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
     if (!live || !turn || turn.result || turn.fresh || turn.keepalive || turn.stopped || turn.light) return false;
-    const file = join(live.dir, 'steer.jsonl');
-    if (!existsSync(file)) return false;
-    appendFileSync(file, promptMessage([{ author: 'System', text, images: [], id }]));
+    if (live.ending) return false;
+    steerLater(live, () => promptMessage([{ author: 'System', text, images: [], id }]));
     return true;
   }
 
@@ -4676,13 +4669,7 @@ export class Runner {
   }
 
   /** Add a finished Codex turn's log to its minion's Codex thread. */
-  private keepCodexLog(ticketId: number, dir: string) {
-    let log = '';
-    try {
-      log = readFileSync(join(dir, 'codex-log.jsonl'), 'utf8');
-    } catch {
-      return;
-    }
+  private keepCodexLog(ticketId: number, log: string | null) {
     const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
     if (!t || !log) return;
     // Past what a hand-over can carry, the oldest turns go: fitLog would cut them to nothing anyway.

@@ -104,7 +104,8 @@ test('a turn outlives its server, and the next one re-attaches and shows the res
   assert.equal(store.getTicket(id)!.status, 'idle');
   assert.ok(!notes(id).some((n) => /restart/i.test(n)), 'no interruption note, no resume');
   assert.equal(store.getSetting(`turn:${id}`), null);
-  assert.ok(!existsSync(dir), 'the turn folder is cleaned up');
+  // The folder is renamed away off the server's thread (#2137), so just after the turn's end, not in the same tick.
+  await until('the turn folder is cleaned up', () => !existsSync(dir));
 });
 
 test('a turn that ends while no server is running is finished by the next one', async () => {

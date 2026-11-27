@@ -43,14 +43,14 @@ test('a Taskmaster denies prompts; a minion asks the approval tool', () => {
   assert.ok(!args.includes('none'));
 });
 
-test('--plugin-dir only for folders that exist, in the worktree or at their absolute path', () => {
+test('--plugin-dir only for folders that exist, in the worktree or at their absolute path', async () => {
   const wt = join(root, 'wt');
   const outside = join(root, 'outside-kit');
   mkdirSync(join(wt, 'tools/mods/delve'), { recursive: true });
   mkdirSync(outside);
   writeFileSync(join(wt, 'file'), '');
-  assert.deepEqual(pluginDirArgs(['tools/mods/delve', 'missing', 'file', outside, join(root, 'gone')], wt), ['--plugin-dir', join(wt, 'tools/mods/delve'), '--plugin-dir', outside]);
-  assert.deepEqual(pluginDirArgs([], wt), []);
+  assert.deepEqual(await pluginDirArgs(['tools/mods/delve', 'missing', 'file', outside, join(root, 'gone')], wt), ['--plugin-dir', join(wt, 'tools/mods/delve'), '--plugin-dir', outside]);
+  assert.deepEqual(await pluginDirArgs([], wt), []);
 });
 
 test("a minion's plugin picks (#361) come only from its scheme's optional folders", () => {

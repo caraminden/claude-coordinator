@@ -345,13 +345,13 @@ test("#661: the Citadel Taskmaster's every-scheme settings.json stays under 1 Mi
     });
   };
   // 3x today's 87 open minions: 30 here, 25 in each of 10 other schemes, and 10 contraptions. The boot check holds the same 1 MiB line on the live data.
-  const grown = launch(30, 10, 25);
+  const grown = await launch(30, 10, 25);
   const settings = grown.files.find((f) => f.name === 'settings.json')!.text;
   assert.ok(Buffer.byteLength(settings) < 1024 * 1024, `settings.json at 3x is ${Buffer.byteLength(settings)} bytes`);
   assert.ok(JSON.parse(settings).permissions.allow.includes(`Bash(git -C ${base}/19/tickets/1524 log:*)`), 'the every-scheme rules are in it');
   for (const f of grown.files) assert.ok(Buffer.byteLength(f.text) < 1024 * 1024, `${f.name} is ${Buffer.byteLength(f.text)} bytes`);
   // 200 open in each of 11 schemes is far past the cap: the launch says why, not Claude Code's bare "Settings file exceeds the 2MiB limit".
-  assert.throws(
+  await assert.rejects(
     () => launch(200, 10, 200),
     (err: Error) => {
       assert.match(

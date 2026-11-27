@@ -7,7 +7,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { access, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 import { execResult } from './exec.ts';
@@ -75,6 +75,18 @@ export function androidEnv(home: string, path = ''): Record<string, string> {
   const sdk = join(home, ANDROID_SDK);
   const jdk = join(home, ANDROID_JDK);
   if (!existsSync(sdk) || !existsSync(jdk)) return {};
+  return { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, JAVA_HOME: jdk, PATH: [path, join(jdk, 'bin')].filter(Boolean).join(delimiter) };
+}
+/** androidEnv off the server's thread, for a turn's start (#2137). */
+export async function androidEnvLater(home: string, path = ''): Promise<Record<string, string>> {
+  const sdk = join(home, ANDROID_SDK);
+  const jdk = join(home, ANDROID_JDK);
+  const there = (p: string) =>
+    access(p).then(
+      () => true,
+      () => false,
+    );
+  if (!(await there(sdk)) || !(await there(jdk))) return {};
   return { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, JAVA_HOME: jdk, PATH: [path, join(jdk, 'bin')].filter(Boolean).join(delimiter) };
 }
 /**
@@ -203,6 +215,22 @@ interface Login {
 export function resolveClaude(bin: string, path = process.env.PATH ?? ''): string {
   if (bin.includes('/')) return realpathSync(bin);
   for (const d of path.split(delimiter)) if (d && existsSync(join(d, bin))) return realpathSync(join(d, bin));
+  throw new Error(`${bin} is not on PATH`);
+}
+
+/** resolveClaude off the server's thread, for a turn's start (#2137). */
+export async function resolveClaudeLater(bin: string, path = process.env.PATH ?? ''): Promise<string> {
+  if (bin.includes('/')) return realpath(bin);
+  for (const d of path.split(delimiter)) {
+    if (
+      d &&
+      (await access(join(d, bin)).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return realpath(join(d, bin));
+  }
   throw new Error(`${bin} is not on PATH`);
 }
 

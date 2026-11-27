@@ -12,7 +12,7 @@ import { linkTree, pinSparesAt, takeSpare } from './pin-spares.ts';
 import { thrown } from './thrown.ts';
 import { cp, rm } from 'node:fs/promises';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
-import { androidEnv, AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
+import { androidEnvLater, AUTH_VARS, resolveClaudeLater, type TurnPlace } from './claude-link.ts';
 import type { Project, Ticket } from './db.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { claudeConfigDir } from './sessions.ts';
@@ -763,8 +763,8 @@ export interface LaunchPlan {
  * cached prefix. Citadel's own scheme only while we measure it (reports/shared-prompt-cache-2026-11.md); add an id to widen, empty it to turn off. */
 export const EXCLUDE_DYNAMIC_PROMPT_SCHEMES: readonly number[] = [];
 
-/** What a turn is launched with, from its facts. It writes nothing and reads no store. From disk it only looks: is the kit in the turn's pin folder, a Taskmaster's minion folders (coordinatorAccess), this machine's Android toolchain (androidEnv) and, for a container turn, where claude is (resolveClaude, which throws when it isn't on the server's PATH). */
-export function launchPlan(facts: TurnFacts): LaunchPlan {
+/** What a turn is launched with, from its facts. It writes nothing and reads no store. From disk it only looks: is the kit in the turn's pin folder, a Taskmaster's minion folders (coordinatorAccess), this machine's Android toolchain (androidEnvLater) and, for a container turn, where claude is (resolveClaudeLater, which throws when it isn't on the server's PATH). */
+export async function launchPlan(facts: TurnFacts): Promise<LaunchPlan> {
   const { project, ticket, dir, pins, place, machines, model, effort, codex } = facts;
   const { files: filesDir, shared: sharedDir, memory: memoryDir, tmp } = facts.folders;
   const pin = join(dir, 'pin');
@@ -901,7 +901,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   args.push('--settings', join(dir, 'settings.json'));
   if (addDirs.length) args.push('--add-dir', ...addDirs);
   if (kit) args.push('--plugin-dir', kit);
-  args.push(...pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd));
+  args.push(...(await pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd)));
   // The advisor trial (#817): `claude-sonnet-5-5+opus-advisor` runs Sonnet with Opus as its advisor. Never a Taskmaster's or Codex's
   // (codex-turn.ts maps the plain --model, so Sonnet's Codex pick).
   // Claude Code's CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1, in the service's env, switches the tool off for every turn.
@@ -935,7 +935,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
     if (tmp) env.XDG_RUNTIME_DIR = tmp;
   }
-  env = { ...env, ...androidEnv(homedir(), env.PATH) };
+  env = { ...env, ...(await androidEnvLater(homedir(), env.PATH)) };
   // mise's shims last (#1147): an approved host tool runs by name, and never shadows one the turn had before.
   env = { ...env, ...facts.env.heavy, PATH: [...(pins.PIN_HAS.heavy ? [join(pin, 'bin', 'heavy')] : []), join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };
   // The server's host tools list (#1147), which propose_host_tool names; the live checkout is in every container too.
@@ -984,7 +984,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (facts.machine && facts.hostReach && ticket.kind !== 'coordinator') env.COORDINATOR_HOST_REACH = facts.hostReach;
   const configDir = place.host ? claudeConfigDir(env) : place.configDir;
   if (facts.machine) env = machineEnv(env);
-  let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);
+  let command = place.host ? facts.claudeBin : await resolveClaudeLater(facts.claudeBin);
   if (codex) {
     // The shim runs in claude's place (src/codex-turn.ts), from the hand-over the runner writes; it skips that when it resumes the thread.
     command = node;

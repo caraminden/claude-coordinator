@@ -1,7 +1,7 @@
 // Per-project approval rules and plugin folders, and the Approve / Deny cards that ask people
 // before a thread runs a tool matching one of the rules.
 import { randomBytes } from 'node:crypto';
-import { statSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { callOf, type CardCall, type ShownCard } from './card-wait.ts';
 import type { MergeCall, PrInfo } from './merge-card.ts';
@@ -132,15 +132,18 @@ export function permissionArgs(cards: boolean): string[] {
 }
 
 /** `--plugin-dir` for each of the project's plugin folders that exists: in this worktree, or at its absolute path. */
-export function pluginDirArgs(dirs: string[], cwd: string): string[] {
-  return dirs.flatMap((d) => {
+export async function pluginDirArgs(dirs: string[], cwd: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const d of dirs) {
     const path = isAbsolute(d) ? d : join(cwd, d);
-    try {
-      return statSync(path).isDirectory() ? ['--plugin-dir', path] : [];
-    } catch {
-      return [];
-    }
-  });
+    if (
+      await stat(path)
+        .then((s) => s.isDirectory())
+        .catch(() => false)
+    )
+      out.push('--plugin-dir', path);
+  }
+  return out;
 }
 
 export type Decision =

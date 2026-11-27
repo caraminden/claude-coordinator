@@ -74,12 +74,12 @@ test("an Overseer gets the skill in place of the build steps, a member the board
 const root = mkdtempSync(join(tmpdir(), 'builds-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('builds switch on when the land script knows --into', () => {
-  assert.equal(landsBuilds(null), false);
-  assert.equal(landsBuilds(root), false, 'no land.sh');
+test('builds switch on when the land script knows --into', async () => {
+  assert.equal(await landsBuilds(null), false);
+  assert.equal(await landsBuilds(root), false, 'no land.sh');
   mkdirSync(join(root, 'tools'));
   writeFileSync(join(root, 'tools', 'land.sh'), '#!/bin/sh\n# rebase, test, fast-forward main\n');
-  assert.equal(landsBuilds(root), false, "today's land.sh");
+  assert.equal(await landsBuilds(root), false, "today's land.sh");
   writeFileSync(join(root, 'tools', 'land.sh'), '#!/bin/sh\ncase "$1" in --into) target="$2" ;; esac\n');
-  assert.equal(landsBuilds(root), true);
+  assert.equal(await landsBuilds(root), true);
 });

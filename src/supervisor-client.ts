@@ -4,6 +4,7 @@
 // delay turn starts).
 import { execFile } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { dirname, join } from 'node:path';
 import { TASKMASTER_SLICE, TURN_NODE } from './turn-launch.ts';
@@ -60,7 +61,16 @@ export function supervisorAlive(pid: unknown): boolean {
 /** The supervisor running in `dir`, or null. */
 export function readSupervisor(dir: string): Running | null {
   try {
-    const s = JSON.parse(readFileSync(join(dir, 'supervisor.json'), 'utf8'));
+    return running(readFileSync(join(dir, 'supervisor.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** What a supervisor.json's text says is running, or null: not one, or its process is gone. */
+function running(text: string): Running | null {
+  try {
+    const s = JSON.parse(text);
     return Number.isInteger(s.port) && typeof s.key === 'string' && supervisorAlive(s.pid) ? s : null;
   } catch {
     return null;
@@ -121,11 +131,12 @@ function pruneOld(spec: SupervisorSpec, now: number) {
  * or refuses: the runner then starts the turn's wrapper, and the spec.json claim lets only one of them run it. It answers
  * on loopback as soon as it has renamed spec.json, so a short wait is all a hung one costs a turn.
  */
-export function handTurn(spec: SupervisorSpec, dir: string, scope: string[], timeoutMs = 500): Promise<boolean> {
-  const s = readSupervisor(spec.dir);
+export async function handTurn(spec: SupervisorSpec, dir: string, scope: string[], timeoutMs = 500): Promise<boolean> {
+  // Its file is read off the server's thread (#2137); /proc's word on its pid stays on it (#1980).
+  const s = await readFile(join(spec.dir, 'supervisor.json'), 'utf8').then(running, () => null);
   if (!s || s.version !== spec.version) {
     ensureSupervisor(spec);
-    return Promise.resolve(false);
+    return false;
   }
   return new Promise((done) => {
     const body = JSON.stringify({ dir, scope });

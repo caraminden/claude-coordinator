@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { TicketKind } from '../src/db.ts';
-import { type QueuedMessage, Runner, unsentSteers } from '../src/runner.ts';
+import { type QueuedMessage, Runner } from '../src/runner.ts';
+import { unsentSteersAtBoot } from '../src/turn-files.ts';
 import { holds, lines, tempRoot, testPins } from './helpers.ts';
 import { fake as fakeOf } from './typed.ts';
 import { until } from './wait.ts';
@@ -222,14 +223,16 @@ test('✕ takes back a queued message, which then never reaches claude', async (
   assert.equal(seen(t.dir).length, 1);
 });
 
-test('a turn started before steering existed (no steer.jsonl) queues instead', async () => {
+// The file is no longer looked for before a steer (#2137: that look blocked the server's thread on every message, for a
+// kind of turn that can't exist any more). The steer is written anyway and reaches claude: passed on by the wrapper, or,
+// when nothing reads the file, given back at the turn's end like any unsent steer, to start the next turn.
+test('a steer into a turn whose steer file is missing still reaches claude', async () => {
   const t = newTicket();
   const r = server();
   await started(r, t);
   rmSync(join(turnDir(r, t.id), 'steer.jsonl'));
   r.send(t.id, 'Cara', 'old turn', [], {}, true);
-  assert.equal(r.queued(t.id), 1);
-  assert.equal(events(t.id, 'user_message')[1].steered, undefined);
+  assert.equal(r.queued(t.id), 0);
   writeFileSync(join(t.dir, 'release'), '');
   await until('seen(t.dir).length === 2', () => seen(t.dir).length === 2);
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
@@ -287,19 +290,19 @@ test('an unreadable steer.sent redelivers nothing; a missing one, everything', (
     ],
   };
   assert.deepEqual(
-    unsentSteers(turn).map((m) => m.text),
+    unsentSteersAtBoot(turn).map((m) => m.text),
     ['a', 'b'],
     'none passed on yet',
   );
   writeFileSync(join(dir, 'steer.sent'), '10');
   assert.deepEqual(
-    unsentSteers(turn).map((m) => m.text),
+    unsentSteersAtBoot(turn).map((m) => m.text),
     ['b'],
   );
   writeFileSync(join(dir, 'steer.sent'), '20');
-  assert.deepEqual(unsentSteers(turn), []);
+  assert.deepEqual(unsentSteersAtBoot(turn), []);
   for (const junk of ['', '1x', ' ', '-3', '1e3']) {
     writeFileSync(join(dir, 'steer.sent'), junk);
-    assert.deepEqual(unsentSteers(turn), [], `"${junk}" is unknown, not 0`);
+    assert.deepEqual(unsentSteersAtBoot(turn), [], `"${junk}" is unknown, not 0`);
   }
 });

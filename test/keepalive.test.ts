@@ -51,7 +51,7 @@ test('the window is 11:00 to midnight Pacific, in winter and summer time', () =>
   assert.equal(inWindow(Date.UTC(2026, 6, 1, 17, 30)), false);
 });
 
-test('the claude stamp skips the claude-pace link and stamps the real CLI', () => {
+test('the claude stamp skips the claude-pace link and stamps the real CLI', async () => {
   const d = mkdtempSync(join(tmpdir(), 'stamp-'));
   try {
     const real = join(d, 'real');
@@ -64,8 +64,8 @@ test('the claude stamp skips the claude-pace link and stamps the real CLI', () =
       symlinkSync('../claude-pace', join(bin, 'claude'));
       return `${bin}:${real}`;
     };
-    assert.equal(claudeStamp('claude', turn('t1')), claudeStamp('claude', turn('t2')));
-    assert.match(claudeStamp('claude', turn('t3')), /real\/claude/);
+    assert.equal(await claudeStamp('claude', turn('t1')), await claudeStamp('claude', turn('t2')));
+    assert.match(await claudeStamp('claude', turn('t3')), /real\/claude/);
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

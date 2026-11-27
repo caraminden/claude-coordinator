@@ -278,7 +278,10 @@ async function runs(repo: string | null, head: string | null): Promise<boolean> 
   return !!repo && !!head && (await git(repo, ['cat-file', '-e', `${head}^{commit}`])) !== null;
 }
 
-/** The same, at once, for callers that can't wait (a turn's start): one git call of a few ms. */
+/** The same by its exported name: a turn's start asks off the server's thread (#2137). */
+export const runsRepoLater = runs;
+
+/** The same, at once, for callers that can't wait: one git call of a few ms. */
 export function runsRepo(repo: string | null, head: string | null): boolean {
   if (!repo || !head) return false;
   try {

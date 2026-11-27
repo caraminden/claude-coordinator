@@ -45,8 +45,8 @@ const plan = (over: Partial<TurnFacts> = {}) => launchPlan({ ...base, ...over })
 const file = (p: LaunchPlan, name: string) => JSON.parse(p.files.find((f) => f.name === name)!.text);
 const flag = (p: LaunchPlan, name: string) => (p.args.includes(name) ? p.args[p.args.indexOf(name) + 1] : undefined);
 
-test('a plan is data: it writes nothing into the turn folder and never resumes by itself', () => {
-  const p = plan({ ticket: { ...minion, session_id: 'abc' } });
+test('a plan is data: it writes nothing into the turn folder and never resumes by itself', async () => {
+  const p = await plan({ ticket: { ...minion, session_id: 'abc' } });
   assert.deepEqual(readdirSync(dir), []);
   assert.deepEqual(
     p.files.map((f) => [f.name, f.mode]),
@@ -61,8 +61,8 @@ test('a plan is data: it writes nothing into the turn folder and never resumes b
   assert.equal(flag(p, '--mcp-config'), join(dir, 'mcp.json'));
 });
 
-test("the environment is the server's filtered one plus the turn's own, and nothing else of the server's", () => {
-  const p = plan();
+test("the environment is the server's filtered one plus the turn's own, and nothing else of the server's", async () => {
+  const p = await plan();
   assert.equal(p.env.SECRET_OF_THE_SERVER, undefined);
   assert.equal(p.env.ANTHROPIC_API_KEY, 'server-key');
   assert.equal(p.env.COORDINATOR_TOKEN, 'tok');
@@ -78,18 +78,11 @@ test("the environment is the server's filtered one plus the turn's own, and noth
   assert.equal(p.configDir, '/srv/claude');
 });
 
-test("a minion's tripwire lets it change its copies of its scheme's apps' data, and only in a scheme with an app (#1884)", () => {
-  const settings = (over: Partial<TurnFacts>) =>
-    plan(over)
-      .files.map((f) => f.text)
-      .join('\n');
+test("a minion's tripwire lets it change its copies of its scheme's apps' data, and only in a scheme with an app (#1884)", async () => {
+  const settings = async (over: Partial<TurnFacts>) => (await plan(over)).files.map((f) => f.text).join('\n');
   const copies = JSON.stringify(join(dir, 'app-copy'));
-  assert.ok(
-    settings({ homeContraptions: ['a'] })
-      .replaceAll('\\', '')
-      .includes(`"copies":${copies}`),
-  );
-  assert.ok(!settings({}).includes('app-copy'));
+  assert.ok((await settings({ homeContraptions: ['a'] })).replaceAll('\\', '').includes(`"copies":${copies}`));
+  assert.ok(!(await settings({})).includes('app-copy'));
 });
 
 // One fact each: the env names it adds to the plain minion's, and no others.
@@ -119,13 +112,13 @@ const adds: [string, Partial<TurnFacts>, Record<string, string>][] = [
   ['files and shared folders', { folders: { ...base.folders, files: '/f', shared: '/s' } }, { COORDINATOR_FILES_DIR: '/f', COORDINATOR_SHARED_DIR: '/s' }],
 ];
 for (const [name, over, extra] of adds) {
-  test(`${name} adds ${Object.keys(extra).join(', ')} to the environment and nothing else`, () => {
-    assert.deepEqual(plan(over).env, { ...plan().env, ...extra });
+  test(`${name} adds ${Object.keys(extra).join(', ')} to the environment and nothing else`, async () => {
+    assert.deepEqual((await plan(over)).env, { ...(await plan()).env, ...extra });
   });
 }
 
-test("a container turn carries none of the server's sign-in, takes the container's env and is spawned there", () => {
-  const p = plan({ place: container, folders: { ...base.folders, tmp: '/t' }, unit: 'never-used' });
+test("a container turn carries none of the server's sign-in, takes the container's env and is spawned there", async () => {
+  const p = await plan({ place: container, folders: { ...base.folders, tmp: '/t' }, unit: 'never-used' });
   for (const v of AUTH_VARS) assert.equal(p.env[v], undefined, v);
   assert.equal(p.env.HOME, '/vol');
   assert.equal(p.env.COORDINATOR_CONTAINER, '1');
@@ -134,9 +127,9 @@ test("a container turn carries none of the server's sign-in, takes the container
   assert.deepEqual(p.spawn, { how: 'container', wrapper: [join(dir, 'pin', 'bin', 'citadel-node'), join(dir, 'pin', 'turn-wrapper.mjs'), dir] });
 });
 
-test('a host turn is a unit when it has one and a child when not, with the same wrapper', () => {
-  const child = plan().spawn;
-  const unit = plan({ unit: 'citadel-turn-x' }).spawn;
+test('a host turn is a unit when it has one and a child when not, with the same wrapper', async () => {
+  const child = (await plan()).spawn;
+  const unit = (await plan({ unit: 'citadel-turn-x' })).spawn;
   assert.equal(child.how, 'child');
   assert.ok(unit.how === 'unit' && child.how === 'child');
   assert.deepEqual(unit.wrapper, child.wrapper);
@@ -145,17 +138,17 @@ test('a host turn is a unit when it has one and a child when not, with the same 
   assert.deepEqual(unit.systemdRun.slice(-3), unit.wrapper);
 });
 
-test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's list; a minion's in the turns' slice; the tools pool beside the Taskmasters (#1280)", () => {
-  const run = (p: ReturnType<typeof plan>) => {
+test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's list; a minion's in the turns' slice; the tools pool beside the Taskmasters (#1280)", async () => {
+  const run = (p: Awaited<ReturnType<typeof plan>>) => {
     assert.equal(p.spawn.how, 'unit');
     return p.spawn.how === 'unit' ? p.spawn.systemdRun : [];
   };
-  const minionRun = run(plan({ unit: 'citadel-turn-x' }));
-  const tmRun = run(plan({ unit: 'citadel-turn-y', ticket: taskmaster }));
+  const minionRun = run(await plan({ unit: 'citadel-turn-x' }));
+  const tmRun = run(await plan({ unit: 'citadel-turn-y', ticket: taskmaster }));
   assert.ok(minionRun.includes('--slice=citadel-turns.slice') && !minionRun.includes('ManagedOOMPreference=omit'), minionRun.join(' '));
   assert.ok(tmRun.includes('--slice=citadel-taskmasters.slice') && !tmRun.includes('--slice=citadel-turns.slice'), tmRun.join(' '));
   assert.equal(tmRun[tmRun.indexOf('ManagedOOMPreference=omit') - 1], '-p');
-  const poolRun = plan({ pool: true, unit: 'citadel-turn-x' }).pool!.systemdRun!;
+  const poolRun = (await plan({ pool: true, unit: 'citadel-turn-x' })).pool!.systemdRun!;
   assert.ok(poolRun.includes('--slice=citadel-taskmasters.slice'), 'the tools pool Taskmasters call');
   // systemd-oomd (#1338): a minion turn is its last pick, never its first; the pool every turn's tools go through is never picked.
   assert.equal(minionRun[minionRun.indexOf('ManagedOOMPreference=avoid') - 1], '-p', minionRun.join(' '));
@@ -164,13 +157,13 @@ test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's lis
   assert.ok(existsSync(new URL('../deploy/citadel-taskmasters.slice', import.meta.url)), 'the slice it names ships in deploy/');
 });
 
-test("a minion's approval rules become asks and it gets the approval tool; a Taskmaster gets neither", () => {
+test("a minion's approval rules become asks and it gets the approval tool; a Taskmaster gets neither", async () => {
   const withRules = { ...project, approval_rules: 'Bash(rm *)' };
-  const m = plan({ project: withRules });
+  const m = await plan({ project: withRules });
   assert.ok(file(m, 'settings.json').permissions.ask.includes('Bash(rm *)'));
   assert.equal(m.env.COORDINATOR_APPROVALS, '1');
   assert.deepEqual(Object.keys(file(m, 'mcp.json').mcpServers), ['thread']);
-  const t = plan({ project: withRules, ticket: taskmaster });
+  const t = await plan({ project: withRules, ticket: taskmaster });
   assert.equal(JSON.stringify(file(t, 'settings.json')).includes('Bash(rm *)'), false);
   assert.equal(t.env.COORDINATOR_APPROVALS, undefined);
   assert.equal(t.env.MCP_TOOL_TIMEOUT, undefined);
@@ -179,18 +172,18 @@ test("a minion's approval rules become asks and it gets the approval tool; a Tas
   assert.deepEqual(Object.keys(file(t, 'mcp.json').mcpServers), ['coordinator']);
 });
 
-test('a lent machine is an MCP server of the turn, allowed by name, and never in argv', () => {
-  const p = plan({ machines: [{ id: 3, name: 'perigee-godot', owner_id: null, servers: ['mcp', 'ws'] } as TurnFacts['machines'][number]] });
+test('a lent machine is an MCP server of the turn, allowed by name, and never in argv', async () => {
+  const p = await plan({ machines: [{ id: 3, name: 'perigee-godot', owner_id: null, servers: ['mcp', 'ws'] } as TurnFacts['machines'][number]] });
   const servers = Object.keys(file(p, 'mcp.json').mcpServers);
   assert.deepEqual(servers, ['thread', 'perigee-godot', 'perigee-godot-ws']);
   for (const s of servers) assert.ok(file(p, 'settings.json').permissions.allow.includes(`mcp__${s}`), s);
   assert.equal(p.args.join(' ').includes('perigee'), false);
 });
 
-test("a pooled turn reaches its place's shared tool server by HTTP, with its own helpers as the fallback; a Codex turn never pools (#1259)", () => {
+test("a pooled turn reaches its place's shared tool server by HTTP, with its own helpers as the fallback; a Codex turn never pools (#1259)", async () => {
   const machines = [{ id: 3, name: 'perigee godot', owner_id: null, servers: ['mcp', 'ws'], lent: 'godot-ai' } as TurnFacts['machines'][number]];
-  const own = plan({ machines });
-  const p = plan({ machines, pool: true });
+  const own = await plan({ machines });
+  const p = await plan({ machines, pool: true });
   const http = file(p, 'mcp.json').mcpServers;
   // The same servers by name, so allow rules and the tool names the turn sees don't change.
   assert.deepEqual(Object.keys(http), Object.keys(file(own, 'mcp.json').mcpServers));
@@ -213,13 +206,13 @@ test("a pooled turn reaches its place's shared tool server by HTTP, with its own
   // A plain env: no token, no sign-in.
   assert.deepEqual(Object.keys(p.pool!.env).sort(), ['HOME', 'PATH', 'TZ']);
   assert.equal(p.pool!.systemdRun, undefined);
-  assert.ok(plan({ pool: true, unit: 'citadel-turn-x' }).pool!.systemdRun!.some((a) => a.startsWith('--unit=citadel-mcp-pool-')));
-  assert.equal(plan({ pool: true, place: container, unit: 'never-used' }).pool!.systemdRun, undefined);
+  assert.ok((await plan({ pool: true, unit: 'citadel-turn-x' })).pool!.systemdRun!.some((a) => a.startsWith('--unit=citadel-mcp-pool-')));
+  assert.equal((await plan({ pool: true, place: container, unit: 'never-used' })).pool!.systemdRun, undefined);
   // Their Taskmaster container counts pids apart, and a pool's record is kept by pid: never the one record for both (#1882).
   const taskmaster = { ...minion, kind: 'coordinator' as const };
-  assert.notEqual(plan({ pool: true, place: container, ticket: taskmaster }).pool!.dir, plan({ pool: true, place: container }).pool!.dir);
-  assert.equal(plan({ pool: true, ticket: taskmaster }).pool!.dir, plan({ pool: true }).pool!.dir, 'the host is one place');
-  const codex = plan({ pool: true, codex: { thread: null } });
+  assert.notEqual((await plan({ pool: true, place: container, ticket: taskmaster })).pool!.dir, (await plan({ pool: true, place: container })).pool!.dir);
+  assert.equal((await plan({ pool: true, ticket: taskmaster })).pool!.dir, (await plan({ pool: true })).pool!.dir, 'the host is one place');
+  const codex = await plan({ pool: true, codex: { thread: null } });
   assert.equal(codex.pool, undefined);
   assert.equal(
     codex.files.some((f) => f.name === 'mcp-stdio.json'),
@@ -227,12 +220,12 @@ test("a pooled turn reaches its place's shared tool server by HTTP, with its own
   );
 });
 
-test("a Codex turn runs the shim in claude's place, on its thread when it has one, checked in turn mode", () => {
-  const claude = plan();
-  const fresh = plan({ codex: { thread: null } });
-  const resumed = plan({ codex: { thread: 'th-1' } });
-  assert.equal(plan({ claudeBin: '/opt/claude' }).command, '/opt/claude');
-  assert.equal(plan({ claudeBin: '/opt/claude', codex: { thread: null } }).command, join(dir, 'pin', 'bin', 'citadel-node'));
+test("a Codex turn runs the shim in claude's place, on its thread when it has one, checked in turn mode", async () => {
+  const claude = await plan();
+  const fresh = await plan({ codex: { thread: null } });
+  const resumed = await plan({ codex: { thread: 'th-1' } });
+  assert.equal((await plan({ claudeBin: '/opt/claude' })).command, '/opt/claude');
+  assert.equal((await plan({ claudeBin: '/opt/claude', codex: { thread: null } })).command, join(dir, 'pin', 'bin', 'citadel-node'));
   assert.equal(fresh.args[0], join(dir, 'pin', 'codex-turn.ts'));
   assert.deepEqual(fresh.args.slice(-claude.args.length), claude.args);
   assert.equal(flag(fresh, '--codex-thread'), undefined);
@@ -244,26 +237,26 @@ test("a Codex turn runs the shim in claude's place, on its thread when it has on
   assert.deepEqual(tw.mcp, ['thread']);
 });
 
-test("the container a host turn's Codex reviews run in is named in its tripwire file, and only when there is one", () => {
-  assert.equal(file(plan(), 'codex-tripwire.json').container, undefined);
+test("the container a host turn's Codex reviews run in is named in its tripwire file, and only when there is one", async () => {
+  assert.equal(file(await plan(), 'codex-tripwire.json').container, undefined);
   const review = { container: 'codex-box', turnsDir: '/c/turns', env: { HOME: '/c' } };
-  assert.deepEqual(file(plan({ codexReview: review }), 'codex-tripwire.json').container, { name: 'codex-box', turnsDir: '/c/turns', env: { HOME: '/c' } });
+  assert.deepEqual(file(await plan({ codexReview: review }), 'codex-tripwire.json').container, { name: 'codex-box', turnsDir: '/c/turns', env: { HOME: '/c' } });
 });
 
-test('the model and effort it was given are passed on, and left out when there is none', () => {
-  assert.equal(flag(plan(), '--model'), undefined);
-  assert.equal(flag(plan(), '--effort'), undefined);
-  const p = plan({ model: 'claude-opus-5-5', effort: 'high' });
+test('the model and effort it was given are passed on, and left out when there is none', async () => {
+  assert.equal(flag(await plan(), '--model'), undefined);
+  assert.equal(flag(await plan(), '--effort'), undefined);
+  const p = await plan({ model: 'claude-opus-5-5', effort: 'high' });
   assert.equal(flag(p, '--model'), 'claude-opus-5-5');
   assert.equal(flag(p, '--effort'), 'high');
 });
 
-test("a minion's turn carries its scheme's screenshot widths and themes for tools/ui-shot.ts, a Taskmaster's none (#1044)", () => {
+test("a minion's turn carries its scheme's screenshot widths and themes for tools/ui-shot.ts, a Taskmaster's none (#1044)", async () => {
   const shots = { ...project, shot_widths: '768,390', shot_themes: 'dark' };
-  const p = plan({ project: shots });
+  const p = await plan({ project: shots });
   assert.equal(p.env.COORDINATOR_SHOT_WIDTHS, '768,390');
   assert.equal(p.env.COORDINATOR_SHOT_THEMES, 'dark');
-  assert.equal(plan({ project: shots, ticket: taskmaster }).env.COORDINATOR_SHOT_WIDTHS, undefined);
+  assert.equal((await plan({ project: shots, ticket: taskmaster })).env.COORDINATOR_SHOT_WIDTHS, undefined);
 });
 
 // #1125: a turn's copy of the pinned files was a cpSync of the tree, 3.8 to 8.7 s of the server's loop on a busy disk.
@@ -297,8 +290,8 @@ test('copyPinned links the pinned files instead of copying their bytes, and keep
 
 // #1979: a skill's load-time `!` command is checked against the allow rules after CLAUDE_SKILL_DIR is filled in,
 // as written (`..` kept; tried in real runs), and nobody can answer a Taskmaster's prompt.
-test('a Taskmaster may run exactly what citadel:briefing and citadel:subagents run when they load', () => {
-  const p = plan({ ticket: taskmaster });
+test('a Taskmaster may run exactly what citadel:briefing and citadel:subagents run when they load', async () => {
+  const p = await plan({ ticket: taskmaster });
   const kit = flag(p, '--plugin-dir')!;
   const rules = ['briefing', 'subagents'].map((skill) => {
     const [, command] = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', skill, 'SKILL.md'), 'utf8').match(/^!`(.+)`$/m)!;
@@ -308,5 +301,5 @@ test('a Taskmaster may run exactly what citadel:briefing and citadel:subagents r
     file(p, 'settings.json').permissions.allow.filter((r: string) => r.startsWith('Bash(node')),
     rules,
   );
-  assert.ok(!file(plan(), 'settings.json').permissions.allow.some((r: string) => r.startsWith('Bash(')), "a minion's rules don't change");
+  assert.ok(!file(await plan(), 'settings.json').permissions.allow.some((r: string) => r.startsWith('Bash(')), "a minion's rules don't change");
 });

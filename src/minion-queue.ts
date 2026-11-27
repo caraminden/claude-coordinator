@@ -211,6 +211,14 @@ export class MinionQueue {
     });
   }
 
+  /** A steer's text is in the turn's steer file, which is `end` bytes long with it. */
+  steerEnd(id: number, msgId: number, end: number) {
+    if (!this.get(id).steered?.some((s) => s.msg.id === msgId)) return; // its turn ended first
+    this.edit(id, (r) => {
+      r.steered = r.steered?.map((s) => (s.msg.id === msgId ? { ...s, end } : s));
+    });
+  }
+
   /** A turn's end: its steers' fate is decided, and the unsent ones (`unsent`) join the queue for the next turn. */
   endSteers(id: number, unsent: QueuedMessage[]) {
     const r = this.get(id);

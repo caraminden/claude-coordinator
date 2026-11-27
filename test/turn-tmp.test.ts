@@ -24,12 +24,12 @@ test('a temp folder is only ever a ticket id directly under an absolute root', (
   assert.throws(() => clearTmpDir('/data/tmp', '..' as any), /Not a ticket id/);
 });
 
-test('clearing a folder removes what is in it but never what its symlinks point at', () => {
+test('clearing a folder removes what is in it but never what its symlinks point at', async () => {
   const tmpRoot = join(root, 'links');
   const outside = join(root, 'outside');
   mkdirSync(outside);
   writeFileSync(join(outside, 'keep.txt'), 'keep');
-  const dir = makeTmpDir(tmpRoot, 3);
+  const dir = await makeTmpDir(tmpRoot, 3);
   mkdirSync(join(dir, 'build'));
   writeFileSync(join(dir, 'build', 'out.dll'), 'x');
   symlinkSync(outside, join(dir, 'link'));
@@ -39,9 +39,9 @@ test('clearing a folder removes what is in it but never what its symlinks point 
   assert.ok(existsSync(tmpRoot), 'the root stays');
 });
 
-test('the sweep removes only ticket folders it is told to, and leaves anything else in the root alone', () => {
+test('the sweep removes only ticket folders it is told to, and leaves anything else in the root alone', async () => {
   const tmpRoot = join(root, 'sweep');
-  for (const id of [1, 2, 3]) makeTmpDir(tmpRoot, id);
+  for (const id of [1, 2, 3]) await makeTmpDir(tmpRoot, id);
   for (const other of ['notes', '01', '2-old', '.hidden']) mkdirSync(join(tmpRoot, other));
   writeFileSync(join(tmpRoot, '4'), 'a file named like a ticket');
   const gone = sweepTmpDirs(tmpRoot, (id) => id === 2);
@@ -69,7 +69,7 @@ test("dismissing a minion clears its temp folder, and a restart sweeps those of 
   const ticket = () => store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' }).id;
 
   const dismissed = ticket();
-  writeFileSync(join(makeTmpDir(tmpRoot, dismissed), 'leftover'), 'x');
+  writeFileSync(join(await makeTmpDir(tmpRoot, dismissed), 'leftover'), 'x');
   await runner.close(dismissed, 'Dismissed.'); // resolves once the folder is gone: the delete doesn't hold up the server (#526)
   assert.ok(!existsSync(join(tmpRoot, String(dismissed))));
   assert.equal(store.getTicket(dismissed)!.status, 'closed');
@@ -80,11 +80,11 @@ test("dismissing a minion clears its temp folder, and a restart sweeps those of 
   const closedEarlier = ticket();
   store.updateTicket(closedEarlier, { status: 'closed' });
   const deleted = ticket();
-  for (const id of [taskmaster, open, closedEarlier, deleted]) makeTmpDir(tmpRoot, id);
+  for (const id of [taskmaster, open, closedEarlier, deleted]) await makeTmpDir(tmpRoot, id);
   store.deleteTicket(deleted);
   // A folder in the wrong scheme's root belongs to no open minion there.
   const other = store.createProject('Other', null);
-  makeTmpDir(runner.tmpRoot(other.id), open);
+  await makeTmpDir(runner.tmpRoot(other.id), open);
   const stray = join(tmpRoot, 'not-a-ticket');
   mkdirSync(stray);
   runner.recover();

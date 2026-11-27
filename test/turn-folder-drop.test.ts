@@ -19,13 +19,14 @@ const make = () => {
   return { root, dir };
 };
 
-test('a_finished_turns_folder_is_out_of_sight_at_once_and_gone_once_its_delete_ends', async () => {
+// The rename is off the server's thread too since #2137, so "out of sight at once" is no longer true or needed: nothing
+// reads a finished turn's folder by name, and a sweep that meets it mid-way only drops it again.
+test('a_finished_turns_folder_is_gone_under_both_names_once_its_delete_ends', async () => {
   const { dir } = make();
   const done = dropTurnDir(dir);
-  // Returned before the delete finished: the name is free, the renamed folder still exists.
-  assert.equal(existsSync(dir), false);
-  assert.equal(existsSync(`${dir}.gone`), true);
+  assert.deepEqual(busyNow(), ['1 folder deletes']);
   await done;
+  assert.equal(existsSync(dir), false);
   assert.equal(existsSync(`${dir}.gone`), false);
 });
 
@@ -58,7 +59,7 @@ test('a_background_folder_delete_counts_as_busy_until_it_ends_so_a_teardown_wait
   assert.deepEqual(await settled(), []);
   assert.equal(existsSync(`${dir}.gone`), false);
 
-  const tmp = makeTmpDir(join(root, 'tmp'), 7);
+  const tmp = await makeTmpDir(join(root, 'tmp'), 7);
   writeFileSync(join(tmp, 'f'), 'x');
   void clearTmpDirLater(join(root, 'tmp'), 7);
   mkdirSync(join(root, '13-1700000000000.gone'));

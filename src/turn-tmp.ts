@@ -3,8 +3,8 @@
  * than in perigee's /tmp, a 15 GB tmpfs every session shares, which their leftovers filled on 2026-10-31.
  * A folder is named by its ticket id; nothing but such a folder, directly under the root, is ever removed.
  */
-import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { readdir, rm } from 'node:fs/promises';
+import { readdirSync, rmSync } from 'node:fs';
+import { chmod, mkdir, readdir, rename, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { track } from './settled.ts';
 
@@ -21,12 +21,12 @@ export function tmpDirFor(root: string, ticketId: number): string {
 }
 
 /** Make the ticket's folder, private like its root, and return it. */
-export function makeTmpDir(root: string, ticketId: number): string {
+export async function makeTmpDir(root: string, ticketId: number): Promise<string> {
   const dir = tmpDirFor(root, ticketId);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   // mkdir's mode is masked by the umask and skips folders that exist already.
-  chmodSync(root, 0o700);
-  chmodSync(dir, 0o700);
+  await chmod(root, 0o700);
+  await chmod(dir, 0o700);
   return dir;
 }
 
@@ -57,18 +57,20 @@ export function sweepTmpDirs(root: string, keep: (ticketId: number) => boolean):
 export const DROPPED_SUFFIX = '.gone';
 
 /**
- * Remove a finished turn's folder without holding the server's thread (#1459): one cheap synchronous rename
- * takes it out of sight, the delete runs async. Resolves once it is gone; never rejects.
+ * Remove a finished turn's folder without holding the server's thread (#1459, #2137): a rename takes it out of
+ * sight, then the delete runs, both async. Resolves once it is gone; never rejects.
  */
 export function dropTurnDir(dir: string): Promise<void> {
-  let target = dir;
-  try {
-    target = `${dir}${DROPPED_SUFFIX}`;
-    renameSync(dir, target);
-  } catch {
-    target = dir; // already gone, or can't be renamed: the delete below copes with both
-  }
-  return deleting(rm(target, { recursive: true, force: true }).catch(() => {}));
+  const target = `${dir}${DROPPED_SUFFIX}`;
+  return deleting(
+    rename(dir, target)
+      .then(
+        () => target,
+        () => dir, // already gone, or can't be renamed: the delete copes with both
+      )
+      .then((d) => rm(d, { recursive: true, force: true }))
+      .catch(() => {}),
+  );
 }
 
 /** Delete the leftovers of a crash mid-delete, in `root` and in the person folders under it, async. */

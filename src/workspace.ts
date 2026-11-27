@@ -1,7 +1,7 @@
 // Project checkouts and per-ticket working directories.
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { buildOwnerKey, type Store, type Ticket } from './db.ts';
@@ -166,6 +166,19 @@ export function buildBranch(repoDir: string | null, build: number | null | undef
   return null;
 }
 
+/** buildBranch off the server's thread, for a turn's start (#2137). */
+export async function buildBranchLater(repoDir: string | null, build: number | null | undefined): Promise<string | null> {
+  if (!repoDir || !build) return null;
+  for (const [ref, name] of [
+    [`refs/heads/build/${build}`, `build/${build}`],
+    [`refs/remotes/origin/build/${build}`, `origin/build/${build}`],
+  ]) {
+    const found = await new Promise<boolean>((done) => execFile('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoDir, timeout: 10_000 }, (err) => done(!err)));
+    if (found) return name;
+  }
+  return null;
+}
+
 /** A minion in a build under way (its branch merges there, not to main), or the build's own minion, which ships the build. */
 export function inBuild(store: Pick<Store, 'getProject' | 'getSetting'>, ticket: Pick<Ticket, 'id' | 'project_id' | 'build'>): boolean {
   if (ticket.build == null) return false;
@@ -177,10 +190,10 @@ export function inBuild(store: Pick<Store, 'getProject' | 'getSetting'>, ticket:
  * its checkout. Until it can, no prompt mentions builds: a build minion could make the branch but nothing
  * could merge into it or land it.
  */
-export function landsBuilds(repoDir: string | null): boolean {
+export async function landsBuilds(repoDir: string | null): Promise<boolean> {
   if (!repoDir) return false;
   try {
-    return /--into\b/.test(readFileSync(join(repoDir, 'tools', 'land.sh'), 'utf8'));
+    return /--into\b/.test(await readFile(join(repoDir, 'tools', 'land.sh'), 'utf8'));
   } catch {
     return false;
   }

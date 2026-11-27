@@ -2,7 +2,7 @@
 // onboarding) and the messages the runner (src/runner.ts) sends a turn. Pure builders over Project and
 // Ticket; edit the wording here.
 import { MSG_DEFAULTS } from './msg-settings.ts';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { imageSize } from './image-size.ts';
@@ -79,8 +79,19 @@ export function lostSessionText(sessionId: string, note: string | null, chat: st
 /** The fallback when a minion's handoff turn fails (#406; a Taskmaster's starts from a facts sheet): Claude Code's own compaction, kept to what a handoff holds. */
 export const COMPACT_COMMAND = '/compact Keep every open ask and who made it, relays still owed, cards waiting on people, who is sealed on what, and promised next steps.';
 
-/** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */
-export function promptMessage(batch: QueuedMessage[]): string {
+/** A batch's attached images by path, read off the server's thread (#2137); one that can't be read is left out, and its message says so. */
+export async function loadImages(batch: QueuedMessage[]): Promise<Map<string, Buffer>> {
+  const out = new Map<string, Buffer>();
+  for (const img of batch.flatMap((m) => m.images))
+    await readFile(img.path).then(
+      (data) => out.set(img.path, data),
+      () => {},
+    );
+  return out;
+}
+
+/** One turn's prompt as a stream-json user message, so pasted images (`images`, from loadImages) reach Claude as images. */
+export function promptMessage(batch: QueuedMessage[], images: Map<string, Buffer> = new Map()): string {
   const content: object[] = [];
   for (const m of batch) {
     const text = m.text || (m.images.length ? '(sent an image)' : m.files?.length ? '(sent a file)' : '');
@@ -90,7 +101,8 @@ export function promptMessage(batch: QueuedMessage[]): string {
     }
     for (const img of m.images) {
       try {
-        const data = readFileSync(img.path);
+        const data = images.get(img.path);
+        if (!data) throw new Error('not loaded');
         content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: data.toString('base64') } });
         // Its path and size, so a reply can point at parts of it with mark_image (#960).
         const size = imageSize(data);

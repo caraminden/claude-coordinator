@@ -5,6 +5,7 @@
 // Turns read the enabled entries as rendered rubric files (renderSet), so critics read them the way they read repo files.
 import type { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import { thrown } from './thrown.ts';
 
@@ -384,7 +385,33 @@ export function readAgentFiles(repoDir: string | null | undefined): AgentFile[] 
     } catch {
       continue;
     }
-    if (raw.length > 256_000) continue;
+    const file = agentFile(n, raw);
+    if (file) out.push(file);
+  }
+  return out;
+}
+
+/** readAgentFiles off the server's thread, for a turn's start (#2137). */
+export async function readAgentFilesLater(repoDir: string | null | undefined): Promise<AgentFile[]> {
+  if (!repoDir) return [];
+  const dir = join(repoDir, '.claude', 'agents');
+  const names = (await readdir(dir).catch(() => [] as string[]))
+    .filter((n) => n.endsWith('.md'))
+    .sort()
+    .slice(0, 100);
+  const out: AgentFile[] = [];
+  for (const n of names) {
+    const raw = await readFile(join(dir, n), 'utf8').catch(() => null);
+    const file = raw === null ? null : agentFile(n, raw);
+    if (file) out.push(file);
+  }
+  return out;
+}
+
+/** One agent file's entry, or null when it is too big or agentKind doesn't count it a judge. */
+function agentFile(n: string, raw: string): AgentFile | null {
+  {
+    if (raw.length > 256_000) return null;
     const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
     const field = (k: string) => unquote(new RegExp(`^${k}:[ \\t]*(.*)$`, 'm').exec(fm?.[1] ?? '')?.[1].trim() ?? '');
     const base = n.slice(0, -3);
@@ -393,9 +420,8 @@ export function readAgentFiles(repoDir: string | null | undefined): AgentFile[] 
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
     const kind = agentKind(field('name') || base, field('description'), field('kind'));
-    if (slug && kind) out.push({ path: `.claude/agents/${n}`, slug, description: field('description'), kind, text: (fm ? raw.slice(fm[0].length) : raw).trim() });
+    return slug && kind ? { path: `.claude/agents/${n}`, slug, description: field('description'), kind, text: (fm ? raw.slice(fm[0].length) : raw).trim() } : null;
   }
-  return out;
 }
 
 /** A frontmatter value, unquoted the way the rubric files quote one (`when: "diff: public/**"`). */

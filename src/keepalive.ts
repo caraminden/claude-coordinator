@@ -8,8 +8,7 @@
  * and the week's readout. The runner (keepaliveSweep) schedules and runs the turns.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { ZONE } from './pacific.ts';
 
@@ -129,50 +128,51 @@ export function changedParts(a: Record<string, string>, b: Record<string, string
   return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => a[k] !== b[k]);
 }
 
-const trees = new Map<string, string>();
+const trees = new Map<string, Promise<string>>();
 /**
  * A hash of a folder's files, once per process: the pinned files only change with a restart. Content for
  * files under a megabyte, size alone above (the pinned node binary), so a restart that changed nothing in
  * them keeps the same hash.
  */
-export function treeHash(root: string): string {
-  const known = trees.get(root);
+export function treeHash(root: string): Promise<string> {
+  let known = trees.get(root);
   if (known) return known;
   const h = createHash('sha256');
-  const walk = (dir: string, rel: string) => {
-    for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  const walk = async (dir: string, rel: string) => {
+    for (const e of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
       const path = join(dir, e.name);
-      if (e.isDirectory()) walk(path, `${rel}${e.name}/`);
+      if (e.isDirectory()) await walk(path, `${rel}${e.name}/`);
       else if (e.isFile()) {
-        const size = statSync(path).size;
+        const size = (await stat(path)).size;
         h.update(`${rel}${e.name}\0${size}\0`);
-        if (size < 1_000_000) h.update(readFileSync(path));
+        if (size < 1_000_000) h.update(await readFile(path));
       }
     }
   };
-  try {
-    walk(root, '');
-  } catch {
-    // No pins (a test): the hash says so.
-  }
-  const out = h.digest('hex');
-  trees.set(root, out);
-  return out;
+  // No pins (a test): the hash says so. Kept as the walk under way, so launches starting together share one.
+  known = walk(root, '').then(
+    () => h.digest('hex'),
+    () => h.digest('hex'),
+  );
+  trees.set(root, known);
+  return known;
 }
 
 /** Which Claude Code build a command runs: its real path, size and time, so an update counts as a change. */
-export function claudeStamp(bin: string, path = process.env.PATH ?? ''): string {
+export async function claudeStamp(bin: string, path = process.env.PATH ?? ''): Promise<string> {
   try {
-    const found = isAbsolute(bin)
-      ? bin
-      : path
-          .split(delimiter)
-          .map((d) => join(d, bin))
-          // The turn's own claude-pace link (#1748) names its turn folder and the server's start: skip it for the CLI it hands to.
-          .find((p) => existsSync(p) && !realpathSync(p).endsWith('/claude-pace'));
+    let found = isAbsolute(bin) ? bin : undefined;
+    for (const p of found ? [] : path.split(delimiter).map((d) => join(d, bin))) {
+      // The turn's own claude-pace link (#1748) names its turn folder and the server's start: skip it for the CLI it hands to.
+      // A name that isn't there is skipped; one there that can't be resolved leaves the stamp as the bare name, as before.
+      const real = await realpath(p).catch((err: NodeJS.ErrnoException) => (err.code === 'ENOENT' ? null : Promise.reject(err)));
+      if (real === null || real.endsWith('/claude-pace')) continue;
+      found = p;
+      break;
+    }
     if (!found) return bin;
-    const real = realpathSync(found);
-    const s = statSync(real);
+    const real = await realpath(found);
+    const s = await stat(real);
     return `${real}\0${s.size}\0${s.mtimeMs}`;
   } catch {
     return bin;

@@ -3,7 +3,7 @@
 // These copy that state into the app's database after each turn and put it back before the next,
 // so a thread survives a switch of Claude account or config dir.
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -222,6 +222,12 @@ async function syncMemory(store: Store, project: Project, root: string, configDi
  * login's new transcript) is no proof of anything, so it stays. Null prunes nothing.
  * The scheme's memory is the server's folder: a row stored at the start whose note isn't there now was deleted.
  */
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
+
 export async function saveSession(store: Store, ticket: Ticket, project: Project, configDir: string, prunable: Set<string> | null) {
   const { ticketRoots, ownMemory, sharedMemory } = scope(ticket, project);
   const seenOwn = seenIn(store, ticket, configDir);
@@ -237,7 +243,7 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
     for (const root of roots) {
       const files = await listFiles(from, root);
       // A memory folder gone whole (a disk that isn't mounted) proves no delete either: the next turn's start refills it.
-      if (!files || (ticketId === null && !existsSync(join(from, root)))) unread.push(root);
+      if (!files || (ticketId === null && !(await exists(join(from, root))))) unread.push(root);
       for (const path of files ?? []) {
         seen.add(path);
         let st;
@@ -258,7 +264,7 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
     if (!prunable) continue;
     // A config dir without the session's transcript (a restore that failed) doesn't hold everything: keep the database's copy.
     const transcript = ticket.session_id ? transcriptPath(configDir, ticket.cwd, ticket.session_id) : null;
-    if (ticketId !== null && ticket.session_id && !(transcript && existsSync(transcript))) continue;
+    if (ticketId !== null && ticket.session_id && !(transcript && (await exists(transcript)))) continue;
     const rows = ticketId === null ? store.listClaudeState(project.id, null) : store.listClaudeState(project.id, ticketId);
     for (const row of rows) {
       const inRoots = roots.some((r) => under(r, row.path));
@@ -452,6 +458,25 @@ export function transcriptPath(configDir: string, cwd: string, sessionId: string
  * The effort level the session's latest reply ran at, read from the end of its transcript (the
  * stream Claude Code prints doesn't report it). Null if there is no transcript or no effort in it.
  */
+export async function lastEffortLater(ticket: Ticket, configDir: string): Promise<string | null> {
+  if (!ticket.session_id || !ticket.cwd) return null;
+  const path = transcriptPath(configDir, ticket.cwd, ticket.session_id);
+  const file = path && (await open(path, 'r').catch(() => null));
+  if (!file) return null;
+  try {
+    const size = (await file.stat()).size;
+    const len = Math.min(size, 256 * 1024);
+    const buf = Buffer.alloc(len);
+    await file.read(buf, 0, len, size - len);
+    return lastEffortIn(buf.toString('utf8'));
+  } finally {
+    await file.close();
+  }
+}
+
+const lastEffortIn = (tail: string) => [...tail.matchAll(/"effort":"([a-z]+)"/g)].at(-1)?.[1] ?? null;
+
+/** The same at once, for the startup sweep. */
 export function lastEffort(ticket: Ticket, configDir: string): string | null {
   if (!ticket.session_id || !ticket.cwd) return null;
   const path = transcriptPath(configDir, ticket.cwd, ticket.session_id);
@@ -467,8 +492,7 @@ export function lastEffort(ticket: Ticket, configDir: string): string | null {
     const len = Math.min(size, 256 * 1024);
     const buf = Buffer.alloc(len);
     readSync(fd, buf, 0, len, size - len);
-    const all = [...buf.toString('utf8').matchAll(/"effort":"([a-z]+)"/g)];
-    return all.length ? all[all.length - 1][1] : null;
+    return lastEffortIn(buf.toString('utf8'));
   } finally {
     closeSync(fd);
   }

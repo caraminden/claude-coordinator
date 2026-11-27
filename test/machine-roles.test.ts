@@ -180,7 +180,10 @@ test('the old write paths go into the roles: the one list, a lend, a runner agen
   s.updateMachine(m.id, { last_check: JSON.stringify({ at: 1, results: [], runners: true }) });
   assert.equal(mayFetch(s, s.getMachine(m.id)!, b), true);
   assert.deepEqual(s.machineRoles(m.id).find((r) => r.role === 'ci')?.projects, [a.id, b.id]);
-  assert.equal(lendsRole(s, s.getMachine(m.id)!, 'tools', a, [josh.id]), false, 'a CI runner host lends turns nothing');
+  // Its next boot makes it one PC's row again (Build 10 H6): the flag goes, its CI role and schemes stay, and its tools lend as before.
+  s.runnerHostRows();
+  assert.deepEqual([s.getMachine(m.id)!.last_check, s.machineRoles(m.id).find((r) => r.role === 'ci')], [null, { role: 'ci', on: true, caps: {}, setup: { runner_agent: true }, projects: [a.id, b.id] }]);
+  assert.equal(lendsRole(s, s.getMachine(m.id)!, 'tools', a, [josh.id]), true, 'no row is a runner host that lends turns nothing');
   s.db.close();
 });
 
@@ -322,6 +325,26 @@ test('each role decides alone: Tools for sessions, GPU jobs for machine jobs, CI
   assert.equal(mayFetch(s, s.getMachine(box.id)!, a), true);
   assert.equal(mayFetch(s, s.getMachine(box.id)!, b), false);
   s.db.close();
+});
+
+test("a CI runner host's row from before becomes one PC's row at boot, its CI role and schemes as they were (Build 10 H6)", () => {
+  const s = new Store(join(dir, 'runner-hosts.db'));
+  const cara = s.createUser({ name: 'Cara', login: 'cara' });
+  const a = s.createProject('a', null, cara.id);
+  const host = s.createMachine('cara-desktop-ci-runners', '', 'Cara', cara.id);
+  const pc = s.createMachine('josh-desktop', '', 'Cara', cara.id);
+  s.db.prepare('UPDATE machines SET last_check = ? WHERE id = ?').run(JSON.stringify({ at: 1, results: [], runners: true, host: 'DESK', os: 'linux' }), host.id);
+  s.writeMachineRoles(host.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, on: true, projects: [a.id], setup: { runner_host: true, run: { id: 'x' } } } : r)));
+  const before = s.machineRoles(pc.id);
+  s.runnerHostRows();
+  assert.equal(s.getMachine(host.id)!.last_check, null, 'the runners flag goes');
+  assert.deepEqual(
+    s.machineRoles(host.id).find((r) => r.role === 'ci'),
+    { role: 'ci', on: true, caps: {}, setup: { run: { id: 'x' }, runner_agent: true }, projects: [a.id] },
+  );
+  assert.deepEqual(s.machineRoles(pc.id), before, 'a row that never was one is left alone');
+  s.runnerHostRows();
+  assert.deepEqual(s.machineRoles(host.id).find((r) => r.role === 'ci')?.setup, { run: { id: 'x' }, runner_agent: true }, 'again: nothing changes');
 });
 
 test('rolesFromLegacy and legacyFromRoles round-trip every lend shape', () => {

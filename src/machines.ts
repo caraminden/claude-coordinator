@@ -29,7 +29,6 @@ import type { WorkerJoin } from './worker-join.ts';
 import type { RoleSetups } from './role-setup.ts';
 import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
 import { cleanReport, type MachineReport, storedReport } from './machine-join.ts';
-import { mergeOf, merges } from './machine-merge.ts';
 import { pausedRoles, setPaused } from './machine-pause.ts';
 import { legacyFromRoles, ROLE_NAMES, rolesCannot } from './machine-roles.ts';
 import { POOLED_WINDOWS, WindowsPool } from './machine-pick.ts';
@@ -125,8 +124,8 @@ const CHECK_MS = 30_000;
 /** One server's check (#307): whether MCP initialize and tools/list came back, and what it lists. */
 export type CheckResult = { server: MachineServer; ok: boolean; tools: string[]; error: string | null; ms: number };
 /**
- * A machine's last check as machines.last_check keeps it (#437); a CI runner host's says runners, with no results, and
- * since one row per PC (Build 7 M2b) the host and OS its runner agent last reported, so "These are one computer" works offline.
+ * A machine's last check as machines.last_check keeps it (#437). `runners` (with the host and OS a runner agent reported) is
+ * what releases before Build 10 H6 wrote for a CI runner host's row: nothing reads it now, as every row is one PC's.
  */
 export type StoredCheck = { at: number; results: CheckResult[]; runners?: true; host?: string; os?: 'windows' | 'linux' };
 
@@ -473,7 +472,8 @@ export class MachineRelay {
     const agent = this.agents.get(machine.id);
     const check = storedCheck(machine);
     const runnersHere = this.runnersOn(machine.id);
-    const runnerRow = this.runnerRow(machine);
+    // Only its CI runner agents are connected now (its machine agent is off, or was never installed): it reads as CI alone.
+    const runnersOnly = !agent && runnersHere.length > 0;
     // Its list of schemes (#438), and which of those schemes' turns get it: the ones its owner is in (and only the
     // turns they ask for, unless they lent its tools to everyone there).
     const projects = this.store.machineProjects(machine.id);
@@ -488,9 +488,8 @@ export class MachineRelay {
       workerHere: worker?.on && worker.here,
       now: Date.now(),
       startedAt: this.startedAt,
-      // A PC row is online by its machine agent; only a runner host's row is online by its runner agent.
-      online: !!agent || (runnerRow && runnersHere.length > 0),
-      runners: !agent && runnerRow,
+      online: !!agent || runnersOnly,
+      runners: runnersOnly,
       alwaysOn: !!machine.always_on,
       createdAt: machine.created_at,
       lastSeenAt: worker?.seen ? Math.max(worker.seen, machine.last_seen_at ?? 0) : machine.last_seen_at,
@@ -517,7 +516,7 @@ export class MachineRelay {
       notes: machine.notes,
       created_at: machine.created_at,
       last_seen_at: machine.last_seen_at,
-      online: !!agent || (runnerRow && runnersHere.length > 0),
+      online: !!agent || runnersOnly,
       host: agent?.host ?? runnersHere[0]?.host ?? null,
       command: agent?.command ?? null,
       connected_at: agent?.since ?? runnersHere[0]?.since ?? null,
@@ -533,16 +532,12 @@ export class MachineRelay {
       /** The MCP servers its agent found there, and what is ticked; lend is null until a managed agent first reports. */
       found: agent?.found ?? [],
       lend: storedLend(this.store, machine),
-      /** A CI runner host's row: only runner agents use it (#328), not one PC's row that also runs CI (Build 7 M2b). */
-      runners: runnerRow,
+      /** Only its CI runner agents are connected now, no machine agent (Build 10 H6: no row is a "runner host" any more). */
+      runners: runnersOnly,
       /** Its CI runner agents connected now, beside its agent (Build 7 M2b). */
       runner_agents: runnersHere.map(({ os, host, since }) => ({ os, host, since })),
       /** Its CI runner agents from before the balancer (M6b), which keep every runner up and the 30% ship squeeze: the row offers their update line. */
       runner_update: runnersHere.some((r) => this.runnerPlans.get(`${machine.id}:${r.os}`) === false) ? { os: runnersHere.filter((r) => this.runnerPlans.get(`${machine.id}:${r.os}`) === false).map((r) => r.os), url: this.agentUrl } : null,
-      /** Other rows its owner has for this PC (one hostname, M2b): "These are one computer: merge". */
-      same_pc: this.samePc(machine).map((m) => ({ id: m.id, name: m.name })),
-      /** A merge waiting on this row's runner agents connecting to the kept row (src/machine-merge.ts). */
-      merging: mergeOf(this.store, machine.id),
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
       /** What marked minions may start there (T8), from its owner's config file on that PC; null while offline. */
@@ -675,10 +670,7 @@ export class MachineRelay {
     if (mcp) this.store.updateMachine(machine.id, mcp);
     const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.managed ? [] : ['mcp'], managed: !!info.managed, found: [], workspaces: [], problems: [], timers: [] };
     this.agents.set(machine.id, agent);
-    // A runner host's flag on a row its machine agent connects to was written by an older release (a rollback) for the runner
-    // agent beside it: one PC's row is no runner host's, so the flag goes and its other roles lend again.
-    const stale = storedCheck(machine)?.runners && !this.store.machineRoles(machine.id).find((r) => r.role === 'ci')?.setup?.runner_host;
-    this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(stale ? { last_check: null } : {}) });
+    this.store.updateMachine(machine.id, { last_seen_at: agent.since });
     this.onChange();
     agent.timers.push(
       setTimeout(() => this.checkIfDue(machine.id), CHECK_UNASKED_MS),
@@ -713,20 +705,17 @@ export class MachineRelay {
     this.runnerAgents.set(key, runner);
     const ships = this.shipsFor(host);
     if (ships.length) res.write(`data: ${JSON.stringify({ ships })}\n\n`);
-    // A runner host's check is its agent connecting: an hourly runner list could collide with a person's add, which the agent
-    // would refuse as busy. Only a row that is one (added as one, or before M2b): on one PC's row the runner agent changes no role but CI.
-    const check = storedCheck(machine);
-    this.store.updateMachine(machine.id, { last_seen_at: runner.since, ...(check?.runners ? { last_check: JSON.stringify({ at: runner.since, results: [], runners: true, host, os }) } : {}) });
-    // Its CI role goes on the first time a runner agent connects, lent where the machine is; switched off after that, it stays off.
-    // As a role its owner switches on, it goes to every scheme they are in (Josh's pick, "Every scheme you're in"); a shared row's
-    // to where the machine is. A merge into this row sets it in finishMerge instead, so the merge lends no scheme more CI.
+    this.store.updateMachine(machine.id, { last_seen_at: runner.since });
+    // Its CI role goes on the first time a runner agent connects, lent where the machine is; switched off after that, it stays off
+    // (`runner_agent` marks that first time, and nothing else). As a role its owner switches on, it goes to every scheme they are
+    // in (Josh's pick, "Every scheme you're in"); a row with no owner's to where the machine is.
     const ci = this.store.machineRoles(machine.id).find((r) => r.role === 'ci');
     const paused = pausedRoles(this.store, machine.id);
-    if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host && paused) {
+    if (ci && !ci.setup?.runner_agent && paused) {
       // Paused (M3's Pause all): it stays off, and Resume brings it on with the rest.
       setPaused(this.store, machine.id, [...paused, 'ci']);
       this.store.setMachineRole(machine.id, 'ci', { setup: { ...ci.setup, runner_agent: true } });
-    } else if (ci && !ci.setup?.runner_agent && !ci.setup?.runner_host && !merges(this.store).some((m) => m.into === machine.id)) {
+    } else if (ci && !ci.setup?.runner_agent) {
       const owner = this.store.getUser(machine.owner_id ?? -1);
       const everyScheme = owner
         ? this.store
@@ -742,11 +731,7 @@ export class MachineRelay {
       clearInterval(ping);
       if (this.runnerAgents.get(key) === runner) this.dropRunner(key, runner);
     });
-    this.onRunner?.(machine);
   }
-
-  /** Told when a runner agent connects, once the server sets it: a merge waiting on that agent finishes (src/routes/machine-merge.ts). */
-  onRunner: ((machine: Machine) => void) | null = null;
 
   private dropRunner(key: string, runner: RunnerAgent) {
     this.runnerAgents.delete(key);
@@ -770,28 +755,6 @@ export class MachineRelay {
   /** A machine's CI runner agents connected now. */
   runnersOn(machineId: number): RunnerAgent[] {
     return [...this.runnerAgents].filter(([k]) => k.startsWith(`${machineId}:`)).map(([, r]) => r);
-  }
-
-  /** A CI runner host's row (#328): marked so when added as one or before M2b, or used by nothing but runner agents (no agent, no report). */
-  private runnerRow(machine: Machine): boolean {
-    return !!storedCheck(machine)?.runners || (!this.agents.has(machine.id) && !storedReport(machine) && this.runnersOn(machine.id).length > 0);
-  }
-
-  /** The hostnames a machine's agents report or last reported, lowercase: its agent's, its runner agents', and as kept offline. */
-  private hostsOf(machine: Machine): Set<string> {
-    const hosts = [this.agents.get(machine.id)?.host, ...this.runnersOn(machine.id).map((r) => r.host), storedReport(machine)?.host, storedCheck(machine)?.host];
-    return new Set(hosts.filter((h): h is string => !!h).map((h) => h.toLowerCase()));
-  }
-
-  /**
-   * The other rows one owner has for the PC this one is on (Build 7 M2b; specs/machine-connections.md section 8): the same
-   * hostname reported, one of the two a CI runner host's row, so the runner agent can move onto the other (src/machine-merge.ts).
-   */
-  samePc(machine: Machine): Machine[] {
-    const mine = this.hostsOf(machine);
-    if (!mine.size) return [];
-    if (isVm(machine)) return [];
-    return this.store.listMachines().filter((m) => m.id !== machine.id && !isVm(m) && m.owner_id === machine.owner_id && (this.runnerRow(m) || this.runnerRow(machine)) && [...this.hostsOf(m)].some((h) => mine.has(h)));
   }
 
   private dropAgent(machineId: number, agent: Agent) {

@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { lendsRole, ownerAsked } from './access.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { GithubLink } from './github-link.ts';
-import { storedCheck, type MachineRelay } from './machines.ts';
+import type { MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 import { thrown } from './thrown.ts';
@@ -81,9 +81,9 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
 export function mayFetch(store: Store, machine: Machine, project: Project, removing = false): boolean {
   const role = store.machineRoles(machine.id).find((r) => r.role === 'ci');
   const ci = role?.on ?? false;
-  if (removing && (ci || storedCheck(machine)?.runners || role?.setup?.runner_agent || role?.setup?.runner_host)) return true;
-  // A PC's row a runner agent has connected to (Build 7 M2b) is one too: its CI role decides, so off is off.
-  if (ci || storedCheck(machine)?.runners || role?.setup?.runner_agent) return lendsRole(store, machine, 'ci', project);
+  if (removing && (ci || role?.setup?.runner_agent)) return true;
+  // A PC's row a runner agent has connected to is one too: its CI role decides, so off is off.
+  if (ci || role?.setup?.runner_agent) return lendsRole(store, machine, 'ci', project);
   return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
 }
 

@@ -5,7 +5,6 @@ import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunne
 import { machineJobsSection } from './jobs.js';
 import { connectWizardRedraw, openConnectPanel, openConnectWizard, reportLine } from './machine-connect.js';
 import { isMine, lentLine, machineCard, ownerName } from './machine-card.js';
-import { openMergePanel, runnerAgentLines } from './machine-merge.js';
 import { removing, renderRemovals, sendRemoval } from './machine-remove.js';
 import { pauseButton } from './machine-role-cards.js';
 import { forgetWorkerLink, workerReason } from './machine-worker-row.js';
@@ -138,26 +137,27 @@ function connectComputer(m = null, inside = null) {
   if (!el) return;
   // One panel at a time: the one before stops watching its code, or its next look would draw over this one.
   connectPanel?.close({ quiet: true });
-  mergePanel?.close({ quiet: true });
   connectPanel = openConnectPanel(el, { machine: m, inside });
   el.scrollIntoView({ block: 'nearest' });
 }
 
-let mergePanel = null;
+/** @type {Record<'windows' | 'linux', { tag: string, where: string, line: (url: string, token: string) => string }>} */
+const RUNNER_WAYS = {
+  windows: { tag: 'powershell-admin', where: 'On that PC, open PowerShell as administrator (Run as administrator) and paste this. It replaces the runner agent there; its runners stay.', line: machineSetupRunnerAgent },
+  linux: { tag: 'wsl', where: "In a root shell in the CI runners' WSL distro on that PC (wsl -d citadel-ci -u root), or sudo -i on a Linux PC, paste this. It replaces the Linux runner agent there; its runners stay.", line: machineSetupRunnerAgentLinux },
+};
 
-/** "These are one computer: merge" (Build 7 M2b): in Connect a computer's place, one panel at a time. */
-function mergeMachines(m, other) {
-  const el = document.getElementById('machine-connect');
-  if (!el) return;
-  connectPanel?.close({ quiet: true });
-  mergePanel?.close({ quiet: true });
-  mergePanel = openMergePanel(el, m, other, { machines: () => view.machines ?? [] });
-  el.scrollIntoView({ block: 'nearest' });
-}
+/**
+ * The lines that reinstall a PC's runner agents with a new token, one per os.
+ * @param {string} url
+ * @param {string} token
+ * @param {('windows' | 'linux')[]} osList
+ */
+const runnerAgentLines = (url, token, osList) => osList.map((os) => [h('p', { class: 'small' }, RUNNER_WAYS[os].where), markdownElement(`\`\`\`${RUNNER_WAYS[os].tag}\n${RUNNER_WAYS[os].line(url, token)}\n\`\`\``)]);
 
 /** A machine just added or given a new token: what its install line needs. */
 function setupFor(machine, token, url, runnerOs = []) {
-  return { id: machine.id, name: machine.name, token, url: url ?? location.origin, runners: machine.runners, runnerOs };
+  return { id: machine.id, name: machine.name, token, url: url ?? location.origin, runnerOs };
 }
 
 function renderMachineSetup() {
@@ -165,51 +165,26 @@ function renderMachineSetup() {
   if (!el) return;
   const t = view.machineToken;
   if (!t) return el.replaceChildren();
-  const ways = t.runners
-    ? [
-        {
-          os: 'runner',
-          tab: 'Windows',
-          label: 'Administrator PowerShell on the Windows PC that hosts the CI runners (tools/ci-runner/README.md): installs the runner agent as a background task.',
-          text: machineSetupRunnerAgent(t.url, t.token),
-          note: 'It checks Node 18+ and Git for Windows, registers the task Citadel runner agent (SYSTEM, at startup), starts it and waits until this machine shows online. No reboot, and no runner is touched.',
-        },
-        {
-          os: 'runner-linux',
-          tab: 'Linux in WSL',
-          label: 'Root shell in the CI runners\' WSL distro on the Windows PC (wsl -d citadel-ci -u root; tools/ci-runner/README.md, "Linux runners in WSL"): installs the Linux runner agent as a systemd service.',
-          text: machineSetupRunnerAgentLinux(t.url, t.token),
-          note: "The first time, it sets up /etc/wsl.conf and asks you to restart the distro and paste this again. Then it installs Node, git and the runner's libraries, starts the agent and waits until this machine shows online. Use a host of its own for this, not the Windows agent's.",
-        },
-        {
-          os: 'runner-plain',
-          tab: 'Linux',
-          label: 'Root shell (sudo -i) on a Linux PC (tools/ci-runner/README.md, "Linux runners on plain Linux"): installs the same agent as a systemd service. CI jobs run as a user of their own, with no sudo.',
-          text: machineSetupRunnerAgentLinux(t.url, t.token),
-          note: "It installs Node, git and the runner's libraries where they are missing (Debian or Ubuntu; elsewhere it names what to install), starts the agent and waits until this machine shows online. All CI there is held to 75% of the PC, or the owner's own number in /opt/citadel-runner-agent/caps.json.",
-        },
-      ]
-    : [
-        { os: 'windows', tab: 'Windows', label: 'Windows PowerShell: runs in the background, also after you close the window, and starts at every logon. No reboot.', text: machineSetupWindows(t.url, t.name, t.token), log: agentLog('windows', t.name) },
-        { os: 'posix', tab: 'macOS or Linux', label: 'Terminal on macOS or Linux: runs in the background, also after you close the window, and starts at every login. No sudo.', text: machineSetupPosix(t.url, t.name, t.token), log: agentLog('posix', t.name) },
-        {
-          os: 'jobs',
-          tab: 'GPU jobs (WSL)',
-          label: 'Shell in the citadel-jobs WSL distro on that PC, as you, not root (wsl -d citadel-jobs; tools/jobs-runner/README.md sets the distro up first): runs GPU jobs from contraptions in podman.',
-          text: machineSetupPosix(t.url, t.name, t.token),
-          note: 'Then add a "jobs" block to ~/coordinator-agent/machine-agent.json in the distro (the README, step 6): the folders jobs may read, the time limit and the disk cap. Without it every job is refused.',
-        },
-      ];
+  const ways = [
+    { os: 'windows', tab: 'Windows', label: 'Windows PowerShell: runs in the background, also after you close the window, and starts at every logon. No reboot.', text: machineSetupWindows(t.url, t.name, t.token), log: agentLog('windows', t.name) },
+    { os: 'posix', tab: 'macOS or Linux', label: 'Terminal on macOS or Linux: runs in the background, also after you close the window, and starts at every login. No sudo.', text: machineSetupPosix(t.url, t.name, t.token), log: agentLog('posix', t.name) },
+    {
+      os: 'jobs',
+      tab: 'GPU jobs (WSL)',
+      label: 'Shell in the citadel-jobs WSL distro on that PC, as you, not root (wsl -d citadel-jobs; tools/jobs-runner/README.md sets the distro up first): runs GPU jobs from contraptions in podman.',
+      text: machineSetupPosix(t.url, t.name, t.token),
+      note: 'Then add a "jobs" block to ~/coordinator-agent/machine-agent.json in the distro (the README, step 6): the folders jobs may read, the time limit and the disk cap. Without it every job is refused.',
+    },
+  ];
   // Picked from this browser; the chips are for adding a computer from another one.
   view.machineSetupOs ??= guessOs();
-  const os = t.runners ? (view.runnerSetupOs ?? 'runner') : view.machineSetupOs;
+  const os = view.machineSetupOs;
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
   copy.onclick = async () => {
     copy.textContent = (await copyText(ways.find((w) => w.os === os).text)) ? 'Copied' : "Couldn't copy";
   };
   const pick = (to) => {
-    if (t.runners) view.runnerSetupOs = to;
-    else view.machineSetupOs = to;
+    view.machineSetupOs = to;
     renderMachineSetup();
   };
   el.replaceChildren(
@@ -239,9 +214,9 @@ function renderMachineSetup() {
           w.note ? h('p', { class: 'small muted' }, w.note) : h('p', { class: 'small muted' }, 'It writes what it prints to ', h('code', {}, w.log), ', and ends by printing how to watch that log, stop it and remove it.'),
         ),
       ),
-      // One PC's row (M2b): its runner agents held the old token too, so they reinstall with this one.
+      // Its runner agents held the old token too, so they reinstall with this one.
       t.runnerOs.length ? [h('div', { class: 'cui-notice', 'data-tone': 'warn', role: 'status' }, h('strong', {}, 'Its CI runner agent is cut off too.'), ' It used the old token: paste this on that PC as well, and its runners stay.'), runnerAgentLines(t.url, t.token, t.runnerOs)] : '',
-      t.runners ? '' : h('p', { class: 'small' }, `Once it connects, ${t.name}'s line below shows the MCP servers and folders it found there: open it and tick what to lend.`),
+      h('p', { class: 'small' }, `Once it connects, ${t.name}'s line below shows the MCP servers and folders it found there: open it and tick what to lend.`),
     ),
   );
 }
@@ -256,7 +231,6 @@ function renderMachineList() {
   const el = document.getElementById('machine-list');
   if (!el) return;
   view.machineOpen ??= new Set();
-  mergePanel?.redraw();
   connectWizardRedraw();
   renderRemovals(document.getElementById('machine-removals'), renderMachineList);
   // One card per computer you own (take B); others' computers lent to your schemes are one read-only line.
@@ -502,7 +476,7 @@ function machineLends(m) {
 }
 
 /** One line of the quiet list (#437, take A): name, reason, status chip (#492), fix button; click it for the rest. */
-/** The fixes a card's header carries (#437, Build 7 M2, M2b, M6b): merge two rows of one PC, Update an old agent, update an old CI agent, a fix. @param {MachineRow} m */
+/** The fixes a card's header carries (#437, Build 7 M2, M6b): Update an old agent, update an old CI agent, a fix. @param {MachineRow} m */
 function machineHead(m) {
   const open = () => {
     view.machineOpen.add(m.id);
@@ -512,13 +486,10 @@ function machineHead(m) {
   const fix = !gone && fixButton(m, open);
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
   const update = m.update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update');
-  // Two rows for one PC (Build 7 M2b): its owner merges them into one. It shows the kept row's token, so only to its owner.
-  const other = !gone && tokenIsMine(m) && m.same_pc?.find((x) => view.machines.some((y) => y.id === x.id && tokenIsMine(y) && !removing(y)));
-  const merge = other && h('button', { type: 'button', class: 'secondary small', title: `${m.name} and ${other.name} report one hostname. Opens the line that moves the CI runner agent onto one row`, onclick: () => mergeMachines(m, other) }, m.merging ? 'Merging: show the line' : 'These are one computer: merge');
   // A CI runner agent from before the balancer (Build 7 M6b): the button opens its details at the update line.
   const ciUpdate = m.runner_update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: "Its CI runner agent is from before: it keeps every runner awake instead of following this PC's balance. Opens the line that updates it", onclick: open }, 'Update CI agent');
   const word = gone ? toneChip('info', 'Removing…') : null;
-  return fix || update || merge || ciUpdate || word ? h('span', { class: 'machine-fix' }, word || '', merge || '', update || '', ciUpdate || '', fix || '') : null;
+  return fix || update || ciUpdate || word ? h('span', { class: 'machine-fix' }, word || '', update || '', ciUpdate || '', fix || '') : null;
 }
 
 /** A card's Details: its computer, screen, notes, token and its buttons (its roles are on the card's tiles). */

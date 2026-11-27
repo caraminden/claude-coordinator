@@ -50,7 +50,6 @@ test('a VM never shows as a machine of its own: only inside its host, which name
       ['peek-auras'],
       "the VM's workspaces are on the host's card",
     );
-    assert.deepEqual(relay.samePc(store.getMachine(box.id)!), [], 'no merge offers a VM');
     // Turns still get the VM's own tools, under its own name (mcp__citadel-test-box-ws__*).
     assert.deepEqual(
       relay.online().map((m) => [m.name, m.servers]),

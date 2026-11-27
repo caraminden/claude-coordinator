@@ -165,7 +165,7 @@ test('a queued job with a label no runner has gets one even with no workflow fil
   assert.deepEqual(w.started.at(-1), 'add Peek Auras windows josh-desktop');
 });
 
-test("unticking a scheme on a PC's own row takes its runners off there; a CI runner host from before keeps what people added", async () => {
+test("unticking a scheme on a PC's row takes its runners off there, a CI runner host's row from before Build 10 H6 too", async () => {
   const w = world();
   const row = w.pc('josh-desktop', w.josh.id, []);
   const host = w.pc('cara-desktop-ci-runners', w.cara.id, [], { runner_host: true });
@@ -174,9 +174,9 @@ test("unticking a scheme on a PC's own row takes its runners off there; a CI run
   w.samples.set(`${row.id}:linux`, new Set(['caraminden/delve', 'someone/not-a-scheme']));
   w.samples.set(`${host.id}:linux`, new Set(['caraminden/delve']));
   await w.auto.pass();
-  assert.deepEqual(w.started, ['remove Delve linux josh-desktop']);
+  assert.deepEqual(w.started.sort(), ['remove Delve linux cara-desktop-ci-runners', 'remove Delve linux josh-desktop']);
   await w.auto.pass();
-  assert.equal(w.started.length, 1, 'once, not each pass');
+  assert.equal(w.started.length, 2, 'once each, not each pass');
 });
 
 test("a scheme someone joins or makes later is lent their PCs' CI; one they unticked stays unticked", () => {

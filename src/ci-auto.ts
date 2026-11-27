@@ -167,7 +167,7 @@ export class CiAuto {
     for (const os of OSES) {
       for (const m of this.d.runnerMachines(os)) {
         const ci = this.d.store.machineRoles(m.id).find((r) => r.role === 'ci');
-        if (!ci?.on || !ci.setup?.runner_agent || ci.setup.runner_host) continue;
+        if (!ci?.on || !ci.setup?.runner_agent) continue;
         for (const repo of this.d.reposOn(m.id, os)) {
           const project = projects.find((p) => repoSlug(p.repo_url)?.toLowerCase() === repo);
           if (!project || lendsCi(this.d.store, m, project)) continue;

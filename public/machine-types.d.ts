@@ -170,12 +170,8 @@ export interface MachineRow {
   programs: MachineProgram[] | null;
   config_file: string | null;
   removing?: unknown;
-  /** For the connect, merge and remove panels (src/machines.ts view). */
+  /** For the connect and remove panels (src/machines.ts view). */
   created_at: number;
-  /** Other rows its owner has for this PC (one hostname). */
-  same_pc?: { id: number; name: string }[];
-  /** A merge waiting on this row's runner agents connecting to the kept row (src/machine-merge.ts Merge). */
-  merging?: { from: number; into: number; os: ('windows' | 'linux')[]; by: string; at: number } | null;
   /** The computer it is a VM on (Build 10 H4), or null. */
   vm_of?: number | null;
   /** Its VMs (Build 10 H4: a VM is a capability of its computer), each as its own row: they never show as machines of their own. */
@@ -205,15 +201,6 @@ export interface MachineJoinLook {
   expires_at: number;
   state: MachineJoinState;
   machine: MachineRow | null;
-}
-
-/** A merge's lines to paste (POST api/machines/:id/merge: src/routes/machine-merge.ts lines). */
-export interface MachineMergeLines {
-  into: { id: number; name: string };
-  from: { id: number; name: string };
-  os: ('windows' | 'linux')[];
-  token: string;
-  agent_url: string;
 }
 
 /** What takes a removed worker off its PC, by shell (src/machine-away.ts UNINSTALL). */

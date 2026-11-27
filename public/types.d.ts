@@ -351,5 +351,4 @@ export type View = Omit<ReturnType<typeof chatView>, keyof SessionState | 'sendi
     /** Admins: "Everyone else's computers" left open. */
     machineOthersOpen?: boolean;
     machineSetupOs: 'posix' | 'windows';
-    runnerSetupOs: 'posix' | 'windows';
   };

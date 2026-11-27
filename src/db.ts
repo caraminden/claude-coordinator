@@ -363,6 +363,7 @@ export const SCHEMA_HISTORY = [
   [126, 'machines.priority (Build 7 M6, #2056)'],
   [127, "machines.owner_id filled where it was empty, from created_by or machine_joins; those rows' roles caps.everyone (Build 10 H1, #2184)"],
   [128, 'machines.vm_of: the computer a VM runs on, linked when its agent finds the VM in Hyper-V (Build 10 H4, #2188)'],
+  [129, "a CI runner host's row becomes one PC's: last_check's runners flag goes, its CI role's runner_host becomes runner_agent (Build 10 H6, #2202)"],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -462,6 +463,7 @@ export class Store {
     this.lendingLists();
     this.machineRoleTables();
     this.machineOwners();
+    this.runnerHostRows();
     this.noteSchemaVersion();
   }
 

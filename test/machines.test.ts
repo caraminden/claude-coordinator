@@ -186,10 +186,9 @@ test('adding a machine takes a name, always on and nothing about what it lends (
   assert.deepEqual([machine.mcp_kind, machine.mcp_command, machine.workspace_tools, machine.lend, machine.always_on, machine.runners], [null, '', false, null, true, false]);
   const { machine: laptop } = await call('/api/machines', { method: 'POST', body: { name: 'lap-pc', always_on: false } });
   assert.equal(laptop.always_on, false);
-  // A CI runner host is one from the start, so its own install line shows before its agent ever connects.
+  // An older page's "CI runner host" is one PC's row like any other (Build 10 H6): its CI runners are a role.
   const { machine: host } = await call('/api/machines', { method: 'POST', body: { name: 'ci-pc', runners: true } });
-  assert.deepEqual([host.runners, host.status, host.reason], [true, 'asleep', 'Not connected yet']);
-  assert.equal((await call(`/api/machines/${host.id}/token`, { method: 'POST' })).machine.runners, true);
+  assert.deepEqual([host.runners, host.status, host.reason, host.checked], [false, 'asleep', 'Not connected yet', null]);
   for (const m of [machine, laptop, host]) await call(`/api/machines/${m.id}`, { method: 'DELETE' });
 });
 

@@ -107,7 +107,6 @@ import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
 import { shellOff } from './src/shell.ts';
 import { agentRoutes, dropRemoved } from './src/routes/machines.ts';
-import { finishMerge } from './src/routes/machine-merge.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
 import { CodeCounts, countApart } from './src/code-counts.ts';
 import { readApart, WorkFlow } from './src/work-flow.ts';
@@ -800,7 +799,6 @@ const jobs = new MachineJobs({
 });
 machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
 // One row per PC (Build 7 M2b): a runner agent connecting to the row a merge keeps finishes that merge.
-machines.onRunner = (m) => void finishMerge(app, m).catch((err) => console.error(`Machine merge into ${m.name}:`, err));
 // A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).
 if (!BOOT_CHECK)
   machines.watchBoxes((id, text) => {

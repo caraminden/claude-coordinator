@@ -13,7 +13,7 @@ import { runnerAsk } from '../ci-runner.ts';
 import { heldRows } from '../ci-hold.ts';
 import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
-import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
+import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend } from '../machines.ts';
 import { POOLED_WINDOWS } from '../machine-pick.ts';
 import type { Machine, Project, Ticket } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
@@ -446,8 +446,7 @@ export const agentRoutes: Route[] = [
   }),
   // A CI runner agent's load sample, every 30 seconds (#534, src/ci-load.ts).
   agent('POST', '/api/machines/runner-load', async ({ req, res, app }, machine) => {
-    // A runner agent on its own row, or beside the PC's agent on one row (Build 7 M2b).
-    if (!storedCheck(machine)?.runners && !app.machines.runnersOn(machine.id).length) throw new HttpError(403, 'Only a CI runner agent sends load samples');
+    if (!app.machines.runnersOn(machine.id).length) throw new HttpError(403, 'Only a CI runner agent sends load samples');
     app.ciLoad.add(machine.id, await readJson(req, 500_000));
     return json(res, 202, {});
   }),
@@ -794,7 +793,8 @@ export const machineRoutes: Route[] = [
       // Someone signed in with the old shared password has no id to own it by.
       if (session.uid === undefined) throw new HttpError(403, 'Sign in with your own login to add a machine');
       const name = machineName(body.name);
-      // Adding is a name (#439): what it lends is ticked once its agent reports what it found. runners: a CI runner host.
+      // Adding is a name (#439): what it lends is ticked once its agent reports what it found. Every row is one PC's (Build 10
+      // H6): an older page's runners: true adds one like any other, whose CI runners its owner sets up as a role.
       for (const k of ['always_on', 'runners'] as const) if (body[k] !== undefined && typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false`);
       let machine;
       try {
@@ -804,8 +804,7 @@ export const machineRoutes: Route[] = [
         throw new HttpError(409, 'A machine with that name already exists');
       }
       const token = app.machines.issueToken(machine.id);
-      // A runner host is one from the start, before its agent first connects: its line and its install line say so.
-      app.store.updateMachine(machine.id, { ...(body.always_on === false ? { always_on: 0 } : {}), ...(body.runners ? { last_check: JSON.stringify({ at: machine.created_at, results: [], runners: true }) } : {}) });
+      if (body.always_on === false) app.store.updateMachine(machine.id, { always_on: 0 });
       await ownWrites(); // the reply re-reads the machine (#1244)
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       // Shown here, and again only to its owner (GET .../token, #1355).
@@ -858,9 +857,9 @@ export const machineRoutes: Route[] = [
     handler: managed(async ({ req, res, app, machine }) => {
       // Its agent is still clearing its copies: a new token would cut it off before they are home.
       if (app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it gets no new token until its copies are cleared, or remove it now`);
-      // A new token locks out whoever holds the old one, the connected agent included: on one PC's row its runner agents too,
-      // so the reply names them and the page shows their lines (M2b).
-      const runnerOs = app.machines.view(machine).runners ? [] : app.machines.runnersOn(machine.id).map((r) => r.os);
+      // A new token locks out whoever holds the old one, the connected agent included, and its runner agents too: the reply
+      // names them and the page shows their lines.
+      const runnerOs = app.machines.runnersOn(machine.id).map((r) => r.os);
       const token = app.machines.issueToken(machine.id);
       app.machines.disconnect(machine.id);
       await ownWrites(); // the reply re-reads the machine (#1244)

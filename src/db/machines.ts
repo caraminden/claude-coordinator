@@ -97,6 +97,35 @@ export const machineQueries = {
    * left without one and said, for a person to settle (it lends nothing meanwhile): an owner is never guessed. Every
    * boot (Store's constructor, after machineRoleTables); says what it did, for the deploy's notes.
    */
+  /**
+   * Every boot, after the owner backfill (which reads the flag): a CI runner host's row (#328, or one an older release made)
+   * becomes one PC's row, as any other (Build 10 H6, "one kind of machine"). Its last_check loses the runners flag, and its
+   * CI role's runner_host becomes runner_agent, which says only that a runner agent has connected there, so the next one
+   * keeps its CI role's schemes as they are. Its roles, schemes and token stay. Says what it did, for the deploy's notes.
+   */
+  runnerHostRows(this: Store) {
+    const rows = (this.db.prepare('SELECT id, name, last_check FROM machines ORDER BY id').all() as { id: number; name: string; last_check: string | null }[]).filter((m) => runnerHost(m.last_check) || this.machineRoles(m.id).some((r) => r.role === 'ci' && r.setup?.runner_host !== undefined));
+    if (!rows.length) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const m of rows) {
+        if (runnerHost(m.last_check)) this.db.prepare('UPDATE machines SET last_check = NULL WHERE id = ?').run(m.id);
+        this.writeMachineRoles(m.id, (roles) =>
+          roles.map((r) => {
+            if (r.role !== 'ci' || r.setup?.runner_host === undefined) return r;
+            const { runner_host: _, ...setup } = r.setup;
+            return { ...r, setup: { ...setup, runner_agent: true } };
+          }),
+        );
+        console.log(`Machines (H6): ${m.name} (row ${m.id}) was a CI runner host's row; it is one PC's row now, its CI role and schemes as they were.`);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  },
+
   machineOwners(this: Store) {
     const rows = this.db.prepare('SELECT id, name, created_by, scoped, last_check FROM machines WHERE owner_id IS NULL ORDER BY id').all() as { id: number; name: string; created_by: string; scoped: number; last_check: string | null }[];
     if (!rows.length) return;
@@ -148,10 +177,10 @@ export const machineQueries = {
         return roles.map((r) => (r.role === 'tools' ? { ...r, caps: { ...r.caps, ticks: l ? { server: l.server, workspaces: l.workspaces, ...(l.before_ticks ? { before_ticks: true as const } : {}) } : null } } : r.role === 'gpu' ? on(r, !l?.gpu_off) : r.role === 'turns' ? on(r, !!l?.worker) : r));
       });
     }
-    // It just became a CI runner host (added as one, or a runner agent connected with its key), or an older release
-    // made it one: the CI role goes on, lent where the machine was, as its runner tokens were before roles (ci-runner.ts mayFetch).
+    // An older release (a rollback) made it a CI runner host: the CI role goes on, lent where the machine was, as its runner
+    // tokens were before roles (ci-runner.ts mayFetch); runnerHostRows makes it one PC's row again at the next boot.
     if (keys.includes('last_check') && runnerHost(rest.last_check ?? null) && !runnerSeen(this.machineRoles(id))) {
-      this.writeMachineRoles(id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, on: true, projects: r.on ? r.projects : legacyFromRoles(roles).projects, setup: { ...r.setup, runner_host: true } } : r)));
+      this.writeMachineRoles(id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, on: true, projects: r.on ? r.projects : legacyFromRoles(roles).projects, setup: { ...r.setup, runner_agent: true } } : r)));
     }
   },
 

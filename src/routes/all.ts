@@ -10,7 +10,6 @@ import { proposalRoutes } from './proposals.ts';
 import { memoryCuratorRoutes } from './memory-curator.ts';
 import { fileRoutes } from './files.ts';
 import { machineRoutes } from './machines.ts';
-import { machineMergeRoutes } from './machine-merge.ts';
 import { jobRoutes } from './jobs.ts';
 import { minionJobRoutes } from './minion-jobs.ts';
 import { ciStoreRoutes } from './ci-store.ts';
@@ -40,7 +39,6 @@ export const apiRoutes = [
   ...memoryCuratorRoutes,
   ...fileRoutes,
   ...machineRoutes,
-  ...machineMergeRoutes,
   ...jobRoutes,
   ...minionJobRoutes,
   ...ciStoreRoutes,

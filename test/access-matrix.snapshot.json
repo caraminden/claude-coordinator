@@ -1099,26 +1099,6 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
- "DELETE /api/machines/:m/merge": {
-  "anon": "401 Not logged in",
-  "person": "200",
-  "member": "404 No such machine",
-  "outsider": "404 No such machine",
-  "tmA": "403 Only people manage machines",
-  "tmB": "403 Only people manage machines",
-  "m1": "403 A minion may only update itself",
-  "m2": "403 A minion may only update itself"
- },
- "POST /api/machines/:m/merge": {
-  "anon": "401 Not logged in",
-  "person": "404 No such machine",
-  "member": "404 No such machine",
-  "outsider": "404 No such machine",
-  "tmA": "403 Only people manage machines",
-  "tmB": "403 Only people manage machines",
-  "m1": "403 A minion may only update itself",
-  "m2": "403 A minion may only update itself"
- },
  "POST /api/machines/:m/pause": {
   "anon": "401 Not logged in",
   "person": "400 pause must be true or false",

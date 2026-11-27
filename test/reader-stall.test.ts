@@ -92,6 +92,8 @@ test('with both readers stalled, page reads are answered by the readers started 
 
 // #2086 (Nov 25): both live readers were alive and answered nothing for 30 minutes; every page read was a 503 and the journal was empty.
 test('readers that are alive but answer nothing are replaced, and the journal and the health log say what they waited on', { timeout: 90_000 }, async () => {
+  // The tests share one database, and the one above leaves a reader-busy row when its new readers start slowly (#2165).
+  const booted = Date.now();
   const srv = await bootServer({ root, env: KNOBS, log: join(root, 'wedge.log') });
   const log = () => readFileSync(join(root, 'wedge.log'), 'utf8');
   try {
@@ -124,7 +126,7 @@ test('readers that are alive but answer nothing are replaced, and the journal an
   }
   const after = new Store(join(root, 'data', 'coordinator.db'));
   try {
-    const rows = after.healthEventsSince(['reader-stuck', 'reader-busy'], 0);
+    const rows = after.healthEventsSince(['reader-stuck', 'reader-busy'], booted);
     assert.equal(rows.filter((r) => r.kind === 'reader-stuck').length, 1);
     assert.match(rows.find((r) => r.kind === 'reader-stuck')!.detail, /replacing it once another is ready; \d+ page reads told to retry/);
     // The pages were told to retry meanwhile: that is recorded too, once.

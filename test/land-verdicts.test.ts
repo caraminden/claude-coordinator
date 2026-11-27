@@ -310,3 +310,15 @@ test('every function that reads $failed is benched here or says why it decides n
   const idle = names.filter((f) => BENCHED.includes(f) && !ran.has(f));
   assert.deepEqual(idle, [], 'no case calls these: give each a case from a real run');
 });
+
+// G (#2209): a ship's run on GitHub is 20 shards, and gh's failed log has each red shard's lines under its own job. Each
+// red shard must be flakes only; the last shard's labels alone said nothing of a real failure in another.
+test("G: a sharded run is flakes only when every red shard's failed files passed alone", () => {
+  const at = (job: string, line: string) => `${job}\\trerun failed files alone\\t2026-11-27T08:01:09.3414420Z run-tests: ${line}`;
+  const flaky = (job: string, f: string) => [at(job, '1 test file(s) failed; rerunning each alone once to tell load from a real failure'), at(job, `${f}: failed in the full run, passed alone: likely load, not your change (1-minute load 3.10)`)];
+  const real = [at('shard (2)', '1 test file(s) failed; rerunning each alone once to tell load from a real failure'), at('shard (2)', 'test/real.test.ts: failed again alone: a real failure')];
+  const script = (lines: string[]) => `failed=$'${lines.join('\\n')}'\nflake_only || echo red`;
+  assert.equal(run({ script: script([...real, ...flaky('shard (9)', 'test/b.test.ts')]) }).out, 'red\n', 'a real failure in an earlier shard');
+  assert.equal(run({ script: script([...flaky('shard (9)', 'test/b.test.ts'), ...real]) }).out, 'red\n');
+  assert.equal(run({ script: script([...flaky('shard (12)', 'test/b.test.ts'), ...flaky('shard (3)', 'test/a.test.ts')]) }).out, 'test/a.test.ts, test/b.test.ts\n');
+});

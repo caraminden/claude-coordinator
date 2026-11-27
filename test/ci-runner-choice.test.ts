@@ -79,9 +79,9 @@ test("a ship's run reruns its failed files alone in a step of its own, inside th
   const limit = land.match(/CI_LIMIT=\$\{LAND_CI_TIMEOUT:-(\d+)\}/)?.[1];
   const step = land.match(/CI_RERUN_STEP='([^']+)'/)?.[1];
   assert.ok(window && limit && step, "land.sh's rerun window, CI limit and rerun step");
-  const at = yml.indexOf(`- name: ${step}`);
+  const at = yml.indexOf(`name: ${step}`); // the desktop job's; GitHub's shards reuse it (#2209)
   assert.ok(at > yml.indexOf('- name: the full suite'), 'the rerun step comes after the full suite');
-  const rerun = yml.slice(at, yml.indexOf('- name:', at + 1));
+  const rerun = yml.slice(at, yml.indexOf('\n      - ', at));
   const suite = yml.slice(yml.indexOf('- name: the full suite'), at);
   assert.match(rerun, new RegExp(`RERUN_WINDOW: ${window}\\b`), "the step's window is land.sh's");
   assert.match(rerun, /DEPLOY_RERUN_DEADLINE=\$\(\(\$\(date \+%s\) \+ RERUN_WINDOW - 30\)\)/, 'its deadline runs from its own start');
@@ -139,7 +139,7 @@ test("the early next train's run goes beside the lands' run, niced, on a ship ru
   assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/early\/'\) && format\('citadel-early-\{0\}', github\.ref_name\)/);
   const r = runsOn(yml);
   const early = r.indexOf('refs/heads/early/\') && fromJSON(\'["self-hosted", "citadel-ci-linux"]\')');
-  assert.ok(early >= 0 && early < r.indexOf('vars.CI_RUNNER'), 'on a ship runner, before the hosted-runner switch, so it never goes to GitHub');
+  assert.ok(early >= 0 && !r.split('\n')[0]!.includes('ubuntu-latest'), "on a ship runner, never GitHub's own: their shards are land/'s (#2209)");
   assert.match(yml, /NICENESS: \$\{\{ !startsWith\(github\.ref, 'refs\/heads\/land\/'\) && '10' \|\| '0' \}\}/);
   assert.match(yml, /BURN_IN_NICE: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && 'nice -n 10'/);
   const ask = stepBody(yml, 'ask Citadel whether ships go first');
@@ -175,4 +175,28 @@ test('a flake proof does not make the desktop busy for an own check or the early
   const [, re] = /ci_busy\(\) \{[^}]*?test\("([^"]+)"\)/s.exec(read('tools/deploy-queue.sh'))!;
   const busy = (file: string) => new RegExp(re.replaceAll('\\\\', '\\')).test(`.github/workflows/${file}`);
   assert.deepEqual(['tests.yml', 'citadel-heavy.yml', 'flake-proof.yml', 'desktop.yml'].map(busy), [true, true, false, false]);
+});
+
+// #2209 (Cara, 2026-11-27: "github should actually be the main CI? with my desktop as the fallback", "if they give us
+// 20, take 20"): a ship's push runs 20 shards on GitHub's runners and the desktop job not at all; a check, an early run,
+// the nightly and land.sh's fallback (where=desktop) run on the desktop as before, and CI_RUNNER=desktop sends ships back.
+test("a ship's push runs 20 shards on GitHub's runners, and everything else the desktop job", () => {
+  const yml = read('.github/workflows/tests.yml');
+  const onGh = "inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop')";
+  const shard = yml.slice(yml.indexOf('\n  shard:\n'));
+  assert.ok(shard.includes(`    if: \${{ ${onGh} }}\n    runs-on: ubuntu-latest\n`), "only a ship's push, or a run asked for there");
+  assert.ok(yml.slice(0, yml.indexOf('\n  shard:\n')).includes(`    if: \${{ !(${onGh}) }}`), 'the desktop job is the rest');
+  assert.ok(yml.includes(`(${onGh}) && format('citadel-github-{0}', github.run_id)`), "a group per run: shards never cancel a land's desktop run");
+  assert.match(shard, /fail-fast: false/);
+  assert.equal(
+    shard
+      .match(/shard: \[([\d, ]+)\]/)?.[1]
+      ?.split(', ')
+      .join(),
+    Array.from({ length: 20 }, (_, i) => i).join(),
+  );
+  assert.match(shard, /CITADEL_TEST_SHARD: \$\{\{ strategy\.job-index \}\}\/\$\{\{ strategy\.job-total \}\}/);
+  for (const step of ['- name: the full suite', '- *rerun', '- *systemd', '- *devdeps']) assert.ok(shard.includes(step), step);
+  assert.match(yml, /where:\n(.*\n)*? +options: \[desktop, github\]\n +default: desktop/, "a dispatch with no where (land.sh's fallback, a person's) runs on the desktop");
+  assert.match(landText(), /'inputs\[where\]=desktop'/);
 });

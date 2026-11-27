@@ -99,7 +99,7 @@ export const SHIP_LIMITS = {
     'tools/land/prepare.sh': 30_000,
     'tools/land/guards.sh': 20_000,
     'tools/land/build.sh': 10_000,
-    'tools/land/ci.sh': 30_000,
+    'tools/land/ci.sh': 32_000, // #2209's GitHub runs and their fallback (Cara, 2026-11-27, above)
     'tools/land/train.sh': 30_000,
     'tools/land/early.sh': 15_000,
     'tools/land/blame.sh': 30_000,
@@ -111,7 +111,9 @@ export const SHIP_LIMITS = {
   } as Record<string, number>,
   // +2,500 for step 7's phase functions (their wrappers and indents); Cara, 2026-11-26: "Do steps 6 and 7"
   // +2,900 for #2212's main_red_hold; Cara, 2026-11-27, on its card: "Raise it 2.9 KB"
-  total: 222_200,
+  // +4,100 for #2209, ship CI on GitHub with the desktop as its fallback (Cara, 2026-11-27: "github should actually be
+  // the main CI? with my desktop as the fallback")
+  total: 226_300,
   longLines: 176,
 };
 

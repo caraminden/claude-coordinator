@@ -131,9 +131,24 @@ ci_online() {
   echo "$n"
 }
 
+# GitHub can't take the ship's run (#2209): cancel it and start tests.yml on the desktop. Fails, with $why, when it can't.
+ci_to_desk() {
+  [ -z "$ci_id" ] || [ "$ci_status" = completed ] || hub gh api -X POST "repos/$ci_slug/actions/runs/$ci_id/cancel" >/dev/null 2>&1 || true
+  ci_stale=${ci_id:-$ci_stale} ci_id='' ci_status='' ci_taken='' limit=$CI_LIMIT rerun_wait='' burn_wait=''
+  online=$(ci_online) || { why="$gh_why, and GitHub didn't say which desktop runners are online$(ci_said)"; return 1; }
+  [ "$online" -gt 0 ] || { why="$gh_why, and no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 1; }
+  hub gh api -X POST "repos/$ci_slug/actions/workflows/${CI_WORKFLOW##*/}/dispatches" -f ref="$CI_REF" -f 'inputs[where]=desktop' \
+    >/dev/null 2>"$state/ci.err" ||
+    { why="$gh_why, and starting the run on the desktop failed$(ci_said)"; return 1; }
+  say "$gh_why, so the run goes to Cara's desktop instead"
+  retro_log "ci to desktop · $branch · $gh_why"
+  ci_gh='' gh_why='' started=$SECONDS online_at=$SECONDS told=''
+}
+
 # 0: green on this commit. 1: red ($ci_lost: its runner was lost, so no verdict). 2: no answer, with the reason in $why.
 ci_gate() {
   local url online='' online_at='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' burn_wait='' ran
+  local ci_gh='' gh_why='' gh_n
   ci_lost='' ci_step=''
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
@@ -150,22 +165,33 @@ ci_gate() {
   # After the outage note (#553): no GitHub ask at all.
   ci_quota=$(gh_quota)
   ci_stale=''
+  # A tests.yml with the shard job sends a ship's push to GitHub's runners, 20 ways (#2209); the desktop is the fallback.
+  [[ $CI_REF != land/* ]] || ! git show "$tip:$CI_WORKFLOW" 2>/dev/null | grep -q '^  shard:' || ci_gh=1
   { echo "quota ${ci_quota%%,*}" >>"$times"; } 2>/dev/null || true # the github line's figure (#1722)
   ci_run || { why="GitHub didn't answer$(ci_said)"; return 2; }
   # A run of this commit that is green or still going (a landing stopped and started again) will do; otherwise a new one.
   if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
     ci_stale=$ci_id ci_id='' ci_status='' ci_result='' # its verdict isn't this run's, if GitHub misses the next ask (LB9)
-    # shortcut: with the repo variable CI_RUNNER=github (hosted runners) this finds no runner and falls back; look at the variable too if that is ever used for long.
-    online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }
-    [[ $online =~ ^[0-9]+$ ]] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
-    [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
+    # The desktop's runners, for its run or as GitHub's fallback, which is all a run on GitHub needs of them.
+    online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || { [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }; }
+    [[ $online =~ ^[0-9]+$ ]] || [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
+    [ -n "$ci_gh" ] || [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
     ci_pushed=$tip ci_pushed_at=$SECONDS # before the push: a stop can end it once GitHub has it
     # Forced on purpose: land/ and land-base/ branches are scratch only this script writes. Atomic: the burn-in needs the base.
     hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; ci_pushed_at=''; return 2; }
   fi
-  say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet). GitHub calls left this hour: $ci_quota"
+  [ -z "$ci_gh" ] ||
+    say "waiting for CI on $short: the full suite on GitHub's runners, 20 ways (on Cara's desktop if they haven't all started in ${CI_GH_START}s)"
+  [ -n "$ci_gh" ] || say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet). GitHub calls left this hour: $ci_quota"
   queue_phase "waiting for CI since $(date +%H:%M)"
   while :; do
+  while :; do
+    if [ -n "$gh_why" ] && ! ci_to_desk; then
+      if quiet; then ci_down; return 2; fi
+      busy_wait "$why"
+      sleep "$QUIET_POLL"
+      continue
+    fi
     # One missed answer is no verdict; a run of them is: ci_status is stale, so the limits say GitHub didn't answer (#1655).
     if ci_run; then ci_fail_n=0; else ci_fail_n=$((ci_fail_n + 1)); [ "$ci_fail_n" -gt 1 ] || ci_fail_at=$(date +%H:%M); fi
     [ "$ci_id" != "$ci_stale" ] || ci_id='' ci_status=''
@@ -177,6 +203,22 @@ ci_gate() {
     fi
     [ "$ci_status" != completed ] || break
     waited=$((SECONDS - started))
+    # Every shard started on GitHub within CI_GH_START, or the desktop takes the run: GitHub is down or its 20 slots are taken.
+    if [ "$ci_gh" = 1 ] && [ "$waited" -ge "$CI_GH_START" ]; then
+      if [ -z "$ci_id" ]; then gh_why="GitHub listed no run within ${CI_GH_START}s"
+      # "<jobs> <on GitHub's runners> <of those not started>"
+      elif gh_n=$(hub gh api "repos/$ci_slug/actions/runs/$ci_id/jobs?per_page=100" --jq '.jobs | map(select(.labels | index("ubuntu-latest"))) as $g |
+        "\(length) \($g | length) \($g | map(select(.status != "in_progress" and .status != "completed")) | length)"' 2>/dev/null) && [[ $gh_n =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]]; then
+        case $gh_n in
+          '0 '*) gh_why="GitHub hadn't made the run's jobs within ${CI_GH_START}s" ;;
+          *' 0 '*) ci_gh='' ;; # not on GitHub after all (the repo variable CI_RUNNER=desktop)
+          *' 0') ci_gh=done ;;
+          *) read -r _ gh_n n <<<"$gh_n"
+            gh_why="GitHub started only $((gh_n - n)) of $gh_n shards within ${CI_GH_START}s (its slots are taken, or it is having trouble)" ;;
+        esac
+      fi
+      [ -z "$gh_why" ] || continue
+    fi
     # Past a limit the suite runs here, but only on a quiet perigee (busy_wait) until then.
     why='' down=''
     if [ -n "$ci_taken" ]; then
@@ -195,7 +237,7 @@ ci_gate() {
           why="CI didn't finish within ${limit}s of starting${rerun_wait:+, its reruns alone included}"
         fi
       fi
-    elif [ "$waited" -ge "$CI_START" ]; then
+    elif [ -z "$ci_gh" ] && [ "$waited" -ge "$CI_START" ]; then
       # Not started: is a runner online? Asked past CI_START, then every CI_ONLINE_POLL s; a missed answer keeps the last.
       if [ -z "$online_at" ] || [ $((SECONDS - online_at)) -ge "$CI_ONLINE_POLL" ]; then
         if n=$(ci_online); then online=$n online_at=$SECONDS; fi
@@ -222,6 +264,15 @@ ci_gate() {
       busy_last='' # a runner is online and CI hasn't given up on it: this time isn't perigee's busy time (#1361)
     fi
     sleep "$nap"
+  done
+  # A run on GitHub that ended with no verdict on the tests (a setup step failed, cancelled) goes to the desktop too.
+  if [ -n "$ci_gh" ] && [ "$ci_result" != success ] && [ "$ci_result" != timed_out ]; then
+    ci_step=$(ci_fact api "repos/$ci_slug/actions/runs/$ci_id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure") | .name][0] // "-"') || ci_step=-
+    case $ci_step in "$CI_STEP" | "$CI_BURN_STEP" | "$CI_RERUN_STEP") ;; -) gh_why="GitHub's run ended as $ci_result, with no failed step" ;;
+      *) gh_why="GitHub's run failed in its step \"$ci_step\", before any test ran ($ci_url)" ;; esac
+    [ -z "$gh_why" ] || continue
+  fi
+  break
   done
   case $ci_result in
     success) rm -f "$state/ci-down"; say "CI passed on $short in $((SECONDS - started))s ($ci_url)" ;;
@@ -279,15 +330,21 @@ burn_lines() { sed -n 's/.*burn-in: \([^ ]*: failed in [0-9]* of [0-9]* copies a
 # "<n> test file(s) failed; rerunning each alone…" line and the labels after it only (a test can quote one); none: no flake.
 # Nor is a run that skipped a test (#1914).
 flake_only() {
-  local at n files
+  local at n files job log all=''
   ! skipped_tests >/dev/null || return 1
-  at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$failed" | tail -n 1 | cut -d: -f1)
-  [[ $at =~ ^[0-9]+$ ]] || return 1
-  n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$failed")
-  [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
-  files=$(tail -n "+$at" <<<"$failed" | sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*/\1/p' | sort -u)
-  [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] || return 1
-  sed ':a;N;$!ba;s/\n/, /g' <<<"$files"
+  # Each red job alone (#2209: a run on GitHub is 20 shards, each with its reruns): gh's lines are "<job>\t<step>\t<time> …".
+  while IFS= read -r job; do
+    log=$failed
+    [ -z "$job" ] || log=$(awk -F '\t' -v j="$job" 'NF > 2 && $1 == j' <<<"$failed")
+    at=$(grep -n 'run-tests: [0-9][0-9]* test file(s) failed; rerunning each alone' <<<"$log" | tail -n 1 | cut -d: -f1)
+    [[ $at =~ ^[0-9]+$ ]] || return 1
+    n=$(sed -n "${at}s/.*run-tests: \\([0-9][0-9]*\\) test file(s) failed.*/\\1/p" <<<"$log")
+    [[ $n =~ ^[1-9][0-9]*$ ]] || return 1
+    files=$(tail -n "+$at" <<<"$log" | sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*/\1/p' | sort -u)
+    [ -n "$files" ] && [ "$(wc -l <<<"$files")" = "$n" ] || return 1
+    all+="$files"$'\n'
+  done < <(awk -F '\t' 'NF > 2 { print $1 }' <<<"$failed" | sort -u | grep . || echo)
+  sort -u <<<"$all" | sed '/^$/d' | sed ':a;N;$!ba;s/\n/, /g'
 }
 
 # Whether $failed is a run cut off from outside before any test failed (#1377): Node's "Interrupted while running:" with no

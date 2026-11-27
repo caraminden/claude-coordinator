@@ -160,6 +160,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // FAKE_RED_PATH: a run is red when its commit has that file, green otherwise (the ship train's bisect, #1166); FAKE_RED_TEXT: the same for
 // a commit with that text in any file (#1403); FAKE_FLAKY_PATH:
 // a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346), or FAKE_FLAKY_LOGS red runs' logs (#1864);
+// A ship's run on GitHub's runners (#2209), when main's tests.yml has the shard job: the desktop's run land.sh starts in
+// its place (a dispatch) is a new run, as a push is; FAKE_GH_JOBS: "<jobs> <on GitHub's runners> <of those not started>".
 // FAKE_STEPS: the run's full suite and rerun steps as land.sh asks at its CI limit (#1374), "<name><tab><status><tab><conclusion>" lines;
 // FAKE_BURN: the burn-in step as land.sh asks at its CI limit (#1443), "<status><tab><started_at><tab><completed_at>";
 // FAKE_REAL: "<test file>=<path> ...": a run is red when its commit has any of the paths, and its log names each such test file
@@ -242,7 +244,7 @@ case "$*" in
     [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
     lag=0
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
-    n=$(($(grep -c -e '/actions/runners ' -e citadel-ci-linux-check "${calls}") - $(cat "${calls}.gone" 2>/dev/null | wc -l))) id=$((6 + n)) st=\${FAKE_CI:-green}
+    n=$(($(grep -c -e '/actions/runners ' -e citadel-ci-linux-check -e '/dispatches ' "${calls}") - $(cat "${calls}.gone" 2>/dev/null | wc -l))) id=$((6 + n)) st=\${FAKE_CI:-green}
     if [ -n "\${FAKE_CI_DOWN_AT:-}" ] && [ ! -e "\$FAKE_CI_UP" ]; then
       grep -qx "$sha" "${calls}.shas" 2>/dev/null || echo "$sha" >>"${calls}.shas"
       [ "$(grep -nx "$sha" "${calls}.shas" | cut -d: -f1)" -lt "\$FAKE_CI_DOWN_AT" ] || exit 1
@@ -280,6 +282,7 @@ case "$*" in
   *"/actions/runs?status="*) echo "\${FAKE_ACTIVE:-0}" ;;
   *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { echo "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runners "*) [ -z "\${FAKE_RUNNERS_ODD:-}" ] || [ $(($(grep -c '/actions/runners ' "${calls}") % 2)) = 1 ] || { echo >>"${calls}.gone"; echo 0; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq "$4" "\$FAKE_RUNNERS_FILE"; else cat "\$FAKE_RUNNERS_FILE"; fi; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runs/"[0-9]*"/jobs"*ubuntu-latest*) echo "\${FAKE_GH_JOBS:-20 20 0}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"burn in new and changed tests"*) printf '%b' "\${FAKE_BURN:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs"*)

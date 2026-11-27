@@ -400,7 +400,7 @@ test("a run red only in the check of the PC's own ports counts as green, and say
 
 // The step's name in land.sh is the workflow's.
 test('the ports step land.sh counts as green is the one tests.yml runs after a green suite', () => {
-  const name = (text: string) => /^(?:CITADEL_)?CI_PORTS_STEP='([^']+)'/m.exec(text)?.[1];
+  const name = (text: string) => /^ *(?:CITADEL_)?CI_PORTS_STEP='([^']+)'/m.exec(text)?.[1];
   const step = name(landText())!;
   assert.match(readFileSync(join(import.meta.dirname, '..', '.github', 'workflows', 'tests.yml'), 'utf8'), new RegExp(`- name: ${step}\n {8}if: \\$\\{\\{ success\\(\\) \\}\\}`));
 });

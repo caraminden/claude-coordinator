@@ -31,7 +31,7 @@ test('a rebase that changes land.sh hands over to the rebased copy, which keeps 
   git(r.wt, 'rebase', '-q', 'main');
   r.commit(r.wt, 'b.txt', 'mine\n');
   const script = join(r.source, 'tools', 'land.sh');
-  writeFileSync(script, readFileSync(script, 'utf8').replace('say "running the tests"', 'say "running the tests (the rebased land.sh)"'));
+  writeFileSync(script, readFileSync(script, 'utf8').replace('\nland_verdict #', '\nsay "running the tests (the rebased land.sh)" # only a copy that took over says it\nland_verdict #'));
   git(r.source, 'commit', '-qam', 'newer land.sh');
   const shared = join(r.dir, 'shared');
   const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), COORDINATOR_SHARED_DIR: shared } });

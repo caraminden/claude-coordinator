@@ -516,6 +516,8 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
       const view = app.machines.view(m);
       return {
         ...view,
+        // Its VMs come as their own entries, each only where this Taskmaster may see it (vm_on below).
+        vms: undefined,
         owner_name: app.store.getUser(m.owner_id ?? -1)?.name ?? null,
         tools_everyone: lendsToEveryone(app.store, m, 'tools'),
         project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),

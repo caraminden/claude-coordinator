@@ -8,7 +8,7 @@
   removed there (or run the scheme's runner setup with -Remove inside the box first). Its machine on
   Citadel's Machines page goes offline; delete it there too.
 #>
-param([string]$Name = 'citadel-test-box')
+param([string]$Name = 'citadel-test-vm')
 $ErrorActionPreference = 'Stop'
 $vm = Get-VM -Name $Name -ErrorAction SilentlyContinue
 if (-not $vm) { Write-Host "No VM '$Name' here."; exit 0 }

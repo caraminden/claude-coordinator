@@ -23,7 +23,7 @@
 [CmdletBinding()]
 param(
   [string]$IsoPath,
-  [string]$Name = 'citadel-test-box',
+  [string]$Name = 'citadel-test-vm',
   [ValidateRange(4, 64)][int]$MemoryGB = 8,
   [ValidateRange(2, 32)][int]$Cpus = 6,
   [ValidateRange(80, 1000)][int]$DiskGB = 120,

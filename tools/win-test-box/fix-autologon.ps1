@@ -14,7 +14,7 @@
   powershell -ExecutionPolicy Bypass -File .\fix-autologon.ps1
 #>
 [CmdletBinding()]
-param([string]$Name = 'citadel-test-box')
+param([string]$Name = 'citadel-test-vm')
 $ErrorActionPreference = 'Stop'
 $report = Join-Path ([Environment]::GetFolderPath('Desktop')) 'citadel-box-autologon.txt'
 $cred = Get-Credential citadel

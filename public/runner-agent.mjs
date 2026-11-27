@@ -15,7 +15,8 @@
 // names (add-runner.sh, ...), installed by tools/ci-runner/install-runner-agent.sh.
 //
 // It dials out to Citadel like the machine agent (public/machine-agent.mjs) and holds an event stream open, so the
-// PC needs no open port. tools/ci-runner/install-runner-agent.ps1 installs it; tools/ci-runner/README.md says how.
+// PC needs no open port. It is a helper of the PC's machine agent (One kind of machine H2): pressing Set up on CI runners makes that
+// agent write its elevate script, which runs tools/ci-runner/install-runner-agent.ps1 (or .sh) as administrator; tools/ci-runner/README.md says more.
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, statfsSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, hostname, totalmem } from 'node:os';

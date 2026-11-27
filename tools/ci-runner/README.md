@@ -133,7 +133,13 @@ role's labels on the runners the add makes, through GitHub's API with the scheme
 
 ## Install the runner agent (the PC's owner, once)
 
-1. On a PC's own row, CI's **Set up** shows this step's whole line with the row's token: run it and skip the rest. On a
+The runner agent is a helper of the PC's machine agent (One kind of machine H2; Cara, 2026-11-26, "One agent, helpers
+hidden"). On a PC whose agent does Set up, CI's **Set up** makes that agent write `elevate.ps1` (Linux: `elevate.sh`) in
+its `coordinator-agent` folder, holding every administrator step the roles that are on still need (this agent, WSL, the
+minion worker on Linux), and the card shows one fixed line that runs it: paste that as administrator and nothing else.
+The steps below are for an agent from before, and for a CI runner host row.
+
+1. On a PC's own row with an older agent, CI's **Set up** shows this step's whole line with the row's token: run it and skip the rest. On a
    CI runner host (before Build 7): on Citadel's Machines page, press **Add a CI runner host** under the list and name it (Cara's is
    `cara-desktop-runners`). Copy its token (`ccm_…`) and the address its setup lines connect to.
 2. Easiest: the page shows the whole line, address and token filled in, right after you add the host (or make a new token for it). Copy that and skip to the end of this step. By hand: open PowerShell **as administrator** and paste this. Put that address in

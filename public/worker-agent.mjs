@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A minion worker's own program (Build 7 T5), on Linux or in a Windows PC's citadel-workers distro. tools/worker/install-worker.sh
-// makes it a service there. It runs the worker that syncs and starts turns (machine-worker.mjs, downloaded from the app), keeps
+// makes it a service there, run only by the PC's machine agent: its Set up on Minion turns, or on Linux its elevate script (H2). It runs the worker that syncs and starts turns (machine-worker.mjs, downloaded from the app), keeps
 // that worker's image current (the app's build files, with the app's own claude version on top), holds the owner's caps from
 // config.json, and runs the self-test the owner asks for on the Machines page. It is apart from machine-agent.mjs, and opens no
 // connection of its own, because that computer's agent holds the machine's one connection.

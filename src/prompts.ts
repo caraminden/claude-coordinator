@@ -300,6 +300,13 @@ export function cabalLines(c: CabalRole | null): string[] {
 /** A prompt's named parts, in order, each a list of lines: the hash log hashes each one (#878). */
 export type PromptSections = Record<string, string[]>;
 
+/**
+ * citadel-cloud's guide (#2200), in a minion's turn message only while the Cloud helpers switch is on (Cara, 2026-11-27,
+ * "Ship dark, switch off"): src/launch-build.ts adds it, so a minion never learns of the helper while it's off.
+ */
+export const CLOUD_HELPER_LINE =
+  "Long steps (a whole test suite, a build, minutes of busy cores): `citadel-cloud run [--minutes N] [--files a,b] -- <command>` runs one where it costs least (a PC lending this scheme CI with room, GitHub's free runners on a public repo, a Claude Code cloud session on your own login, which runs your last commit, so commit first, else perigee's heavy-job slot) and keeps one live line in your chat. Run it as a background command and wait with `citadel-wait pid`; its exit is the command's. Exit 76: the step runs on in the cloud on its own: type the `citadel-wait cmd` it printed (exit 75: end the turn), and when woken run the `citadel-cloud collect` it printed. `citadel-cloud brief <file> [--model opus]` hands a research or review brief to a cloud session that works alone (exit 69: give it to a Grunt). Quick checks stay on citadel-test.";
+
 /** A prompt's text from its parts. */
 export const promptText = (parts: PromptSections): string => Object.values(parts).flat().join('\n');
 

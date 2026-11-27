@@ -19,7 +19,8 @@ import { makeTmpDir } from './turn-tmp.ts';
 import { codexThreadKey, isCodexModel, type CodexThread } from './codex.ts';
 import { decideHold, type HoldDecision, type Holds } from './prompt-hold.ts';
 import { cabalName, overseerOf } from './cabal-board.ts';
-import { promptParts, promptText, type PromptSections, type TurnMachine } from './prompts.ts';
+import { helpersOn } from './cloud-flakes.ts';
+import { CLOUD_HELPER_LINE, promptParts, promptText, type PromptSections, type TurnMachine } from './prompts.ts';
 import type { ServerTool } from './server-tools.ts';
 import { offSkills, pruneKit } from './skills.ts';
 import { copyPinned, launchPlan, turnPins, turnSettings, wrapperSpec, type EveryScheme } from './turn-launch.ts';
@@ -233,6 +234,7 @@ export class TurnLaunches {
       // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
       const budget = ticket.kind === 'ticket' ? budgetFor(this.d.store, ticket) : null;
       if (budget) parts.turn.budget = [turnLine(budget, this.d.store.ticketCost(ticket.id))];
+      if (ticket.kind === 'ticket' && helpersOn(this.d.store)) parts.turn.cloudHelpers = [CLOUD_HELPER_LINE];
       const jobs = this.d.jobs()?.turnLine(ticket.id);
       if (jobs) parts.turn.jobs = [jobs];
       // What changed since the held prompt, last in the turn's [System] note. A side question's fork gets the prompt, not the note.

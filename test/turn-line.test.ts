@@ -15,6 +15,7 @@ import { lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 import { tooCold, waitsLine } from '../public/threadstate.js';
 import { workerWaitText } from '../src/worker-wait.ts';
+import { HELPERS_SWITCH } from '../src/cloud-flakes.ts';
 testPins();
 
 // #1868: one pool of workers for all of Citadel's minion turns (Josh, 2026-11-24: "we have a pool of claude sessions that
@@ -901,6 +902,31 @@ test('a Stop stops the job a minion waits for, says so, and a turn meanwhile hea
     assert.deepEqual(runner.jobTurn(t), { refuse: "This turn's jobs end with it" });
   } finally {
     runner.jobs = null;
+  }
+});
+
+test("citadel-cloud's guide is in a minion's turn only while the Cloud helpers switch is on, and never a Taskmaster's (#2200)", async () => {
+  const off = minion();
+  say(off);
+  await started(off);
+  assert.doesNotMatch(turnsOf(off)[0], /citadel-cloud/, 'off by default: dark');
+  end(off);
+  await idle(off);
+  store.setSetting(HELPERS_SWITCH, true);
+  try {
+    const on = minion();
+    say(on);
+    await started(on);
+    assert.match(turnsOf(on)[0], /`citadel-cloud run \[--minutes N\]/);
+    end(on);
+    await idle(on);
+    const t = taskmaster();
+    const n = turnsOf(t).length;
+    say(t);
+    await until('the Taskmaster to start', () => turnsOf(t).length > n && runner.isRunning(t));
+    assert.doesNotMatch(turnsOf(t).at(-1)!, /citadel-cloud/);
+  } finally {
+    store.deleteSetting(HELPERS_SWITCH);
   }
 });
 

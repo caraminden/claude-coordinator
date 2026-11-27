@@ -165,7 +165,7 @@ test('a build starts once its machine has room for it, with no go card, and says
   assert.equal(w.cards.length, 0, 'the Builds role switch is its go');
   const start = w.sent.find((s) => s.type === 'job.start');
   assert.ok(start && start.type === 'job.start');
-  assert.equal(start.kind.lane, 'builds');
+  assert.equal((start.kind as Partial<BuildKind>).lane, 'builds');
   assert.equal(w.store.getMachineJob(id)!.state, 'starting');
   w.jobs.report(w.m(), { id, state: 'running', run_s: 0 });
   w.jobs.report(w.m(), { id, state: 'done', run_s: 5, exit_code: 0 });

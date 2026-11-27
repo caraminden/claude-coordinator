@@ -74,7 +74,7 @@ writeFileSync(
   fakeHeavy,
   `#!${process.execPath}
 require('node:fs').appendFileSync(${JSON.stringify(join(root, 'heavy.log'))}, JSON.stringify({ args: process.argv.slice(2), github: process.env.CITADEL_HEAVY_GITHUB ?? null, what: process.env.CITADEL_HEAVY_WHAT }) + '\\n');
-process.exit(Number(process.env.FAKE_HEAVY_CODE || 0));
+setTimeout(() => process.exit(Number(process.env.FAKE_HEAVY_CODE || 0)), Number(process.env.FAKE_HEAVY_MS || 0));
 `,
 );
 chmodSync(fakeHeavy, 0o755);
@@ -114,6 +114,7 @@ beforeEach(() => {
   rmSync(heavyDir, { recursive: true, force: true }); // timing-ok: own temp dir
   rmSync(join(work, '.github'), { recursive: true, force: true }); // timing-ok: own temp dir
   delete process.env.FAKE_HEAVY_CODE;
+  delete process.env.FAKE_HEAVY_MS;
   rmSync(join(root, 'vm-dir'), { force: true });
   delete process.env.CITADEL_JOB;
   delete process.env.CITADEL_CLOUD;
@@ -130,12 +131,13 @@ const cloudBranches = () => git(origin, 'for-each-ref', '--format=%(refname:shor
 const claudeCalls = () => (existsSync(join(root, 'claude.log')) ? readFileSync(join(root, 'claude.log'), 'utf8').trim().split('\n') : []);
 
 test('a command runs on the minion commit in the cloud: progress lines, its output and files back, exit 0, no branch left', async () => {
-  const j = job('cat marker.txt; sleep 1; echo made > out.txt; echo all done', { files: ['out.txt', 'nope.txt'] });
-  assert.equal(await cloud(j), 0);
-  assert.ok(
-    said.some((l) => /^citadel-cloud: \d+ min: /.test(l)),
-    `a progress line: ${said.join('\n')}`,
-  );
+  // The job holds until the test has seen a progress line, so a beat and the result never arrive in one look.
+  const go = join(root, 'go-progress');
+  const j = job(`cat marker.txt; while [ ! -e ${go} ]; do sleep 0.1; done; echo made > out.txt; echo all done`, { files: ['out.txt', 'nope.txt'] });
+  const ran = cloud(j);
+  await until('a progress line', () => said.some((l) => /^citadel-cloud: \d+ min: the minion commit/.test(l)));
+  writeFileSync(go, '');
+  assert.equal(await ran, 0);
   assert.ok(!said.some((l) => /min:\s*$/.test(l)), `a beat before any output reads "N min", not "N min:": ${said.join('\n')}`);
   const reply = said.find((l) => l.includes('after 0 min in the cloud')) ?? '';
   assert.match(reply, /exit 0/);
@@ -213,7 +215,7 @@ test("a command job's session text carries the runner whole and its job; a brief
   assert.match(brief, /Look into X\.[\s\S]*"job": "cloud\/t7-y"[\s\S]*git push origin HEAD:refs\/heads\/cloud\/t7-y/);
 });
 
-test("pickPlace: Cara's order, a PC with room, GitHub on a public repo, the cloud unless WAY slower, else perigee", () => {
+test("pickPlace: Cara's order, a PC with room, GitHub on a public repo, the cloud unless WAY slower, else perigee; with helpers off, perigee for all", () => {
   const f = (more: Partial<Facts>): Facts => ({ on: true, machine: false, workflow: true, public: false, slower: null, ...more });
   const run = { kind: 'run' as const, files: [] };
   const cases: [Partial<Facts>, Pick<Job, 'kind' | 'files'>, string][] = [
@@ -224,6 +226,7 @@ test("pickPlace: Cara's order, a PC with room, GitHub on a public repo, the clou
     [{ slower: SLOWER - 0.1 }, run, 'cloud'],
     [{ slower: SLOWER }, run, 'home'],
     [{ on: false }, run, 'home'],
+    [{ on: false, machine: true, public: true }, run, 'home'],
     [{ machine: true }, { kind: 'brief', files: [] }, 'cloud'],
     [{ on: false, machine: true }, { kind: 'brief', files: [] }, 'home'],
   ];
@@ -246,7 +249,7 @@ test("slower: the cloud's runs of a command over this scheme's runs of it on per
 
 test('a command goes through citadel-heavy to a PC with room, to GitHub on a public repo, or to perigee when helpers are off', async () => {
   mkdirSync(join(work, '.github/workflows'), { recursive: true });
-  writeFileSync(join(work, '.github/workflows/citadel-heavy.yml'), 'on: workflow_dispatch\n');
+  writeFileSync(join(work, '.github/workflows/citadel-heavy.yml'), 'on:\n  workflow_dispatch:\n    inputs:\n      runner:\n');
   io.place = async () => ({ on: true, machine: true });
   process.env.FAKE_HEAVY_CODE = '75';
   assert.equal(await helper(job('npm test')), 75, "citadel-heavy's exit code, 75 included");
@@ -254,10 +257,9 @@ test('a command goes through citadel-heavy to a PC with room, to GitHub on a pub
   io.isPublic = () => true;
   process.env.FAKE_HEAVY_CODE = '3';
   assert.equal(await helper(job('npm test')), 3);
-  io.place = async () => ({ on: false, machine: false });
-  io.isPublic = () => false;
+  io.place = async () => ({ on: false, machine: true });
   delete process.env.FAKE_HEAVY_CODE;
-  assert.equal(await helper(job('npm test')), 0);
+  assert.equal(await helper(job('npm test')), 0, 'helpers off: neither a PC nor GitHub');
   assert.deepEqual(
     heavyCalls().map((c) => [c.args.join(' '), c.github, c.what]),
     [
@@ -268,6 +270,31 @@ test('a command goes through citadel-heavy to a PC with room, to GitHub on a pub
   );
   assert.match(said.join('\n'), /runs on a PC lending this scheme CI[\s\S]*runs on GitHub's own runners[\s\S]*runs here, in perigee's heavy-job slot: cloud helpers are off/);
   assert.deepEqual(claudeCalls(), [], 'no session for any of them');
+});
+
+test("a public repo whose citadel-heavy workflow has no runner input (the kit's template) isn't sent to GitHub, which would refuse the run", async () => {
+  mkdirSync(join(work, '.github/workflows'), { recursive: true });
+  writeFileSync(join(work, '.github/workflows/citadel-heavy.yml'), 'on: workflow_dispatch\n');
+  io.place = async () => ({ on: true, machine: false });
+  io.isPublic = () => true;
+  process.env.FAKE_MODE = 'quiet';
+  io.quietMs = 1500;
+  await helper(job('npm test', { minutes: 60 }));
+  assert.match(said.join('\n'), /runs in a cloud session/);
+  assert.ok(!heavyCalls().some((c) => c.github), 'never on GitHub');
+});
+
+test('at home --minutes still holds (exit 124) and --files come to --out, as from the cloud', async () => {
+  io.place = async () => ({ on: false, machine: false });
+  io.minuteMs = 200;
+  process.env.FAKE_HEAVY_MS = '20000';
+  assert.equal(await helper(job('npm test', { minutes: 1 })), 124);
+  assert.match(lines.at(-1)![0], /stopped at its 1-minute limit$/);
+  delete process.env.FAKE_HEAVY_MS;
+  writeFileSync(join(work, 'made.txt'), 'made here');
+  const j = job('make it', { files: ['made.txt', 'nope.txt'] });
+  assert.equal(await helper(j), 0);
+  assert.equal(readFileSync(join(j.out, 'made.txt'), 'utf8'), 'made here');
 });
 
 test("a cloud session that goes quiet falls back to perigee's slot by itself; a brief the cloud can't take comes back 69 for a Grunt", async () => {
@@ -322,10 +349,23 @@ test('the chat line: one note for the step, rewritten from its start to its exit
   );
 });
 
-test('a long cloud step runs on its own once it has started: check says when, collect brings it home with its chat line', async () => {
+test('a step allowed long but done before the hand-over time waits in the turn to its end (Cara\'s "Both, by length": how long it runs, not its cap)', async () => {
   io.canHand = () => true;
-  const j = job('echo long one; sleep 2; echo made > out.txt', { minutes: HAND_MINUTES + 10, files: ['out.txt'] });
+  const j = job('echo quick one', { minutes: HAND_MINUTES + 10 });
+  assert.equal(await helper(j), 0);
+  assert.ok(!existsSync(join(j.out, '.hand.json')), 'never handed over');
+  assert.match(lines.at(-1)![0], /exit 0 after 0 min$/);
+  const vm = readFileSync(join(root, 'vm-dir'), 'utf8');
+  await until('the VM saw DONE and ended', () => existsSync(join(vm, 'said')) && /DONE/.test(readFileSync(join(vm, 'said'), 'utf8')));
+});
+
+test('a long cloud step runs on its own once it has run past the hand-over time: check says when, collect brings it home with its chat line', async () => {
+  io.canHand = () => true;
+  io.handMs = 0;
+  const go = join(root, 'go-hand');
+  const j = job(`echo long one; while [ ! -e ${go} ]; do sleep 0.1; done; echo made > out.txt`, { minutes: HAND_MINUTES + 10, files: ['out.txt'] });
   assert.equal(await helper(j), ON_ITS_OWN);
+  writeFileSync(go, '');
   const said1 = said.join('\n');
   assert.match(said1, new RegExp(`citadel-wait cmd 'citadel-cloud check ${j.out}'[\\s\\S]*citadel-cloud collect ${j.out}`));
   assert.match(lines.at(-1)![0], /runs on its own in the cloud; Citadel watches for its result$/);

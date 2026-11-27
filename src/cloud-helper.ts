@@ -20,9 +20,9 @@
 // couldn't take (run it as a Grunt), 2 a usage error, 143 stopped. Run it as a background command and
 // wait with `citadel-wait pid`; not under citadel-job, which leaves out your Claude login (no cloud there).
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { readResult, RESULT } from './cloud-turn.mjs';
 import { jsonLines } from './json-lines.ts';
 
@@ -72,6 +72,10 @@ export const io = {
   line: (text: string, detail: string, event: number | null) => postLine(text, detail, event),
   lineMs: 120_000,
   /** Whether a turn is here to hand a long wait to the server (citadel-wait's own test). */
+  /** How long a command waits in the turn before it's handed to run on its own: a short one never is (Cara's "Both, by length"). */
+  handMs: HAND_MINUTES * 60_000,
+  /** A minute, for --minutes at home (turned down by tests). */
+  minuteMs: 60_000,
   canHand: () => !!process.env.CLAUDE_PID && !!process.env.COORDINATOR_TOKEN,
   heavyDir: () => process.env.CITADEL_HEAVY_DIR || join(homedir(), '.local/share/claude-coordinator/projects/.heavy'),
 };
@@ -252,7 +256,7 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
       say(ev.text);
       on(ev.text, `Its session: ${url}`);
       // Running, by its own beat: a long one goes on without this process (and its driver), which the turn can't keep.
-      if (job.kind === 'run' && job.minutes > HAND_MINUTES && io.canHand() && !handed) {
+      if (job.kind === 'run' && job.minutes > HAND_MINUTES && Date.now() - began >= io.handMs && io.canHand() && !handed) {
         handed = true;
         const hand: Hand = { cwd, branch, ref, beat, url, began, minutes: job.minutes, quietMs: io.quietMs, job, event: null };
         writeFileSync(join(job.out, '.hand.json'), JSON.stringify(hand));
@@ -306,11 +310,12 @@ export const SLOWER = 3;
 export function pickPlace(f: Facts, job: Pick<Job, 'kind' | 'files'>): { place: Place; why: string } {
   const off = 'cloud helpers are off';
   if (job.kind === 'brief') return f.on ? { place: 'cloud', why: 'a brief runs in a cloud session' } : { place: 'home', why: off };
+  if (!f.on) return { place: 'home', why: off };
   const ci = f.workflow && !job.files.length;
   if (ci && f.machine) return { place: 'machine', why: 'a PC lending this scheme CI has room, with no ship or CI waiting there' };
   if (ci && f.public) return { place: 'github', why: "this repo is public, so GitHub's own runners take it free" };
-  if (f.on && !(f.slower !== null && f.slower >= SLOWER)) return { place: 'cloud', why: "no PC has room and GitHub can't take it" };
-  return { place: 'home', why: f.on ? `its cloud runs took ${f.slower?.toFixed(1)}× its runs here` : off };
+  if (!(f.slower !== null && f.slower >= SLOWER)) return { place: 'cloud', why: "no PC has room and GitHub can't take it" };
+  return { place: 'home', why: `its cloud runs took ${f.slower?.toFixed(1)}× its runs here` };
 }
 
 /** The server's half of the facts: the switch and a PC's room. Unreadable counts as off and no room. */
@@ -390,13 +395,22 @@ async function heavy(place: Exclude<Place, 'cloud'>, job: Job, on: (state: strin
   const mins = () => Math.round((Date.now() - began) / 60_000);
   const timer = setInterval(() => on(`${mins()} min${tail(1) ? `: ${tail(1).slice(0, 200)}` : ''}`, tail(30)), io.lineMs);
   stopping = () => child.kill('SIGTERM');
+  // --minutes holds here too, as in the cloud: past it the step stops with 124 (timeout's code).
+  let late = false;
+  const limit = setTimeout(() => ((late = true), child.kill('SIGTERM')), job.minutes * io.minuteMs);
   const code = await new Promise<number>((r) => {
     child.once('error', () => r(127));
-    child.once('close', (c, sig) => r(c ?? (sig === 'SIGTERM' ? 143 : 1)));
+    child.once('close', (c, sig) => r(late ? 124 : (c ?? (sig === 'SIGTERM' ? 143 : 1))));
   });
   clearInterval(timer);
+  clearTimeout(limit);
   stopping = null;
-  on(code === 75 ? 'handed to Citadel to finish as a minion job' : code === 143 ? `stopped after ${mins()} min` : `exit ${code} after ${mins()} min`, tail(30));
+  // --files come to --out as they do from the cloud, so the minion reads them in one place wherever it ran.
+  if (place === 'home' && job.files.length) {
+    mkdirSync(job.out, { recursive: true });
+    for (const f of job.files) if (existsSync(join(io.cwd(), f))) copyFileSync(join(io.cwd(), f), join(job.out, basename(f)));
+  }
+  on(code === 75 ? 'handed to Citadel to finish as a minion job' : code === 124 ? `stopped at its ${job.minutes}-minute limit` : code === 143 ? `stopped after ${mins()} min` : `exit ${code} after ${mins()} min`, tail(30));
   return code;
 }
 
@@ -443,7 +457,7 @@ export async function collect(out: string): Promise<number> {
   } catch {
     result = null;
   }
-  spawnSync('git', ['-C', h.cwd, 'update-ref', '-d', local], { stdio: 'ignore' });
+  for (const r of [local, `refs/citadel-cloud/${h.beat}`]) spawnSync('git', ['-C', h.cwd, 'update-ref', '-d', r], { stdio: 'ignore' });
   // The source branch going is also the Stop: a job still running there ends at its next beat.
   for (const b of [h.ref, h.beat, h.branch]) spawnSync('git', ['-C', h.cwd, 'push', '-q', 'origin', '--delete', b], { stdio: 'ignore' });
   const mins = Math.round((Date.now() - h.began) / 60_000);
@@ -502,8 +516,11 @@ function liveLine(job: Job, from: number | null = null) {
 export async function helper(job: Job): Promise<number> {
   const cwd = io.cwd();
   const server = await io.place();
-  const workflow = existsSync(join(cwd, '.github/workflows/citadel-heavy.yml'));
-  const facts: Facts = { ...server, workflow, public: job.kind === 'run' && workflow && !server.machine && !job.files.length && io.isPublic(cwd), slower: job.kind === 'run' ? slower(job.cmd) : null };
+  const yml = join(cwd, '.github/workflows/citadel-heavy.yml');
+  const workflow = existsSync(yml);
+  // GitHub's runners need the workflow's `runner` input (Citadel's own; the kit's template has none, and GitHub refuses the run).
+  const runnerInput = workflow && /^\s+runner:/m.test(readFileSync(yml, 'utf8'));
+  const facts: Facts = { ...server, workflow, public: job.kind === 'run' && runnerInput && !server.machine && !job.files.length && io.isPublic(cwd), slower: job.kind === 'run' ? slower(job.cmd) : null };
   const { place, why } = pickPlace(facts, job);
   io.log(`citadel-cloud: runs ${WHERE[place]}: ${why}`);
   const line = liveLine(job);

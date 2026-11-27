@@ -13,7 +13,7 @@
 //   job: { ref: the branch with the minion's commit, branch: the result branch, beat: the progress branch, cmd: the command
 //   (bash), minutes: its time limit, files: paths it makes that come home (each at most 5 MB, at most 19) }.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { basename, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -37,11 +37,23 @@ const git = (args, env = {}) =>
     stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();
 
+/** A file's last `bytes`, read without loading the rest (a verbose build's log can outgrow the VM's memory). @param {string} file @param {number} bytes */
+function end(file, bytes) {
+  const size = statSync(file).size;
+  const buf = Buffer.alloc(Math.min(size, bytes));
+  const fd = openSync(file, 'r');
+  try {
+    readSync(fd, buf, 0, buf.length, size - buf.length);
+  } finally {
+    closeSync(fd);
+  }
+  return buf;
+}
+
 /** The last `n` lines of the output so far. @param {number} n */
 export function tail(n) {
   if (!existsSync(LOG)) return '';
-  const size = statSync(LOG).size;
-  const buf = readFileSync(LOG).subarray(Math.max(0, size - 64 * 1024));
+  const buf = end(LOG, 64 * 1024);
   return String(buf)
     .split('\n')
     .slice(-n - 1)
@@ -73,8 +85,7 @@ export function resultFiles(job, code, minutes) {
   const listed = [];
   /** @type {string[]} */
   const left = [];
-  const log = existsSync(LOG) ? readFileSync(LOG) : Buffer.alloc(0);
-  files['.citadel/out/output.log'] = blob(log.subarray(Math.max(0, log.length - MAX_BYTES)));
+  files['.citadel/out/output.log'] = blob(existsSync(LOG) ? end(LOG, MAX_BYTES) : Buffer.alloc(0));
   listed.push('.citadel/out/output.log');
   for (const f of job.files.slice(0, 19)) {
     const out = `.citadel/out/${basename(f)}`;

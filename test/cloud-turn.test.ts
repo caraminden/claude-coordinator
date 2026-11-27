@@ -339,13 +339,15 @@ test('a result naming another job is not read off its own result branch either',
   assert.equal(texts(evs).at(-1), 'from teleport');
 });
 
-test("a helper's progress commits show as live lines, the exit code comes back, a card comes back as text, and the beat branch goes", async () => {
+test("a helper's beat seen beside its result shows no progress line (a finished step isn't handed over), the exit code comes back, a card comes back as text, and the beat branch goes", async () => {
   const branch = 'cloud/t7-beat';
   const before = posted.length;
   const evs = await drive({ branch, beat: `${branch}-beat`, quietMs: 60_000, cards: false, text: `Push to ${branch}.` }, { FAKE_MODE: 'beat' });
-  const at = evs.findIndex((e) => e.subtype === 'cloud_progress');
-  assert.equal(evs[at]?.text, '3 min: tests 40/120');
-  assert.ok(at >= 0 && at < evs.findLastIndex((e) => e.type === 'assistant'), 'progress shows before the result');
+  // The fake pushes its beat and its result together: the result wins the look, so no progress line hands a finished step over.
+  assert.deepEqual(
+    evs.filter((e) => e.subtype === 'cloud_progress'),
+    [],
+  );
   assert.deepEqual(
     evs.filter((e) => e.subtype === 'cloud_result'),
     [{ type: 'system', subtype: 'cloud_result', code: 3 }],

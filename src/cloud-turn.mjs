@@ -430,20 +430,14 @@ export async function cloudTurn(job) {
     if (fails >= MAX_GIT_FAILS) return end(`This turn lost its way to the repo on GitHub: ${MAX_GIT_FAILS} looks for \`${job.branch}\` failed in a row. The cloud session${session ? ` ${session}` : ''} may still push it; the next message reads it.\n\nThe last error: ${failed}`, true);
     // Its own result branch first, then any working branch that moved since the job went (2026-11-26: a session pushed its
     // answer only to its own claude/ branch, and the turn waited on a branch that never came).
-    const beat = job.beat ? now?.get(job.beat) : undefined;
-    if (job.beat && beat && looked.get(job.beat) !== beat) {
-      looked.set(job.beat, beat);
-      beatAt = Date.now();
-      const line = await progress(job, beat).catch(note);
-      if (line) emit({ type: 'system', subtype: 'cloud_progress', text: line });
-    }
     const moved = [...(now ?? [])].filter(([b, sha]) => b !== job.beat && sha !== job.sha && looked.get(b) !== sha).sort(([a], [b]) => Number(b === job.branch) - Number(a === job.branch));
     for (const [branch, sha] of moved) {
       looked.set(branch, sha);
       try {
         result = await fetchResult(job, sha, branch);
       } catch (err) {
-        if (/** @type {{ notOurs?: boolean }} */ (err).notOurs) continue;
+        // Another session's working branch can be deleted between the listing and the fetch: only this job's own branch failing ends it.
+        if (/** @type {{ notOurs?: boolean }} */ (err).notOurs || branch !== job.branch) continue;
         emit({ type: 'system', subtype: 'cloud', session, branch: job.branch, sha });
         return end(`The cloud session pushed \`${branch}\` (${sha.slice(0, 9)}) but its result couldn't be read: ${err instanceof Error ? err.message : String(err)}`, true);
       }
@@ -452,6 +446,14 @@ export async function cloudTurn(job) {
       break;
     }
     if (result) break;
+    // Progress only once no result came in the same look: a beat seen beside the result would hand a finished step over (#2200).
+    const beat = job.beat ? now?.get(job.beat) : undefined;
+    if (job.beat && beat && looked.get(job.beat) !== beat) {
+      looked.set(job.beat, beat);
+      beatAt = Date.now();
+      const line = await progress(job, beat).catch(note);
+      if (line) emit({ type: 'system', subtype: 'cloud_progress', text: line });
+    }
     // A helper's runner pushes progress every couple of minutes: none for quietMs means it isn't running (a session that ended its
     // turn, a VM gone). One read-back for a result it printed, then the helper runs the step at home rather than wait out the limit.
     if (job.quietMs && Date.now() - beatAt >= job.quietMs) {

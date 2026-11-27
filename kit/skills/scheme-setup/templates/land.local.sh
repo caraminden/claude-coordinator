@@ -106,6 +106,13 @@
 # README.md rows ^##\ Layout$
 # '
 
+# A major build's generated files (#2234): files every feeder refreshes (a test map), which build-claims.md can't give
+# to one feeder or mark shared: (the refresh rewrites whole lines). claims_check skips them, and each --into takes the
+# build's side of them on a conflict and runs CLAIMS_REGENERATE (bash, from the repo's top) after its rebase,
+# committing what changed, so the build tip always holds a fresh copy. Set both or neither: one alone refuses --into.
+# CLAIMS_GENERATED='tools/affected-map.txt'
+# CLAIMS_REGENERATE='node tools/affected-map.ts --write'
+
 # The land lock and the line's folder ('' is <.git>/land.lock and <.git>/land-queue in the main checkout). Set both to
 # share one line with another script that takes the same lock with flock (a deploy queue). Relative: from the main
 # checkout.

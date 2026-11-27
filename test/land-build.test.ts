@@ -457,6 +457,52 @@ test('claims: its own and unclaimed new files merge in; one another feeder alrea
   assert.equal(tipOf(r, 'build/3'), before);
 });
 
+// Generated files (#2234, as the kit's: test/scheme-setup-land-build.test.ts). map.txt lists the [bc].txt files; #2
+// merges c.txt with its map, and #1's map, made without c.txt, conflicts with it and is #2's by merge order.
+const MAP = { CLAIMS_GENERATED: 'map.txt', CLAIMS_REGENERATE: 'ls [bc].txt | sort >map.txt' };
+// A feeder's commit of <file> and its map, titled "#<n>:" as Citadel's are (the regenerated commit is too).
+function feed(wt: string, n: number, file: string, map: string) {
+  writeFileSync(join(wt, 'map.txt'), map);
+  writeFileSync(join(wt, file), `${n}\n`);
+  git(wt, 'add', '-A');
+  git(wt, 'commit', '-qm', `#${n}: ${file} and the map`);
+}
+function generated(r: R) {
+  build(r);
+  const boss = worktree(r, 'ticket/9-build');
+  r.commit(boss, 'build-claims.md', 'build: #9\n#1: b.txt\n#2: c.txt\n');
+  git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
+  const two = worktree(r, 'ticket/2-y');
+  feed(two, 2, 'c.txt', 'c.txt\n');
+  return two;
+}
+
+test('claims (#2234): a feeder that touches only a CLAIMS_GENERATED file beside its own passes, and --into makes it again on the build tip', () => {
+  const r = setup();
+  const two = generated(r);
+  const res2 = into(r, [OK], MAP, two);
+  assert.equal(res2.status, 0, res2.stderr);
+  feed(r.wt, 1, 'b.txt', 'b.txt\n');
+  const early = r.run(MAP, ['--check', '--into', 'build/3', OK]);
+  assert.equal(early.status, 0, early.stderr);
+  const res = into(r, [OK], MAP);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.source, 'show', 'build/3:map.txt'), 'b.txt\nc.txt', 'the map was made again on the build tip: both feeders in it');
+  assert.equal(git(r.source, 'log', '-1', '--format=%s', 'build/3'), '#1: regenerated at ship time: ls [bc].txt | sort >map.txt');
+});
+
+test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as today', () => {
+  const r = setup();
+  const two = generated(r);
+  assert.equal(into(r, [OK], {}, two).status, 0);
+  feed(r.wt, 1, 'b.txt', 'b.txt\n');
+  const before = tipOf(r, 'build/3');
+  const res = into(r, [OK]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /map\.txt is unclaimed, but #2 merged it in first, so it is #2's/);
+  assert.equal(tipOf(r, 'build/3'), before);
+});
+
 test("claims: a shared file takes added lines, not changes to lines another feeder merged in; the build minion isn't checked", () => {
   const r = setup();
   const { boss } = claimed(r);

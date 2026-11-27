@@ -339,6 +339,54 @@ test("claims (#1159): the template and Citadel's land.sh carry the same claims_c
   assert.equal(kit, fn(landText()));
 });
 
+// Generated files (#2234, Peek Build 2: tools/affected-map.txt moved 7 times and refused 4 feeder merges). map.txt lists
+// the f*.txt files, and each feeder refreshes it beside its own claimed file. #2 merges first; #1's map, made without
+// f2.txt, is unclaimed but #2's by merge order, and conflicts with the build's.
+function generated(config: Record<string, string>) {
+  const b = buildSetup(config);
+  git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt\n#2: f2.txt\n');
+  git(b.main, 'branch', '-f', 'build/1', 'ticket/3-x');
+  writeFileSync(join(b.wts[1], 'map.txt'), 'f2.txt\n');
+  b.commit(b.wts[1], 'f2.txt', 'two\n');
+  const two = b.run(2, '--into', 'build/1', 'f2.txt');
+  assert.equal(two.status, 0, two.stderr);
+  writeFileSync(join(b.wts[0], 'map.txt'), 'f1.txt\n');
+  b.commit(b.wts[0], 'f1.txt', 'one\n');
+  return b;
+}
+const MAP = { CLAIMS_GENERATED: 'map.txt', CLAIMS_REGENERATE: 'ls f*.txt | sort >map.txt' };
+
+test('claims (#2234): a feeder that touches only a CLAIMS_GENERATED file beside its own passes the claims, and --into makes the file again on the build tip', () => {
+  const b = generated(MAP);
+  const early = b.run(1, '--check', '--into', 'build/1', 'f1.txt');
+  assert.equal(early.status, 0, early.stderr);
+  const res = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(b.main, 'show', 'build/1:map.txt'), 'f1.txt\nf2.txt', 'the map was made again on the build tip: both feeders in it');
+  assert.equal(git(b.main, 'log', '-1', '--format=%s', 'build/1'), '#1: regenerated at ship time: ls f*.txt | sort >map.txt');
+  // A feeder whose map is already right adds no commit.
+  b.commit(b.wts[0], 'f1.txt', 'one more\n');
+  const again = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(git(b.main, 'log', '-1', '--format=%s', 'build/1'), 'f1.txt: one more');
+});
+
+test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as today; set without CLAIMS_REGENERATE, --into refuses', () => {
+  let b = generated({});
+  const build = b.at('build/1');
+  const res = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /map\.txt is unclaimed, but #2 merged it in first, so it is #2's/);
+  assert.equal(b.at('build/1'), build);
+  for (const half of [{ CLAIMS_GENERATED: MAP.CLAIMS_GENERATED }, { CLAIMS_REGENERATE: MAP.CLAIMS_REGENERATE }]) {
+    b = buildSetup(half);
+    const one = b.run(2, '--into', 'build/1', 'f2.txt');
+    assert.equal(one.status, 1, one.stderr);
+    assert.match(one.stderr, /CLAIMS_GENERATED and CLAIMS_REGENERATE go together/);
+  }
+});
+
 test("land_rebased runs in a feeder's --into, and its commit goes into the build; --into --full and --build never call it", () => {
   const b = buildSetup({}, rebasedHook);
   const build = b.at('build/1');

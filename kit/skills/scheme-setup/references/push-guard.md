@@ -70,7 +70,7 @@ green" is not the rule (a workflow that only blocks when red, one that runs for 
 `BUILD_WORKFLOWS` in `land.local.sh`: `'desktop.yml'` for every build, or `'desktop.yml:<paths file>'` only when the build
 changes a path that file lists. That file must name everything the workflow tests (the code too, not just its harness),
 or a build that changes only that code skips it; when in doubt, use the plain form. `--full` dispatches it on the build's `land/` branch when the push didn't
-start it (it needs `workflow_dispatch`), waits for it, and refuses the build on its red, CI_STATUS or not. Exit 75 means
+start it (it needs `workflow_dispatch`), waits for it, and refuses the build on its red, CI_STATUS or not. A file every feeder of a build regenerates (a test map) can't be claimed by one feeder: name it in `CLAIMS_GENERATED` with the command that writes it in `CLAIMS_REGENERATE` (both in `land.local.sh`), and claims_check skips it while each `--into` makes it again on the build tip. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion
 calls `wake_when_runners_back`, seals itself, and runs it again once Citadel says the runners are back. Say all of this in the "How a
 change ships" line, and that the worktree sits on a detached commit while a ship waits.

@@ -5,11 +5,10 @@
 # Regenerated files (#1827). A ship whose diff is a command's output says so with trailers on its own commits:
 #   Regenerate: <a command, run with bash from the repo's top>
 #   Regenerate-files: <the files it writes, as .gitattributes patterns, space-separated>
-# Every merge numbers_git makes for it then takes main's side of those files (the citadel-regen driver), so the early
-# checks pass it too; after the rebase each command runs again on main and what it wrote is committed (regen_run). A
-# conflict in any other file stops as before. Such a ship holds the line (QUEUE_HOLD). Land and --into only; the prompt
-# baseline is this step's built-in case. shortcut: a modify/delete conflict in a declared file, or a .gitattributes
-# merge= on one, still stops, and a hand edit to a declared file is lost when main changed it too.
+# numbers_git's merges take main's side of them (the citadel-regen driver), the early checks too; after the rebase each
+# command runs again and its output is committed (regen_run). Another file's conflict stops as before. It holds the
+# line (QUEUE_HOLD). Land and --into only; the prompt baseline is built in. shortcut: a modify/delete conflict
+# in a declared file, or a .gitattributes merge= on one, still stops; a hand edit to one is lost when main changed it.
 regen_setup() {
   regen_cmds=() regen_pats=() regen_attrs=''
   if [[ $mode = land || $mode = into ]]; then
@@ -24,6 +23,10 @@ regen_setup() {
     for p in "${regen_pats[@]}"; do
       case $p in '!'* | '#'* | *=*) refuse "Regenerate-files: takes plain .gitattributes patterns, not \"$p\". Nothing landed" ;; esac
     done
+    if [ "$mode" = into ] && [ -n "${CLAIMS_REGENERATE-}" ]; then # CLAIMS_GENERATED (#2234): Citadel sets none
+      regen_cmds+=("$CLAIMS_REGENERATE")
+      for p in ${CLAIMS_GENERATED-}; do regen_pats+=("/$p"); done # /: from the top
+    fi
     if [ ${#regen_cmds[@]} -gt 0 ]; then
       regen_attrs=$(git rev-parse --absolute-git-dir)/land-regen.attributes
       { cat "$tools/ship-numbers.attributes"; printf '%s citadel-regen merge=citadel-regen\n' "${regen_pats[@]}"; } >"$regen_attrs.$$"
@@ -94,12 +97,12 @@ land_regen() {
   n=${branch#ticket/} n=${n%%-*}
   for c in "${regen_cmds[@]}"; do regen_run "${n:+#$n: }regenerated at ship time: $c" "$c" "${regen_pats[@]}"; done
   # The prompt baseline (#1418), the built-in case: a branch that changed it got main's copy from the merge, so it is
-  # measured again on the merged prompts. shortcut: not for --build, whose merge keeps main's baseline; upgrade if that goes stale and bites.
+  # measured again. shortcut: not for --build, whose merge keeps main's; upgrade if it bites.
   if [[ $mode = land || $mode = into ]] && [ -f test/prompt-budget.test.ts ] && ! git diff --quiet "$(git merge-base "$adr_onto" "$pre")" "$pre" -- test/prompt-baseline.json; then
     regen_run "${n:+#$n: }test/prompt-baseline.json measured again at ship time" "PROMPT_BASELINE=write $(printf %q "$tools/citadel-node") --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 || true" test/prompt-baseline.json
   fi
   # The type baseline (#2141): a commit that only lowered it took main's (ship-numbers.ts), so --update lowers it again.
-  # shortcut: not for --build, whose lowerings wait for the next --update; upgrade if a build's slack baseline bites.
+  # shortcut: not for --build, whose lowerings wait for the next --update; upgrade if that bites.
   if [[ $mode = land || $mode = into ]] && [ -f tools/typecheck.ts ] &&
     ! git diff --quiet "$(git merge-base "$adr_onto" "$pre")" "$pre" -- test/typecheck-baseline.json; then
     regen_why="after the rebase onto ${adr_onto#refs/heads/}, node tools/typecheck.ts --update refused on $branch, so nothing"

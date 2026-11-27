@@ -2,13 +2,13 @@
 # Build branches (--into build/<n>): claims, the build's lock and the merge into it.
 # Sourced by tools/land.sh up front: definitions only (#2099).
 
-# Build claims (#1159): build-claims.md on build/<n> names the files each feeder writes ("#<n>: <paths>"; a path ending
-# in / is a folder, longest match wins), the files any feeder may add to ("shared: <paths>") and the build minion
-# ("build: #<n>"). A feeder's --into is refused when it writes a file another feeder claimed or merged in first, the
-# claims file, or, in a shared file, lines another feeder merged in. Who merged a commit: build/<n>'s reflog
-# ("land.sh --into <branch>"), else a "#<n>" starting its subject. Runs at --check and after the rebase. No file, no check.
+# Build claims (#1159): build-claims.md on build/<n> names each feeder's files ("#<n>: <paths>"; a path ending in / is
+# a folder, longest match wins), files any feeder may add to ("shared: <paths>") and the build minion ("build: #<n>").
+# --into refuses a file another feeder claimed or merged in first, the claims file, or a shared file's lines another
+# merged in. Who merged: build/<n>'s reflog ("land.sh --into <branch>"), else a leading "#<n>". At --check and after the
+# rebase; no file, no check. CLAIMS_GENERATED's (#2234) are anyone's.
 claims_check() {
-  local trunk=$1 claims me boss mb merged f who m a b why
+  local trunk=$1 claims me boss mb merged f who m a b why gen=${CLAIMS_GENERATED-}
   claims=$(git show "refs/heads/$build:build-claims.md" 2>/dev/null) || return 0
   me=$(sed -nE 's#^ticket/([0-9]+)(-.*)?$#\1#p' <<<"$branch")
   boss=$(sed -nE 's/^build:[[:space:]]*#?([0-9]+).*/\1/p' <<<"$claims" | head -n 1)
@@ -31,8 +31,10 @@ claims_check() {
     [ -n "$m" ] || m=$(git log -1 --format=%s "$1" | sed -nE 's/^#([0-9]+)([^0-9].*)?$/\1/p')
     [ "$m" = "$boss" ] || echo "$m"
   }
+  gen=" ${gen//$'\n'/ } " # generated files: anyone's
   why=$(while IFS= read -r f; do
     [ -n "$f" ] || continue
+    [[ $gen != *" $f "* ]] || continue
     if [ "$f" = build-claims.md ]; then
       echo "$f is the build minion's plan, so only it changes a claim"
       continue
@@ -68,8 +70,8 @@ claims_check() {
   refuse "$why"
 }
 
-# One writer per build branch, on fd 6: a merge into it, its --full run or its land. Merges wait only for each other, not
-# in the lands' line; --full and --build take it before that line, so a land never waits on a feeder's test run.
+# One writer per build branch, on fd 6: a merge, its --full run or its land. Merges wait only for each other, not in
+# the lands' line; --full and --build take it before it, so no land waits on a feeder's tests.
 build_lock() {
   local lock=$state/build-${build#build/}.lock wait=${LAND_BUILD_WAIT:-3600}
   exec 6>"$lock" || { say "can't open $lock for writing, so nothing merged: a person needs to look at it"; return 1; }
@@ -90,8 +92,7 @@ merge_into() {
 }
 
 # A claims merge in flight (#1684): the build minion's --into of a changed build-claims.md marks itself with
-# <state>/build-<n>.claims.<pid> (its queue_proc identity); a mark whose process is gone counts for nothing.
-# claims_inflight prints the pid of a live one other than this run (a dead one's goes).
+# <state>/build-<n>.claims.<pid> (its queue_proc identity). claims_inflight prints a live one's pid, not this run's.
 claims_mark() { echo "$state/build-${build#build/}.claims"; }
 
 claims_inflight() {
@@ -104,9 +105,8 @@ claims_inflight() {
   return 1
 }
 
-# claims_check, unless a claims merge is in flight: the claims are about to change, so a feeder's hand-off (--check)
-# goes ahead, and its run waits for that merge and is checked against the new plan. Under the build's lock claims_check
-# runs again whatever happened here.
+# claims_check, unless a claims merge is in flight: the claims are about to change, so a hand-off (--check) goes ahead
+# and the run waits for it, then checks the new plan. Under the build's lock claims_check runs again anyway.
 claims_gate() {
   local pid t=$SECONDS
   if pid=$(claims_inflight); then

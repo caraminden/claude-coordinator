@@ -210,6 +210,12 @@ GUARD_TIMEOUT=${LAND_GUARD_TIMEOUT:-120}
 # Ship-time merges ("Ship-time merges" below): the files a rebase onto $BRANCH may merge by rule rather than stop on,
 # a line "<path> <rule> [<regex>]" each ('#' comments). '' none: a clash in any file stops the rebase, as always.
 MERGES=''
+# Generated files in a major build (#2234): CLAIMS_GENERATED names files (paths from the repo's top, split by spaces or
+# newlines) that every feeder may refresh (Peek's tools/affected-map.txt), and CLAIMS_REGENERATE the command, run with
+# bash from the repo's top, that writes them. claims_check skips them, and each --into takes the build's side of them
+# on a conflict and runs the command after its rebase, as a Regenerate ship's (below). Set both or neither; '' none.
+CLAIMS_GENERATED=''
+CLAIMS_REGENERATE=''
 # The land lock and the line's folder: '' is <.git>/land.lock and <.git>/land-queue in the main checkout. Set them to
 # share one line with another script that takes the same lock (Citadel's deploy queue). A relative path is from the
 # main checkout.
@@ -1082,8 +1088,9 @@ undo_guard() {
 # feeder claimed, an unclaimed file another feeder already merged in, the claims file itself, or, in a shared file,
 # lines another feeder merged in. Who merged a commit comes from build/<n>'s reflog ("land.sh --into <branch>"),
 # else from a "#<n>" at the start of its subject. It runs at --check, before the lock, and again after the rebase. A plain check, no AI; with no claims file there is no check.
+# The files CLAIMS_GENERATED names (#2234) are nobody's: any feeder writes them, and --into makes them again.
 claims_check() {
-  local trunk=$1 claims me boss mb merged f who m a b why
+  local trunk=$1 claims me boss mb merged f who m a b why gen=${CLAIMS_GENERATED-}
   claims=$(git show "refs/heads/$build:build-claims.md" 2>/dev/null) || return 0
   me=$(sed -nE 's#^ticket/([0-9]+)(-.*)?$#\1#p' <<<"$branch")
   boss=$(sed -nE 's/^build:[[:space:]]*#?([0-9]+).*/\1/p' <<<"$claims" | head -n 1)
@@ -1106,8 +1113,10 @@ claims_check() {
     [ -n "$m" ] || m=$(git log -1 --format=%s "$1" | sed -nE 's/^#([0-9]+)([^0-9].*)?$/\1/p')
     [ "$m" = "$boss" ] || echo "$m"
   }
+  gen=" ${gen//$'\n'/ } " # generated files: anyone's
   why=$(while IFS= read -r f; do
     [ -n "$f" ] || continue
+    [[ $gen != *" $f "* ]] || continue
     if [ "$f" = build-claims.md ]; then
       echo "$f is the build minion's plan, so only it changes a claim"
       continue
@@ -1371,6 +1380,14 @@ if [[ $mode = land || $mode = into ]] && [ -z "$verify" ]; then
   for p in "${regen_pats[@]}"; do
     case $p in '!'* | '#'* | *=*) refuse "Regenerate-files: takes plain .gitattributes patterns, not \"$p\". Nothing landed" ;; esac
   done
+  # A build's generated files (CLAIMS_GENERATED, #2234): every --into declares them, as if by trailers.
+  if [ "$mode" = into ] && [ -n "$CLAIMS_GENERATED$CLAIMS_REGENERATE" ]; then
+    { [ -n "$CLAIMS_GENERATED" ] && [ -n "$CLAIMS_REGENERATE" ]; } || refuse "CLAIMS_GENERATED and CLAIMS_REGENERATE go together (the generated files and the command that writes them), and $LOCAL sets only one, so nothing merged: set both or neither"
+    for claims_c in "${regen_cmds[@]}" ''; do [ "$claims_c" != "$CLAIMS_REGENERATE" ] || break; done
+    [ -n "$claims_c" ] || regen_cmds+=("$CLAIMS_REGENERATE")
+    read -ra claims_gen <<<"${CLAIMS_GENERATED//$'\n'/ }" || true
+    for p in "${claims_gen[@]}"; do regen_pats+=("/$p"); done # from the top, not a name at any depth
+  fi
   if [ ${#regen_cmds[@]} -gt 0 ]; then
     if [ -z "$merge_dir" ]; then
       merge_dir=$gitdir/land-merge

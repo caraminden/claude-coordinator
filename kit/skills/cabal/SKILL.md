@@ -81,6 +81,8 @@ Your build is `build/<n>`. In a container, each `tools/land.sh` below is the lan
 2. **Plan the claims** before members start: `build-claims.md` at the top of `build/<n>`, a line `build: #<your
    number>`, then one line per member, `#N: <the files it writes>` (paths separated by spaces; a folder ends in /; no
    path in two claims), and `shared: <hub files>` for files several members add to, which take only added lines.
+   A file every member regenerates (a test map) goes in neither: it is the scheme's `CLAIMS_GENERATED` in
+   `tools/land.local.sh`, which each merge makes again; if it isn't set there, ask the scheme's Taskmaster.
    Add each member's line as `cabal_start` gives its number, before its first merge.
    Commit it on your branch and merge it in with `tools/land.sh --into build/<n>` (docs only, so no test files).
    `--into` refuses a member's merge that writes outside its claim; a member that needs another's file asks you on

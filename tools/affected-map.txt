@@ -12,7 +12,7 @@
 # test/affected.test.ts fails when a test imports a module and its change would not pick that test.
 @imports src/** public/** tools/**
 # A src module with no rule of its own also runs the tests of the rules of the src modules that import it directly, when it has
-# at most 10 of them (effort retro #2216: the nine parts #1840 split out of src/runner.ts lost its rows). Wide pick only.
+# at most 10 of them (effort retro #2216: the nine parts #1840 split out of src/runner.ts lost its rows). The narrow pick takes only the @pinned ones.
 @inherit src/**
 @inheritmax 10
 # Pinning tests too slow for tools/always-tests.txt (#2037, Josh 2026-11-25 "Run when their code changes"): the narrow pick

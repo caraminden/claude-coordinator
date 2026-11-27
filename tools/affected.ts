@@ -157,10 +157,10 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
     }
     // @inherit: a changed module with no rule of its own takes the rules of the modules that import it directly, when it has
     // at most @inheritmax of them (a split-out part keeps the rows of the file it came from; a shared helper is not that).
-    if (!narrow && !isTest && map.inherit.some((re) => re.test(p)) && !map.rules.some((r) => own(r, p))) {
+    if (!isTest && map.inherit.some((re) => re.test(p)) && !map.rules.some((r) => own(r, p))) {
       srcImports ??= new Map(tracked.filter((t) => map.inherit.some((re) => re.test(t))).map((t) => [t, directImports(root, t)]));
       const importers = [...srcImports].filter(([, deps]) => deps.includes(p)).map(([f]) => f);
-      if (importers.length <= map.inheritMax) for (const f of importers) for (const r of map.rules) if (own(r, f)) for (const t of r.tests) for (const h of /[*?]/.test(t) ? tracked.filter((x) => globRe(t).test(x)) : [t]) add(h, `inherit ${f} map:${r.line}`);
+      if (importers.length <= map.inheritMax) for (const f of importers) for (const r of map.rules) if (own(r, f)) for (const t of narrow ? r.tests.filter((x) => map.pinned.includes(x)) : r.tests) for (const h of /[*?]/.test(t) ? tracked.filter((x) => globRe(t).test(x)) : [t]) add(h, `inherit ${f} map:${r.line}`);
     }
     if (!covered && !narrow) unmapped.push(p);
   }

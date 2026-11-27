@@ -284,7 +284,8 @@ test('@inherit: a module with no rule of its own takes the rule tests of the mod
     const picks = (m: string, p: string, narrow = false) => affected(parseMap(m), [p], tr, dir, narrow).run.map((r) => r.test);
     assert.deepEqual(picks(base, 'src/part.ts'), ['test/all.test.ts', 'test/big.test.ts']);
     assert.deepEqual(picks(base, 'src/own.ts'), ['test/all.test.ts', 'test/own.test.ts'], 'a module with its own rule inherits nothing');
-    assert.deepEqual(picks(base, 'src/part.ts', true), [], 'the narrow pick does not inherit');
+    assert.deepEqual(picks(base, 'src/part.ts', true), [], 'the narrow pick inherits only @pinned tests');
+    assert.deepEqual(picks(`${base}@pinned test/big.test.ts\n`, 'src/part.ts', true), ['test/big.test.ts']);
     assert.deepEqual(picks('@tests test/*.test.ts\nsrc/big.ts: test/big.test.ts\n', 'src/part.ts'), [], 'no @inherit, no inheriting');
     assert.deepEqual(picks(`${base}@inheritmax 1\n`, 'src/part.ts'), ['test/all.test.ts'], 'two importers is over @inheritmax 1');
   } finally {

@@ -37,7 +37,7 @@ export function roleCannot(report: Capable | null, role: Role, gpuFound = false)
   const runs = report.os_name || report.os;
   switch (role) {
     case 'screen':
-      return report.os === 'windows' ? null : `Windows only, and this PC runs ${runs}.`;
+      return report.os === 'windows' ? null : `Windows only, and this computer runs ${runs}.`;
     case 'ci':
       return mac ? 'CI runners need Windows or Linux.' : null;
     case 'turns':

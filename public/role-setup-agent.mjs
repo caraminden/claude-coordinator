@@ -522,6 +522,6 @@ async function elevate(ctx, say, n, own) {
     return true;
   }
   await ctx.post({ id: ctx.ask.id, admin: { needs, pm: packages.length ? await packageManager(ctx) : null, script: true, at: file } });
-  await say(n, `Run the administrator command below on this PC (it installs ${needs.length > 1 ? 'everything listed' : 'it'} in one go)`, 'running');
+  await say(n, `Run the administrator command above on that PC (it installs ${needs.length > 1 ? 'everything listed' : 'it'} in one go)`, 'running');
   return true;
 }

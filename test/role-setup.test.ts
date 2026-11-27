@@ -389,7 +389,7 @@ test('CI runners with an agent that does Set up: it writes the elevate script, t
   const run = t.setups.start(t.machine(), 'ci', 'setup', t.josh);
   assert.equal(run.worker_install, false, 'no install lines to paste by hand');
   assert.deepEqual(t.sent, [{ setup: { id: run.id, role: 'ci', kind: 'setup', turns_caps: { workers: 2 }, also: ['turns'] } }], 'Minion turns is on with no worker yet: its needs go in the same script, with its caps');
-  t.setups.heard(t.machine(), { id: run.id, admin: { needs: ['runner', 'wsl'], script: true }, step: { n: 0, text: 'Run the administrator command below on this PC', state: 'running' } });
+  t.setups.heard(t.machine(), { id: run.id, admin: { needs: ['runner', 'wsl'], script: true }, step: { n: 0, text: 'Run the administrator command above on that PC', state: 'running' } });
   t.setups.heard(t.machine(), { id: run.id, done: { ok: true } });
   let kept = t.run('ci')!;
   assert.equal(kept.done, null, 'it waits for the runner agent');
@@ -404,7 +404,7 @@ test('CI runners with an agent that does Set up: it writes the elevate script, t
   assert.deepEqual(
     kept.steps.slice(0, 2).map((s) => [s.text, s.state]),
     [
-      ['Run the administrator command below on this PC', 'ok'],
+      ['Run the administrator command above on that PC', 'ok'],
       ['The runner agent connected to Citadel', 'ok'],
     ],
   );
@@ -425,7 +425,7 @@ test('Minion turns on Linux: the agent writes the elevate script, then T5 self-t
   const run = t.setups.start(t.machine(), 'turns', 'setup', t.josh);
   assert.equal(run.worker_install, false);
   assert.deepEqual(t.sent, [{ setup: { id: run.id, role: 'turns', kind: 'setup', caps: { workers: 4 } } }]);
-  t.setups.heard(t.machine(), { id: run.id, admin: { needs: ['worker'], script: true }, step: { n: 0, text: 'Run the administrator command below on this PC', state: 'running' }, done: { ok: true } });
+  t.setups.heard(t.machine(), { id: run.id, admin: { needs: ['worker'], script: true }, step: { n: 0, text: 'Run the administrator command above on that PC', state: 'running' }, done: { ok: true } });
   t.w.here = true;
   t.tick(5000);
   const kept = t.run('turns')!;

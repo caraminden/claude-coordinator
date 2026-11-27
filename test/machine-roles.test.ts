@@ -302,9 +302,9 @@ test('rolesFromLegacy and legacyFromRoles round-trip every lend shape', () => {
 test("a PC's report rules out what it can't do, with why; no report rules out nothing", async () => {
   const mac = { os: 'macos' as const, os_name: 'macOS 14.5', gpu: null };
   assert.deepEqual(Object.keys(rolesCannot(mac)).sort(), ['builds', 'ci', 'gpu', 'screen', 'turns']);
-  assert.equal(roleCannot(mac, 'screen'), 'Windows only, and this PC runs macOS 14.5.');
+  assert.equal(roleCannot(mac, 'screen'), 'Windows only, and this computer runs macOS 14.5.');
   const linux = { os: 'linux' as const, os_name: 'Ubuntu 24.04', gpu: null };
-  assert.deepEqual(rolesCannot(linux), { screen: 'Windows only, and this PC runs Ubuntu 24.04.', gpu: 'No GPU found on this PC.' });
+  assert.deepEqual(rolesCannot(linux), { screen: 'Windows only, and this computer runs Ubuntu 24.04.', gpu: 'No GPU found on this PC.' });
   assert.equal(roleCannot(linux, 'gpu', true), null, "its jobs block's GPU outranks a report that found none");
   assert.deepEqual(rolesCannot({ os: 'windows', gpu: 'RTX 4080' }), {});
   assert.deepEqual(rolesCannot(null), {}, 'an agent from before reports nothing: nothing is ruled out');

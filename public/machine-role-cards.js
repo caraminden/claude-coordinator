@@ -86,7 +86,7 @@ function cannot(m, r) {
   const why = m.cannot?.[/** @type {MachineRoleKey} */ (r.role)];
   if (why) return why;
   if (r.role === 'ci' && m.report?.os === 'macos') return 'CI runners need Windows or Linux.';
-  if (r.role === 'screen' && m.worker?.host && !m.worker.wsl) return 'Windows only, and this PC runs Linux.';
+  if (r.role === 'screen' && m.worker?.host && !m.worker.wsl) return 'Windows only, and this computer runs Linux.';
   if (r.role === 'turns' && m.owner_id === null) return 'A machine runs only its owner\'s minions, and this one is shared: add that PC again with "Mine" ticked.';
   if (r.role === 'turns' && !(m.owner_id === account?.id)) return 'Only its owner can switch Minion turns on.';
   if (r.role === 'gpu' && m.report && !m.report.gpu && !hasGpu(m)) return 'That PC reported no GPU.';

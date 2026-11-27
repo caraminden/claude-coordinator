@@ -375,10 +375,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
   if (runsOn) app.runner.runsOn.set(id, runsOn, session.name);
   if (cloud) app.runner.cloud.made(id, cloud, session.name);
-  if (cloudOff && asked) {
-    const then = typeof asked === 'string' ? `its cloud mark wasn't kept (${asked})` : `${'go' in asked ? 'it' : 'its cloud mark is kept and it'} goes to the cloud only if the switch is back on before its first turn`;
-    notes.push(`Cloud sessions are off for every scheme right now (an admin switch), so it runs at perigee; ${then}.`);
-  }
+  if (cloudOff && asked) notes.push(`Cloud sessions are off for every scheme right now (an admin switch), so it runs at perigee${typeof asked === 'string' ? `; its cloud mark wasn't kept (${asked})` : ''}.`);
   // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
   store.addPick(id, model, effort, pickBy, because);
   store.updateTicket(id, { picked_because: because, person_id: caller && !picked ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });

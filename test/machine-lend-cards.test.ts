@@ -61,13 +61,15 @@ before(async () => {
     // Their turns run on the server's (stand-in) login, so their asks start turns.
     new Store(join(srv.data, 'coordinator.db')).updateUser(made.person.id, { server_login: 1 });
   }
-  // An admin's shared machine with a real agent that found two workspaces and an MCP server.
+  // An admin's machine, its tools lent to every turn in its schemes (Build 10 H1: no row is shared, it has an owner), with
+  // a real agent that found two workspaces and an MCP server.
   const dir = join(root, 'box');
   for (const d of ['w', 'x', 'home']) mkdirSync(join(dir, d), { recursive: true });
   const config = join(dir, 'machine-agent.json');
   writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] } }, workspaces: { w: { path: join(dir, 'w') }, x: { path: join(dir, 'x') } } }));
   const made = await call('Cara', '/api/machines', { method: 'POST', body: { name: 'box' } });
   box = made.machine;
+  await call('Cara', `/api/machines/${box.id}/roles`, { method: 'PATCH', body: { role: 'tools', everyone: true } });
   ({ output } = startMachineAgent({ base: srv.base, token: made.token, run: ['--config', config], env: { CLAUDE_CONFIG_DIR: join(dir, 'home') } }));
   await until('box to report what it found', async () => {
     const m = await boxNow();
@@ -99,7 +101,7 @@ test('the change is worked out against the machine as it is: only what differs, 
 
 test("a minion's call posts a card with the change and what it lends after; bad calls are refused before anyone sees them", async () => {
   const r = await propose({ machine: 'box', here: true, tick: ['w'], why: 'Cantrips needs the w folder' });
-  assert.equal(r.owner, null);
+  assert.equal(r.owner, 'Cara');
   assert.equal(r.page, `#/p/${project.id}/machines/box`);
   const c = await card(minion, r.id);
   assert.equal(c.summary, 'Lend box to Cantrips');
@@ -121,7 +123,7 @@ test("a minion's call posts a card with the change and what it lends after; bad 
 
 test('only its owner or an admin approves: Approve saves it as the page would, and the agent is told', async () => {
   const [c] = (await events(minion)).filter((e) => e.status === 'pending');
-  await assert.rejects(verdict('Dana', minion, c.id, 'approve'), /403 Only an admin can change what it lends/);
+  await assert.rejects(verdict('Dana', minion, c.id, 'approve'), /403 Only Cara, who owns box, or an admin can change what it lends/);
   await assert.rejects(verdict(`agent:${minion.id}`, minion, c.id, 'approve'), /403/);
   assert.equal((await card(minion, c.id)).status, 'pending');
   await verdict('Cara', minion, c.id, 'approve');

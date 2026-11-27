@@ -41,6 +41,7 @@ function app(name: string) {
     'shell/index.html': 'shell',
     'android/gradlew': '#!/bin/sh\n',
     'android/app/build.gradle': 'android { defaultConfig { versionName "1.0" } }',
+    'android/app/debug.keystore': 'PUBLIC-DEBUG-KEY',
     'android/capacitor.settings.gradle': "project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor')\n",
   });
   git(live, 'add', '-A');
@@ -60,7 +61,8 @@ function app(name: string) {
 type Outcome = 'ok' | 'fails' | 'away';
 
 /** A builder whose machine is faked: `outcomes` is what each job does in turn; none left means no machine has room. */
-function world(outcomes: Outcome[]) {
+function world(outcomes: Outcome[], took = () => {}) {
+  const signLimits: number[] = [];
   const sent: { files: string[]; argv: string[]; text: string }[] = [];
   const perigee: string[][] = [];
   const signed: string[] = [];
@@ -77,6 +79,7 @@ function world(outcomes: Outcome[]) {
     },
     jobs: {
       queueBuild: (q) => {
+        took();
         const id = jobs.size + 1;
         const outcome = outcomes.shift()!;
         const snap = q.inputs[0].path;
@@ -119,8 +122,9 @@ function world(outcomes: Outcome[]) {
     pollMs: 5,
     awayMs: 15,
   };
-  const run: Runner = async (argv, cwd) => {
+  const run: Runner = async (argv, cwd, _env, _log, ms) => {
     perigee.push(argv);
+    if (argv[1] === 'sign') signLimits.push(ms);
     if (argv.includes('sync')) put(cwd, { 'android/app/src/main/assets/public/index.html': 'synced web', 'android/local.properties': 'sdk.dir=/perigee', 'android/keystore.properties': 'storePassword=hunter2', 'android/release.jks': 'stray' });
     if (argv.includes('assembleRelease')) put(cwd, { 'app/build/outputs/apk/release/app-release-unsigned.apk': 'unsigned on perigee' });
     if (argv[1] === 'sign') {
@@ -146,7 +150,7 @@ function world(outcomes: Outcome[]) {
     oomKills: async () => 0,
   });
   const gradleHere = () => perigee.filter((c) => c.includes('assembleRelease')).length;
-  return { builds, sent, signed, stopped, told, gradleHere };
+  return { builds, sent, signed, signLimits, stopped, told, gradleHere };
 }
 
 test('a release build placed on a machine is signed on perigee, and no key file is among what it was sent', async () => {
@@ -158,9 +162,9 @@ test('a release build placed on a machine is signed on perigee, and no key file 
   const [{ files, argv, text }] = w.sent;
   assert.deepEqual(argv.slice(0, 2), ['./gradlew', '--no-daemon']);
   assert.ok(argv.includes('-Pcitadel.versionCode=1'));
-  for (const f of ['android/app/src/main/assets/public/index.html', 'node_modules/@capacitor/android/capacitor/src/Bridge.java', 'android/app/build.gradle']) assert.ok(files.includes(f), f);
+  for (const f of ['android/app/src/main/assets/public/index.html', 'node_modules/@capacitor/android/capacitor/src/Bridge.java', 'android/app/build.gradle', 'android/app/debug.keystore']) assert.ok(files.includes(f), f);
   assert.deepEqual(
-    files.filter((f) => /\.(jks|keystore|pass)$|local\.properties|keystore\.properties|left-pad|capacitor\/build\//.test(f)),
+    files.filter((f) => f !== 'android/app/debug.keystore' && /\.(jks|keystore|pass)$|local\.properties|keystore\.properties|left-pad|capacitor\/build\//.test(f)),
     [],
   );
   assert.doesNotMatch(text, /THE-KEY|hunter2/);
@@ -190,6 +194,15 @@ test('a machine that goes away has the build placed once more, then perigee take
   const t = world(['away', 'away', 'ok']);
   assert.deepEqual(await t.builds.check(gone, '#1'), { built: 1 });
   assert.deepEqual([t.sent.length, t.stopped, t.gradleHere()], [2, [1, 2], 1]);
+});
+
+test('a build that comes back late still has time to be signed', async (t) => {
+  let late = 0;
+  const now = Date.now.bind(Date);
+  t.mock.method(Date, 'now', () => now() + late);
+  const w = world(['ok'], () => (late = 2 * 3_600_000));
+  assert.deepEqual(await w.builds.check(app('late'), '#1'), { built: 1 });
+  assert.ok(w.signLimits[0] > 60_000, `signing had ${w.signLimits[0]} ms`);
 });
 
 test("capacitorExtras: nothing for a project that isn't Capacitor's, and a hoisted package outside the project is found", () => {

@@ -6,12 +6,14 @@
 import { mkdir, readFile, rename, rm, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { capacitorExtras, snapshot } from '../tools/heavy-builds.ts';
+import { fileURLToPath } from 'node:url';
 import type { ContraptionRow, Store } from './db.ts';
 import { execResult } from './exec.ts';
 import { buildRecipe, type BuildPlacer, KIND_SIZE } from './heavy-builds.ts';
 import { ENDED, jobInputs, type MachineJobs } from './machine-jobs.ts';
 import { thrown } from './thrown.ts';
+
+const PACK = fileURLToPath(new URL('../tools/heavy-builds.ts', import.meta.url));
 
 export interface ApkMachineDeps {
   store: Pick<Store, 'getMachine' | 'getMachineJob' | 'machineJobs' | 'updateMachineJob'>;
@@ -88,7 +90,9 @@ export class ApkMachine {
   private async once(a: ApkMachineAsk, projectId: number, image: string, spots: { id: number; name: string }[], note: (line: string) => Promise<void>): Promise<boolean | 'away'> {
     await rm(a.scratch, { recursive: true, force: true });
     await mkdir(a.scratch, { recursive: true });
-    snapshot(a.top, a.scratch, capacitorExtras(a.top, a.dir));
+    // A child process: packing a checkout takes seconds of git, tar and gzip, which the server's thread can't give.
+    const packed = await execResult(process.execPath, [PACK, '--pack', a.top, a.scratch, a.dir]);
+    if (packed.code !== 0) throw new Error(`the checkout couldn't be packed: ${packed.err.trim().slice(-300)}`);
     const inputs = await jobInputs([join(a.scratch, 'snapshot.tgz')], [a.scratch]);
     const machine = this.d.store.getMachine(spots[0].id);
     if (!machine) return false;

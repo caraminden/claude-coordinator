@@ -138,7 +138,7 @@ export function buildsReady(setup: Record<string, unknown> | null, shipped: Reco
  * `cap`: place() only read the room, and two jobs placed at once must not both start past it. A build bigger than the
  * cap starts when no other build runs there, so it never waits for ever.
  */
-export function buildRoom(balancer: Pick<MachineBalancer, 'ask' | 'holding'>, machineId: number, job: { key: string; label: string; size: number }, cap: number | null): 'start' | 'late' | 'wait' {
+export function buildRoom(balancer: Pick<MachineBalancer, 'ask' | 'holding'>, machineId: number, job: { key: string; label: string; size: number; first?: boolean }, cap: number | null): 'start' | 'late' | 'wait' {
   const held = cap === null || !job.key.startsWith('build:') ? 0 : balancer.holding(machineId, 'build:');
   if (cap !== null && held > 0 && held + job.size > cap) return 'wait';
   return balancer.ask(machineId, job);

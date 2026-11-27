@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { BuildPlacer, buildRoom, buildsReady, KIND_SIZE, place, SCRIPT } from '../src/heavy-builds.ts';
-import { MachineBalancer } from '../src/machine-balancer.ts';
+import { balance, MachineBalancer } from '../src/machine-balancer.ts';
 import { type AgentJobMessage, type BuildKind, DEFAULT_SETTINGS, type JobKind, MachineJobs } from '../src/machine-jobs.ts';
 import { kindOf } from '../tools/heavy-builds.ts';
 import { tempRoot } from './helpers.ts';
@@ -369,4 +369,10 @@ test("a release APK queued by Citadel (a contraption's build job) goes ahead of 
   w.asked.length = 0;
   w.jobs.pump(w.box);
   assert.deepEqual(w.asked, [`build:${release}`, `build:${first}`]);
+});
+
+test('a release build is next for the room even when an older build already holds a place in the wait', () => {
+  const job = (key: string, since: number, first?: boolean) => ({ key, label: key, size: 8, since, first });
+  const plan = balance({ threads: 8, caps: { workers: null, runners: null, turnThreads: null, ciThreads: null }, ship: false, ciWaiting: 0, running: 0, heavy: [job('build:1', 1), job('build:2', 2, true)], now: 3 });
+  assert.deepEqual(plan.start, ['build:2']);
 });

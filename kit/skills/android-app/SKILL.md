@@ -17,8 +17,8 @@ is **read-only**.
   a cold build takes every core it can get and 2–3 GB of RAM (`--heavy`: a first build counts as heavy before its past runs say).
   `--back` names what you need here: the build may run on another machine with the Builds role (perigee when none has room),
   and only those paths come back, into the same folders. Without it a scheme with CI sends the build to CI and no APK arrives.
-  What goes there is the checkout as git sees it, plus a Capacitor project's synced web files and plugin packages; never a
-  release key.
+  What goes there is the checkout as git sees it, plus a Capacitor project's synced web files and plugin packages; of key files
+  only a tracked `debug.keystore`.
 - The APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
 - The Gradle daemon is off (`~/.gradle/gradle.properties`, copied into container homes). Don't pass
   `--daemon` or override it in the project's `gradle.properties`. After the build,
@@ -94,7 +94,9 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   `signingConfig`, so Gradle writes `app-release-unsigned.apk` and Citadel signs it with the key.
 - A hand release (a plain Gradle app, or a one-off):
   1. Bump `versionCode` (and `versionName`) in `app/build.gradle`.
-  2. `citadel-heavy --here --heavy ./gradlew assembleRelease` (`--here`: a hand release stays on perigee, beside its key).
+  2. `citadel-heavy --heavy --back app/build/outputs/apk/release --back app/build/intermediates/merged_manifests/release ./gradlew assembleRelease`
+     (Gradle writes it unsigned, so it may run elsewhere; the key stays here for step 3. An app whose Gradle signs with a key
+     adds `--here`).
   3. Sign with `apksigner` from `$ANDROID_HOME/build-tools/36.1.0/`, then verify:
      `apksigner sign --ks <jks> --ks-pass file:<pass> --out <app>.apk app-release-unsigned.apk`,
      then `apksigner verify <app>.apk`.

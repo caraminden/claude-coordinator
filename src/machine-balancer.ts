@@ -24,6 +24,8 @@ export interface HeavyJob {
   label: string;
   size: number;
   since: number;
+  /** A release build: it stands ahead of the jobs that asked before it. */
+  first?: boolean;
   /** It has started there and holds its size. */
   running?: true;
 }
@@ -69,7 +71,7 @@ export function balance(i: BalanceIn): Plan {
   const ciRoom = i.caps.ciThreads === null ? free : Math.min(free, i.caps.ciThreads);
   const ci = Math.max(0, Math.min(i.ciWaiting, Math.floor(ciRoom / COST.ci), i.caps.runners ?? Infinity));
   free -= ci * COST.ci;
-  const waiting = i.heavy.filter((h) => !h.running).sort((a, b) => a.since - b.since);
+  const waiting = i.heavy.filter((h) => !h.running).sort((a, b) => Number(!!b.first) - Number(!!a.first) || a.since - b.since);
   // The oldest one waiting keeps its size free of new turns (not one past its wait: that one starts anyway).
   const reserve = waiting.find((h) => i.now - h.since < HEAVY_WAIT_MS)?.size ?? 0;
   const turnRoom = i.caps.turnThreads === null ? free - reserve : Math.min(free - reserve, i.caps.turnThreads);
@@ -166,7 +168,7 @@ export class MachineBalancer {
    * A heavy job asks to start there: 'start' (it now holds its size until done()), 'late' (it waited HEAVY_WAIT_MS and
    * starts anyway), or 'wait' (it is held, and no new turn starts there meanwhile). Ask again each tick.
    */
-  ask(machineId: number, job: { key: string; label: string; size: number }): 'start' | 'late' | 'wait' {
+  ask(machineId: number, job: { key: string; label: string; size: number; first?: boolean }): 'start' | 'late' | 'wait' {
     const jobs = this.heavy.get(machineId) ?? new Map<string, HeavyJob>();
     this.heavy.set(machineId, jobs);
     const had = jobs.get(job.key);

@@ -104,15 +104,17 @@ export function capacitorExtras(top: string, dir: string): string[] {
 }
 
 /**
- * The working copy as it is (tracked and untracked files, .gitignore kept, no .env or key files), as heavy-ci.ts
- * snapshots it, plus `extras` (capacitorExtras), whose links are followed: a linked node_modules goes as its files.
+ * The working copy as it is (tracked and untracked files, .gitignore kept, no .env or key files but a tracked
+ * debug.keystore), plus `extras` (capacitorExtras), whose links are followed: a linked node_modules goes as its files.
  */
 export function snapshot(top: string, into: string, extras: string[] = []): string {
   const file = join(into, 'snapshot.tgz');
   const listed = execFileSync('git', ['-C', top, 'ls-files', '-z', '-co', '--exclude-standard', '--', ':/', ...SECRETS.map((g) => `:(top,exclude,glob)${g}`)], { encoding: 'utf8', maxBuffer: 256 << 20 });
   // A link on the way to an extra file (node_modules itself, where .gitignore names only the folder) isn't packed as a link.
   const parents = new Set(extras.flatMap((f) => f.split('/').map((_, i, p) => p.slice(0, i).join('/'))));
-  const list = listed.split('\0').filter((f) => f && !parents.has(f));
+  // The one key file that goes: a tracked debug.keystore, which is public by the android-app skill's rule and which debug builds sign with.
+  const debug = execFileSync('git', ['-C', top, 'ls-files', '-z', '--', ':(top,glob)**/debug.keystore'], { encoding: 'utf8' });
+  const list = `${listed}${debug}`.split('\0').filter((f) => f && !parents.has(f));
   const plain = extras.length ? join(into, 'snapshot.tar') : file;
   // A file deleted since it was added is in the list but not on disk: left out, not an error. --no-recursion: a
   // checked-out submodule is listed as its folder, and its own .env and keys must not ride along inside it.
@@ -285,7 +287,11 @@ export async function main(args: string[]): Promise<number> {
 }
 
 if (import.meta.main) {
-  main(process.argv.slice(2)).then((code) => {
-    process.exitCode = code;
-  });
+  const argv = process.argv.slice(2);
+  // `--pack <top> <into> <dir>`: how Citadel snapshots a release build's checkout off its own thread (src/apk-machine.ts).
+  if (argv[0] === '--pack') snapshot(argv[1], argv[2], capacitorExtras(argv[1], argv[3]));
+  else
+    main(argv).then((code) => {
+      process.exitCode = code;
+    });
 }

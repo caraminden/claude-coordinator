@@ -375,11 +375,10 @@ export class ApkBuilds {
       await step('cap sync android', ['npx', '--no-install', 'cap', 'sync', 'android'], join(src, cap.root));
       // The versionCode goes in through an init script, so the app's build.gradle needs no change and keeps its own number for hand builds.
       const gradlew = (init: string) => ['./gradlew', '--no-daemon', '--init-script', init, `-Pcitadel.versionCode=${code}`, 'assembleRelease'];
-      if (!(await this.elsewhere(row, src, cap.android, gradlew, log, dir))) {
-        // The time a machine was tried for isn't taken from perigee's own build.
-        deadline = Date.now() + BUILD_MS;
-        await step('gradlew assembleRelease', ['nice', '-n', '10', this.d.heavy, ...gradlew(VERSION_INIT)], join(src, cap.android));
-      }
+      const built = await this.elsewhere(row, src, cap.android, gradlew, log, dir);
+      // The time a machine took isn't taken from what perigee still does: its own build, or the signing.
+      deadline = Date.now() + BUILD_MS;
+      if (!built) await step('gradlew assembleRelease', ['nice', '-n', '10', this.d.heavy, ...gradlew(VERSION_INIT)], join(src, cap.android));
       if (!existsSync(unsigned)) throw new Error(`no ${unsigned.slice(src.length + 1)} after the build: its release build type must leave signing to Citadel`);
       await rm(signed, { force: true });
       await step('apksigner sign', [apksigner(this.d.home, env.ANDROID_HOME), 'sign', '--ks', key, '--ks-pass', `file:${pass}`, '--out', signed, unsigned], dir);

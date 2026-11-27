@@ -105,7 +105,7 @@ export function readerStatus(store: Store, snap: Snapshot, dataDir: string): () 
       commit: s().commit,
       cores: s().cores,
       ownScheme: () => snap.ownScheme,
-      ciSnapshot: (canSee) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee),
+      ciSnapshot: (canSee) => CiHealth.prototype.snapshot.call({ store, deps: { asleep: () => snap.status?.asleep ?? [] } } as unknown as CiHealth, canSee),
       desktops: () => s().desktops,
       storms: () => s().storms,
       easing: () => s().easing,
@@ -361,7 +361,7 @@ if (workerData?.reader) {
     // The Members page's: a member's repo invite, from the database.
     repoAccess: { view: (projectId: number, userId: number) => RepoAccess.prototype.view.call({ store } as unknown as RepoAccess, projectId, userId) },
     // The CI page's (/api/ci, /api/ci-desktop): CI health is in the database, the desktops' load in the Status snapshot.
-    ciHealth: { snapshot: (canSee: (id: number) => boolean) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee) },
+    ciHealth: { snapshot: (canSee: (id: number) => boolean) => CiHealth.prototype.snapshot.call({ store, deps: { asleep: () => snap.status?.asleep ?? [] } } as unknown as CiHealth, canSee) },
     ciLoad: {
       views: () => {
         if (!snap.status) throw new Error('No Status snapshot yet');

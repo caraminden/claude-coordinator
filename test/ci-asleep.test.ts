@@ -29,6 +29,8 @@ test('asleepRunners takes up to n offline runners named after the PC, Linux ones
     { name: 'DESKTOP-G248IJ8-linux-4', status: 'offline' },
     { name: 'DESKTOP-G248IJ8-2', status: 'offline' },
     { name: 'OTHER-PC-linux', status: 'offline' },
+    // A PC whose name only starts with this one's isn't this one.
+    { name: 'DESKTOP-G248IJ80-linux', status: 'offline' },
   ];
   assert.deepEqual([...asleepRunners(runners, [{ host: 'DESKTOP-G248IJ8', os: 'linux', n: 3 }])], ['DESKTOP-G248IJ8-linux-2', 'DESKTOP-G248IJ8-linux-3', 'DESKTOP-G248IJ8-linux-4']);
   // Only two asleep: the third offline one is offline for real.
@@ -45,5 +47,6 @@ test("the Runs on line doesn't say Fine while the scheme's runners on that PC ar
   assert.deepEqual(runsOnWord(pc, shot), ['danger', '3 runners offline']);
   assert.deepEqual(runsOnWord(pc, [shot[0], r('DESKTOP-G248IJ8-linux-2', 'offline', true), shot[2]]), ['danger', '1 runner offline'], 'asleep is not offline');
   assert.deepEqual(runsOnWord(pc, [shot[0], r('OTHER-PC', 'offline')]), ['ok', 'Fine'], "another PC's runner isn't this one's");
+  assert.deepEqual(runsOnWord(pc, [r('DESKTOP-G248IJ80-linux', 'offline')]), ['ok', 'Fine'], 'a PC named longer is another PC');
   assert.deepEqual(runsOnWord(pc, null), ['ok', 'Fine']);
 });

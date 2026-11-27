@@ -249,6 +249,6 @@ export function runsOnWord(pc, runners) {
   const word = pcWord(pc);
   if (word[0] === 'danger') return word;
   const host = pc.host.toLowerCase();
-  const off = (runners ?? []).filter((r) => r.status === 'offline' && !r.asleep && r.name.toLowerCase().startsWith(host)).length;
+  const off = (runners ?? []).filter((r) => r.status === 'offline' && !r.asleep && (r.name.toLowerCase() === host || r.name.toLowerCase().startsWith(`${host}-`))).length;
   return off ? ['danger', `${off} runner${off === 1 ? '' : 's'} offline`] : word;
 }

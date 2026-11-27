@@ -17,7 +17,7 @@ import type { SchemeReleases } from './releases.ts';
 import { thrown } from './thrown.ts';
 import type { Storm } from './memory-storms.ts';
 import type { EaseNow } from './memory-ease.ts';
-import type { PcView } from './ci-load.ts';
+import type { PcView, Slept } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
 import type { JobRow } from './every.ts';
 import type { CabalCard } from './cabal-cards.ts';
@@ -203,6 +203,8 @@ export interface StatusSnap {
   storms: Storm[];
   easing: EaseNow | null;
   desktops: PcView[];
+  /** #2239: the runners each PC's agent keeps asleep (src/ci-load.ts asleep), for the reader's /api/ci; absent from an older main. */
+  asleep?: Slept[];
   disk: Record<string, DiskUse | null>;
   units: UnitState[] | null;
   jobs: JobRow[];

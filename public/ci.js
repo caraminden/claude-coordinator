@@ -308,7 +308,13 @@ function runningBlock(s, now, ui) {
         { hue: { offline: 'danger', asleep: 'muted', busy: 'running', idle: 'done' }[word], lead: word, meta: since(j) },
         h('strong', { title: `${r.name}: ${r.labels.join(', ')}` }, r.name),
         ' ',
-        j ? jobCell(j) : h('span', { class: 'muted' }, word === 'asleep' ? 'stopped to make room for minion turns; wakes when work comes' : word === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : 'offline') : (r.job ?? (word === 'busy' ? 'a job from an older run' : 'waiting for work'))),
+        j
+          ? jobCell(j)
+          : h(
+              'span',
+              { class: 'muted', title: word === 'asleep' ? 'Its PC stopped it to make room for minion turns (Citadel balances the PC between them); it wakes when work comes' : null },
+              word === 'asleep' ? 'wakes when work comes' : word === 'offline' ? (r.offlineSince ? `since ${when(r.offlineSince)}` : 'offline') : (r.job ?? (word === 'busy' ? 'a job from an older run' : 'waiting for work')),
+            ),
       ),
     };
   });
@@ -903,7 +909,11 @@ export function releasesShell() {
       ? [
           h('div', { class: 'ci-list-head' }, 'Desktops'),
           ...pcs.map((x) => {
-            const [tone, word] = pcWord(x);
+            // #2239: every scheme's runners named after it, so the list can't say Fine while some are offline for real.
+            const [tone, word] = runsOnWord(
+              x,
+              (ciRead?.schemes ?? []).flatMap((c) => c.view.runners ?? []),
+            );
             return h(
               'button',
               {

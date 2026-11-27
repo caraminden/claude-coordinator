@@ -1,6 +1,7 @@
 // CI health (src/ci-health.ts, #368): the four rules on GitHub answers shaped like Peek Auras' real ones, and the
 // poller putting and clearing admins' Mandate alerts.
 import { withoutHeld } from '../src/ci-hold.ts';
+import type { Slept } from '../src/ci-load.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -434,6 +435,11 @@ test("#2239: runners a PC's agent keeps asleep read asleep on the CI page; the r
     ],
     "another repo's sleep doesn't cover this one's Windows runner",
   );
+  // A reader thread calls it on a bare { store } (src/reader.ts), with the asleep list from main's snapshot or none.
+  const asReader = (deps?: { asleep: () => Slept[] }) => CiHealth.prototype.snapshot.call(Object.assign(Object.create(CiHealth.prototype), { store: w.store, deps }), () => true).find((s) => s.id === w.peek.id)!;
+  assert.equal(asReader().view.runners!.filter((r) => r.asleep).length, 0, 'no deps: every offline runner reads offline');
+  const viaSnap = asReader({ asleep: () => [{ host: 'DESKTOP-G248IJ8', os: 'linux', repo: 'caraminden/peek-auras', n: 2 }] });
+  assert.equal(viaSnap.view.runners!.filter((r) => r.asleep).length, 2);
 });
 
 test('a quieted workflow whose last run on main failed keeps its verdict on the page, marked quiet, and makes no problem (TWIReader #990)', async () => {

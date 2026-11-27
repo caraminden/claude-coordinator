@@ -707,7 +707,8 @@ export class CiHealth {
   /** Every scheme with CI that `canSee` allows, with its last view and its open problems (the land gate's in the live checkout's scheme), for GET /api/ci. */
   snapshot(canSee: (projectId: number) => boolean) {
     const land = this.store.getSetting<LandWatch>(LAND_WATCH);
-    const slept = this.deps.asleep?.() ?? [];
+    // `deps` is absent where a reader thread calls this on a bare { store } (src/reader.ts).
+    const slept = this.deps?.asleep?.() ?? [];
     // A scheme whose repo has no workflows has no view, so isn't listed.
     return this.store.listProjects().flatMap((p) => {
       const view = repoSlug(p.repo_url) && canSee(p.id) ? this.store.getSetting<CiView>(`ci-health:view:${p.id}`) : undefined;

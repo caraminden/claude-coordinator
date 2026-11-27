@@ -135,7 +135,7 @@ export function asleepRunners(runners: readonly { name: string; status: string }
     let left = s.n;
     for (const r of [...runners].sort((a, b) => a.name.localeCompare(b.name))) {
       if (left <= 0) break;
-      if (r.status !== 'offline' || out.has(r.name) || !r.name.toLowerCase().startsWith(host) || linux.test(r.name) !== (s.os === 'linux')) continue;
+      if (r.status !== 'offline' || out.has(r.name) || !(r.name.toLowerCase() === host || r.name.toLowerCase().startsWith(`${host}-`)) || linux.test(r.name) !== (s.os === 'linux')) continue;
       out.add(r.name);
       left--;
     }

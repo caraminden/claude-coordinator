@@ -3094,7 +3094,18 @@ if (config.front) {
     previews: !!previews,
     status,
     ships: () => ({ queue: waits.queue, releases: releases.view(() => true) }),
-    statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, readerMs: () => answerProbe.readerMs, storms: () => memoryStorms.current(), easing: () => memoryEase.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
+    statusInputs: {
+      bootAt: BOOT_AT,
+      commit: BOOT_COMMIT ?? '',
+      probing: !BOOT_CHECK && !PREVIEW,
+      lastMs: () => answerProbe.lastMs,
+      readerMs: () => answerProbe.readerMs,
+      storms: () => memoryStorms.current(),
+      easing: () => memoryEase.current(),
+      desktops: () => ciLoad.views(),
+      asleep: () => ciLoad.asleep(),
+      diskUse: (row) => services.diskUse(row),
+    },
     ...(SETTLED_ROUTE && config.readerSweepMs ? { sweepMs: config.readerSweepMs } : {}),
   });
 } else if (onSocket) {

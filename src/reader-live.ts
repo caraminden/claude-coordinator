@@ -34,7 +34,18 @@ export type LiveDeps = {
   /** The Status page's in-memory inputs, as server.ts gives them to its StatusPage. */
   /** The ship lines' inputs (Ships in src/front.ts), for /api/ship-lines. */
   ships: () => Ships;
-  statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; readerMs: () => number | null; storms: () => StatusSnap['storms']; easing: () => StatusSnap['easing']; desktops: () => StatusSnap['desktops']; diskUse: (row: ContraptionRow) => DiskUse | null };
+  statusInputs: {
+    bootAt: number;
+    commit: string;
+    probing: boolean;
+    lastMs: () => number | null;
+    readerMs: () => number | null;
+    storms: () => StatusSnap['storms'];
+    easing: () => StatusSnap['easing'];
+    desktops: () => StatusSnap['desktops'];
+    asleep?: () => NonNullable<StatusSnap['asleep']>;
+    diskUse: (row: ContraptionRow) => DiskUse | null;
+  };
   sweepMs?: number;
   /** The old server's snapshot in a warm handover (its `dump`): readers answer from it until this one's own first pass. */
   handed?: string | null;
@@ -84,6 +95,7 @@ export function publishLive(d: LiveDeps) {
       storms: s.storms(),
       easing: s.easing(),
       desktops: s.desktops(),
+      asleep: s.asleep?.() ?? [],
       disk: Object.fromEntries(store.listContraptions().map((r) => [r.name, s.diskUse(r)])),
       units: units.rows,
       jobs: jobList(),

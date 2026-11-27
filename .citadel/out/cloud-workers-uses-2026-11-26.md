@@ -4,7 +4,228 @@ Research minion #2190, run as a Claude Code cloud session. Asked by Cara on 2026
 
 Research only: no code was changed. I read `src/cloud-pool.ts` and `src/cloud-turn.mjs` at `5a61844`, the official docs (cited below, all read 2026-11-27), and probed this VM myself (marked **[probed]**).
 
-## Top 3
+> **Read Part A first.** It was added after Cara's follow-ups that night: at 23:20 PST, "oh, this might be useless then, if we cant have the sessions operate remotely", and at 23:40 PST, "The goal needs to be to find any uses for the cloud sessions that can look IDENTICAL to a Citadel user to a local (or on our own machines) session". Cloud sessions are off until this is figured out. Part A re-ranks everything by that test. Part B, from "Top 3 (first pass)" on, is the first report, unchanged except for its labels.
+
+---
+
+# Part A: what looks identical to a local session (added 2026-11-27)
+
+**The test:** would a person in Citadel's chat see any difference at all? That means the same minion, the same live stream, cards mid-turn, steering and Stop, the shared folder and Citadel's tools.
+
+## A0. The answer in one paragraph
+
+**Family 1 wins, and it's buildable today with no network change.** The minion stays home with its chat, cards, tools and shared folder, and hands heavy or parallel *steps* to the cloud, the way it hands work to a Grunt or `citadel-heavy` now. People see the same minion. The only visible trace is a step that runs elsewhere, and it already looks like a tool call.
+
+**Family 2 (the minion itself in the cloud) can come close, but not through Tailscale.**
+- **Tailscale (a) doesn't work:** [probed] every packet out of the VM goes through Anthropic's egress gateway.
+- **What does work per the docs:** expose Citadel's tools as a **claude.ai custom connector** (a remote MCP server), which cloud sessions reach through Anthropic's servers. Add **HTTP hooks** that post the session's events to a narrow Citadel endpoint, authorised by a **network secret** the session never sees.
+- **What that gets:** tools, cards, the shared folder (as tools) and a near-live stream.
+- **What stays different:**
+  - Start-up latency.
+  - Steering lands only between turns, unconfirmed.
+  - Stop goes through a different path, unconfirmed.
+  - The stream is per line or per tool call, not per token, unconfirmed in a cloud VM.
+  - The box's admin has to put an endpoint on the public internet.
+
+## A1. Can a cloud session reach Citadel live?
+
+### What the VM's network actually is [probed, 2026-11-27, on this session's Default environment, Limited]
+
+- **No real egress outside the gateway.** `HTTPS_PROXY` is a local agent proxy. Raw TCP to any IP "connects", but the TLS certificate that comes back is issued by `O=Anthropic, CN=Egress Gateway SDS Issuing CA (production)`, for `1.1.1.1` and for example.com's IP alike. It's a transparent man-in-the-middle gateway.
+  - Plain HTTP to `1.1.1.1:80` got the gateway's `426 Upgrade Required`.
+- **UDP is answered by the gateway too.** UDP/53 to 1.1.1.1, 9.9.9.9 and OpenDNS all came back NXDOMAIN for example.com (rcode 3, no answers). Hosts that aren't allowed don't resolve at all: example.com, controlplane.tailscale.com, derp1.tailscale.com, pkgs.tailscale.com and stun.l.google.com. There is no raw UDP to the internet.
+- **Docs:** sessions run "behind an HTTP/HTTPS network proxy for security and abuse prevention purposes". Three levels: None, Limited (allowlist), Full ("Any domain"). https://code.claude.com/docs/en/cloud-environments (2026-11-27).
+- **Paths that skip the allowlist at any level:** GitHub, "MCP connectors you enable… because connector traffic travels through Anthropic's servers", the hosts of the environment's network secrets, and the Anthropic API. Same page.
+- `/dev/net/tun` exists and the session is root, so a TUN device isn't the blocker. The network is.
+
+### (a) The session joins our tailnet with a short-lived, locked-down key
+
+- **Does it work per the docs? No, and the probe says no.**
+  - WireGuard needs UDP. The gateway answers DNS itself and nothing else got out.
+  - Tailscale's fallback is DERP relays over HTTPS. Control and DERP both use an HTTP `Upgrade` to their own protocols over TLS. Through a TLS-intercepting gateway that returned `426 Upgrade Required` on a plain request, I expect that to fail.
+  - Tailscale's hosts would need adding under Limited, or Full. I didn't add them: that's an environment change for the owner to approve.
+- **What it would take to try:**
+  - Allow `controlplane.tailscale.com`, `login.tailscale.com`, `*.tailscale.com` (DERP) and `pkgs.tailscale.com`.
+  - Install with the setup script.
+  - Run `tailscaled --tun=userspace-networking` with `HTTPS_PROXY` set, and an ephemeral, tagged, pre-approved auth key.
+  - An ACL that lets `tag:cloud` reach only `perigee:<tool port>`.
+- **What it exposes:**
+  - The auth key can't be a network secret (those are only attached as HTTP headers by the proxy), so it sits in an env var or the brief. "Anyone who uses the environment can read the values", and so can a prompt-injected session.
+  - With an ephemeral, one-use key that expires in an hour and a one-port ACL, the blast radius is that port. That's still a tailnet node run by a VM you don't control.
+- **Who sets it up:** the tailnet's admin (the person who runs the box and its network, not Cara): the tag, the ACL and key minting (an OAuth client that mints a key per session). Cara or each person: the environment's hosts and setup script.
+- **Verdict:** don't build on it. Spend 20 minutes on a trial only if the admin wants to be sure. I'd bet on failure.
+
+### (b) A narrow Citadel endpoint on the public internet that only cloud sessions can call
+
+- **Does it work per the docs? Yes.**
+  - Add the endpoint's host (say `citadel-cloud.example.org`) to the environment's **Allowed domains**. Or just put a **network secret** on that host: secret hosts are reachable at any level.
+  - "Anthropic's agent proxy adds the key to requests for the hosts you list, after each request leaves the session's VM, so the key itself stays outside the VM." https://code.claude.com/docs/en/cloud-environments, "Add network secrets" (2026-11-27). Available on Pro, Max, Ultra, Team and Enterprise.
+  - The session `curl`s the endpoint with no token in hand, and the proxy adds `Authorization: Bearer …`.
+- **"Only cloud sessions can call it":**
+  - The bearer secret gives that in practice. The session can't read it, and nobody else has it.
+  - For an IP lock as well: Anthropic publishes outbound ranges, `160.79.104.0/21` and `153.61.208.0/20`, "for outbound requests (for example, when making MCP tool calls to external servers)". https://platform.claude.com/docs/en/api/ip-addresses (2026-11-27).
+  - **Unconfirmed:** whether cloud-session VM traffic leaves from those ranges. The page names MCP calls, not session egress.
+- **What it would take:**
+  - A reverse proxy (TLS, a real hostname) in front of a small Citadel route set:
+    - `POST /cloud/events` (a turn's stream)
+    - `POST /cloud/card` (ask a question)
+    - `GET /cloud/answer/<id>` (long-poll for the answer)
+    - `GET/PUT /cloud/shared/<path>` (the shared folder, scoped to the minion)
+    - a tool call proxy for the few Citadel tools a minion uses
+  - A per-minion token: see the exposure below.
+- **What it exposes:**
+  - An internet-facing Citadel endpoint: TLS, auth, rate limits, logs.
+  - A network secret is environment-wide: "The secret applies in every session that runs in the environment". So one secret covers every cloud session on that person's environment, and Citadel can't tell minion A from minion B by the secret alone.
+  - The fix is two-part: the secret gets you in the door, and a per-minion capability token in the brief scopes what you may touch. A leaked brief token reaches one minion's endpoints, and only through the proxy, because it doesn't work without the secret.
+  - The shared folder through it is the biggest exposure. Scope it to the minion's scheme, read-mostly.
+- **Who sets it up:**
+  - The box's admin: the DNS name, the reverse proxy, the port and firewall (optionally the IP ranges above), and the Citadel routes deployed.
+  - Each person: the network secret on their own environment. The request form is a single host and token, and Citadel can show the value once for them to paste.
+
+### (c) Citadel as a claude.ai custom connector (remote MCP server)
+
+This is a third shape the docs point to, and the one I'd pick for tools.
+
+- **Does it work per the docs? Yes, for tools.**
+  - Connectors added at claude.ai/customize/connectors "are automatically available in Claude Code", and connector traffic "travels through Anthropic's servers rather than the session's network". https://code.claude.com/docs/en/mcp, "Use MCP servers from claude.ai"; https://code.claude.com/docs/en/cloud-environments (2026-11-27).
+  - It works at network level None.
+  - Long tool calls can be **MCP tasks** in cloud sessions: "MCP tasks work in the cloud with claude.ai connectors that support them on protocol revision 2026-07-28". That's how a mid-turn card can wait for its answer without hitting the 5-minute idle timeout on connector calls. https://code.claude.com/docs/en/mcp, "MCP tasks in cloud sessions" (2026-11-27).
+- **What it would take:**
+  - Citadel's MCP server (`src/mcp.ts`, today per-turn and local) served as a remote Streamable-HTTP MCP server with OAuth, so each person authorises the connector as themselves and Citadel's access rules apply unchanged.
+  - Then `ask_question` becomes a task that resolves when the card is answered.
+  - The Citadel tools a minion calls work as they do now.
+  - The shared folder becomes tool calls (read, list, write) instead of file paths.
+- **What it exposes:**
+  - The same public endpoint as (b), but OAuth-authenticated and reachable from Anthropic's published outbound ranges, which are documented for MCP calls. So it can be firewalled to those ranges.
+  - Each person's connector reaches what they can reach in Citadel.
+  - A prompt-injected cloud session could call any tool that person could, the same as a local minion today.
+- **Who sets it up:**
+  - The box's admin: the public HTTPS endpoint.
+  - A Citadel build: the remote MCP server with OAuth.
+  - Each person: adds the connector once. On Team and Enterprise plans "only admins can add servers".
+- **Its limit:** a connector gives tools. It doesn't give a live stream or steering. Those come from (b)'s hooks and `claude -p --cloud`.
+
+## A2. Family 1: the minion stays home and the cloud is its backend
+
+They're ranked. Each one **passes the test** unless it says otherwise. The common building block is **S0**.
+
+**S0. `cloud-turn.mjs` as a step, not a turn.**
+- Today the cloud *is* the turn, so chat, cards and the stream break.
+- Turn the same start, poll and read-back code into a command a home minion runs, like `citadel-job` or a Grunt: `citadel-cloud run --brief <file> --branch …`. It prints progress lines while it waits and returns the result JSON as its output.
+- The minion's chat, cards, steering and Stop stay exactly as they are.
+- If the cloud fails, refuses or times out, it falls back to doing the step at home, so the person never sees a failure mode that's new to them.
+- It runs on the minion's own person's login (sender pays, as now).
+- **Size:** M. Most of the code exists (`cloudTurn`, `fetchResult`, `teleport`).
+
+Ranked uses on top of S0, plus one that doesn't need a model at all:
+
+1. **Model-free heavy jobs on GitHub-hosted runners behind `citadel-heavy`** (Part B idea 2).
+   - Passes: the minion sees `citadel-heavy` take a little longer or shorter, and that's all.
+   - It's not even a cloud session, and costs no plan usage.
+   - Frees up to 17.8 + 19.3 + 5.9 h a week.
+   - Size M. Blocked only by Actions minutes (unknown) and schemes not on GitHub.
+2. **Long steps in the cloud with a model in the loop**, for when a step needs judgement while it runs (a flaky-test investigation, a long build that needs fixing midway).
+   - Passes through S0.
+   - Use the 2-hour background limit (Part B idea 1).
+   - Size S on top of S0.
+3. **Fan-out review for high-risk ships** (Part B idea 8).
+   - The home minion's self-review sends 2–3 reviewer briefs through S0, waits, and merges the findings into its own review.
+   - Passes: it reads as a longer self-review step.
+   - Size S on top of S0.
+4. **Speculative fixes, two or three drafts at once** (Part B idea 5).
+   - The home minion starts 2–3 drafts through S0, runs their tests at home, and keeps one.
+   - Passes: the person sees one minion that tried things and picked one.
+   - Size S–M.
+5. **Research fan-out from a home research minion.**
+   - The minion splits its question into 3–5 parts, sends them through S0, and merges.
+   - It keeps cards, the shared folder and Citadel's tools for itself.
+   - Passes. It's the honest replacement for the cloud research first turn that Cara turned off.
+   - Size S.
+6. **Mutation, fuzz and bisect runs**, sliced and sent to runners (idea 1) or through S0 (Part B ideas 7, 18, 21).
+   - Passes: they're jobs, like now.
+   - Size S–M.
+7. **Sharded prompt-eval and review-escapes benches** (Part B idea 9).
+   - Passes: the asker sees the same report sooner.
+   - Size S–M.
+8. **Pre-drafted next minion** (Part B idea 12).
+   - Passes: nothing is visible until go, then the minion starts from a branch.
+   - Size M.
+9. **Nightly audits and dependency upgrades** (Part B ideas 10, 11), run as backends of a home schedule.
+   - The schedule's run stays home and files its results with Citadel's tools.
+   - Passes. That's the fix for "a schedule's start stays home".
+   - Size M.
+10. **UI shots and other schemes' Linux builds** (Part B ideas 13, 23) through S0 or runners.
+    - Passes.
+    - Size S per scheme.
+
+These **pass for chat, but not for everyone**:
+- **Plan usage:** fan-out spends the person's own limits faster (F3). Use the same consent and ordering as Part B idea 14.
+
+These **fail the test** as originally framed:
+- The shipped cloud first turn for research, ideation and sweeps, and the cloud code drafts *as a minion's turn*. Rebuilt on S0 they pass.
+
+## A3. Family 2: the minion runs in the cloud and still looks identical
+
+What "identical" needs, item by item, using shapes (b) and (c):
+
+| Need | How | Per docs? | Passes? |
+|---|---|---|---|
+| Citadel's tools | (c) connector | Yes | Yes |
+| Mid-turn cards | (c) `ask_question` as an MCP task that resolves on answer | Yes (MCP tasks in cloud) | Likely. Unconfirmed until built. |
+| Shared folder | (c) file tools, or (b) `/cloud/shared` | Yes | For the person, yes. The agent uses tools, not paths, so prompts differ. |
+| Live stream | (b) **HTTP hooks** in the scheme repo's `.claude/settings.json`: `PreToolUse`, `PostToolUse`, `Stop`, and **`MessageDisplay`** ("Runs while an assistant message streams… the new text in `delta`") POST to `/cloud/events` | Hook types yes (https://code.claude.com/docs/en/hooks, 2026-11-27). Repo hooks run in cloud sessions, but "a session with several repositories doesn't load hooks from any repository" | Nearly. Per line, not per token. **Unconfirmed** that `MessageDisplay` fires in a cloud VM with no local screen. |
+| Steering mid-turn | `claude -p "<msg>" --cloud <id>` "queues the message" | Yes, as a queue | **Unconfirmed** whether it lands mid-turn or only at the turn's end. Today's local steer lands mid-turn. |
+| Stop | No documented CLI stop for a cloud session. The cloud-only tools have an `interrupt_session` | Not from home | **Fails** today. A `PreToolUse` HTTP hook could poll a stop flag and block every next tool, which is close. |
+| Pictures and files in the first message | Upload through (b) or the connector | Buildable | Yes once built |
+| Start latency | Cold start ~1 min (55 s onboarding in #2147), less with a cached setup (Part B idea 3) or a routine fire (Part B idea 4) | n/a | **Visible**: the first reply is about a minute later |
+
+**Verdict:** family 2 nearly passes, at size **L**: a remote MCP server with OAuth, a public endpoint, the hook set committed to *every* scheme's repo (an every-scheme change), a stop hook and a per-minion token scheme. On top of that, the admin has to put Citadel on the public internet.
+
+What it buys over family 1: the minion's *own* turns stop using a perigee worker (~250 MB and a slot each). Family 1 already moves the heavy part, which is where perigee's load is (65.5 heavy run-hours). So family 2 is worth it only if the worker count itself becomes the limit.
+
+## A4. Part B's ideas against the test
+
+| Part B idea | Passes as built on S0 or runners? |
+|---|---|
+| 1 Step limit to ~110 min | Yes (it's a S0 setting) |
+| 2 GitHub-hosted runners | Yes, no cloud session at all |
+| 3 Per-login environment and setup | Yes (makes S0 faster). Android through S0 passes too |
+| 4 Routine `/fire` start | Yes (makes S0 robust) |
+| 5 Speculative drafts | Yes |
+| 6 Batching short jobs | Yes, but adds a wait for short checks the person may notice. Keep batches short. |
+| 7 Mutation | Yes |
+| 8 Fan-out review | Yes |
+| 9 Sharded benches | Yes |
+| 10 Nightly audits | Yes, as backends of a home schedule |
+| 11 Dependency upgrades | Yes, same |
+| 12 Pre-drafting | Yes |
+| 13 Other schemes' builds | Yes |
+| 14 Concurrency-aware line | Yes (invisible) |
+| 15 Route by duration | Yes (invisible) |
+| 16 Dispatcher cloud session | Yes, behind S0 |
+| 17 Desktop as self-hosted environment | Yes. Runs on our own machine, so it reaches Citadel natively and passes family 2's test with no public endpoint. It doesn't add compute, though. |
+| 18 Bisect | Yes |
+| 19 Stress and flake hunting | Yes |
+| 20 Deterministic benchmarks | Yes |
+| 21 Property and fuzz | Yes |
+| 22 Docs drafts | Yes through S0. **No** as a cloud minion of its own |
+| 23 UI shots | Yes |
+| 24 Managed Agents | Yes behind S0. It has a real read API too |
+
+## A5. What I couldn't confirm for Part A
+
+- **Tailscale over DERP/HTTPS through the gateway.** I didn't allow Tailscale's hosts, which would be an environment change for the owner to approve. My expectation is failure (the `426`), but it's untested.
+- **Whether session VM egress leaves from Anthropic's published outbound IP ranges.** They're documented for MCP calls only.
+- **Whether `MessageDisplay` and HTTP hooks fire in a cloud session**, and whether a hook's POST goes through the agent proxy with the network secret attached. I had no allowed endpoint of ours to test against.
+- **Whether `claude -p --cloud <id>` lands a message mid-turn**, and whether there's any supported stop from home.
+- **Whether a claude.ai connector's MCP task can wait hours for a card's answer** in a cloud session before the session counts as idle and is reclaimed. The docs say a session waiting on connector *approval* counts as inactive.
+- **The real cost and latency of S0 steps.** I couldn't run a child session from here without spending the person's usage unasked.
+
+---
+
+# Part B: the first report
+
+## Top 3 (first pass)
 
 1. **Stop capping steps at 25 minutes.**
    - The docs say a background command may run up to **2 hours** when given a `timeout`. 30 minutes is only the default.
@@ -21,7 +242,7 @@ The full ranked list is below. Each idea has what it frees, what it costs, what 
 
 ---
 
-## 0. Facts that change the picture
+## B0. Facts that change the picture
 
 These are from the docs (read 2026-11-27) or from probing this VM.
 
@@ -46,7 +267,7 @@ Session cost below uses the brief's figure, about $0.50 per 20 min of running (~
 
 ---
 
-## 1. Ranked ideas
+## B1. Ranked ideas
 
 Columns: **Frees** is perigee or desktop time, wait or latency. **Costs** is plan usage, latency and risk. **Blocks** is what stops it today. **Size**: S, M or L.
 
@@ -335,7 +556,7 @@ Columns: **Frees** is perigee or desktop time, wait or latency. **Costs** is pla
 
 ---
 
-## 2. Extending what's shipped or being built
+## B2. Extending what's shipped or being built (not new ideas)
 
 These aren't new ideas.
 
@@ -348,7 +569,7 @@ These aren't new ideas.
 - **Cloud flake runs:** give them idea 19's stress mode, and put the nightly sweep on a routine (idea 10/4) rather than a home schedule.
 - **Test sweeps:** once idea 1 lands, the sweep kind's 25 min refusal should read about 110 min.
 
-## 3. Problems I noticed in the shipped code
+## B3. Problems I noticed in the shipped code (for #2153's owner; no change made)
 
 These are for whoever owns #2153. I made no code change.
 
@@ -358,7 +579,7 @@ These are for whoever owns #2153. I made no code change.
 3. **`--environment` isn't usable for `env_` ids (F6):** any plan to pick environments per scheme through the CLI won't work. Use a routine (idea 4) or a dispatcher (idea 16).
 4. **The cost estimate is wall-clock-shaped (`costUsd.start` 0.40):** real cost is tokens (F3). For long compute steps it overstates. For chatty research it may understate. Measure a few sessions against the plan's usage page.
 
-## 4. What I couldn't check from inside this session
+## B4. What I couldn't check from inside this session
 
 - **The real concurrency cap** per login or plan. It isn't documented. I didn't start child sessions to find it (cost and consent).
 - **Whether a long background command keeps the VM from pausing** (F9 says "activity"). I didn't run a 60+ min command: it needs a real try before idea 1 ships.
@@ -386,4 +607,8 @@ These are for whoever owns #2153. I made no code change.
 - https://code.claude.com/docs/en/remote-control
 - https://code.claude.com/docs/en/scheduled-tasks
 - https://platform.claude.com/docs/en/managed-agents/overview
+- https://code.claude.com/docs/en/hooks (HTTP hooks, MessageDisplay)
+- https://code.claude.com/docs/en/mcp (claude.ai connectors, MCP tasks in the cloud)
+- https://code.claude.com/docs/en/channels
+- https://platform.claude.com/docs/en/api/ip-addresses (outbound IP ranges)
 - https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-max-or-ultra-plan

@@ -4,7 +4,8 @@
 # root, 4 vCPU, Node 22, no tailnet), never on perigee. Each `run` appends one JSON line to .citadel/out/flake.jsonl, and
 # `finish` commits that file with .citadel/result.json and pushes it to the branch the tool watches (src/cloud-turn.mjs reads it).
 #
-#   tools/cloud-flake-vm.sh setup <node major>         Node of that major (into /opt), devDependencies, git identity, sqlite3
+#   tools/cloud-flake-vm.sh setup <node major>         Node of that major (into /opt), devDependencies, git identity, sqlite3,
+#                                                      the browser tests' headless Chromium
 #   tools/cloud-flake-vm.sh run <test file> <copies>   one batch: <copies> at once under load (tools/flake-proof.sh), at most
 #                                                      CLOUD_FLAKE_STEP (1440) s, then its verdict
 #   tools/cloud-flake-vm.sh finish <result branch>     commit and push the results
@@ -34,7 +35,21 @@ case ${1:-} in
     git config --global user.name >/dev/null || git config --global user.name 'Citadel cloud flake run'
     git config --global user.email >/dev/null || git config --global user.email 'cloud-flake@citadel.invalid'
     command -v sqlite3 >/dev/null || { apt-get install -y -qq sqlite3 >/dev/null 2>&1 || (apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq sqlite3 >/dev/null 2>&1) || echo 'cloud-flake-vm: no sqlite3 (tests that need it will skip or fail)'; }
-    echo "cloud-flake-vm: set up in $((SECONDS - t0)) s: node $(node -v), $(nproc) CPUs, at $(git rev-parse HEAD)"
+    # The browser tests' headless Chromium, the build tests.yml installs (its version read from there, so the two stay one).
+    chs=$(sed -n 's|.*v=\([0-9.]*\) dir=\$HOME/\(\.cache/ms-playwright/chromium_headless_shell-[0-9]*\)$|\1 \2|p' .github/workflows/tests.yml | head -1)
+    v=${chs% *} dir=$HOME/${chs#* }
+    if [ -n "$chs" ] && [ ! -x "$dir/chrome-headless-shell-linux64/chrome-headless-shell" ]; then
+      zip=$(mktemp) && mkdir -p "$dir" &&
+        curl -fsSL -o "$zip" "https://storage.googleapis.com/chrome-for-testing-public/$v/linux64/chrome-headless-shell-linux64.zip" &&
+        python3 -m zipfile -e "$zip" "$dir" && chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell" || echo 'cloud-flake-vm: no headless Chromium (browser tests will skip)'
+      rm -f "$zip"
+      # Its shared libraries, best effort: a name this Ubuntu lacks only costs that library.
+      apt-get update -qq >/dev/null 2>&1
+      for lib in libnss3 libnspr4 libgbm1 libxkbcommon0 libatk-bridge2.0-0 libatk1.0-0 libcups2 libxcomposite1 libxdamage1 libxrandr2 libxfixes3 libpango-1.0-0 libcairo2 libasound2t64 libdrm2 fonts-liberation; do
+        dpkg -s "$lib" >/dev/null 2>&1 || apt-get install -y -qq "$lib" >/dev/null 2>&1 || echo "cloud-flake-vm: no $lib"
+      done
+    fi
+    echo "cloud-flake-vm: set up in $((SECONDS - t0)) s: node $(node -v), $(nproc) CPUs, $("$dir/chrome-headless-shell-linux64/chrome-headless-shell" --version 2>/dev/null || echo 'no Chromium'), at $(git rev-parse HEAD)"
     ;;
   run)
     file=${2:?usage: cloud-flake-vm.sh run <test file> <copies>}

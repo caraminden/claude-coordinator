@@ -116,9 +116,13 @@ test("the GitHub owner defaults to the owner of Citadel's origin and can be set"
   })();
   const r = await s.call('/api/app/settings');
   assert.equal(r.status, 200);
-  assert.deepEqual(r.data, { github_owner: null, github_owner_default: repoSlug(origin)?.split('/')[0] ?? null });
+  assert.deepEqual(r.data, { github_owner: null, github_owner_default: repoSlug(origin)?.split('/')[0] ?? null, cloud_sessions: false });
   assert.equal((await s.call('/api/app/settings', { github_owner: 'not a name' }, 'PUT')).status, 400);
   assert.equal((await s.call('/api/app/settings', { github_owner: 'test-owner' }, 'PUT')).data.github_owner, 'test-owner');
+  // The cloud sessions switch (#2193): off by default, a boolean only, and kept.
+  assert.equal((await s.call('/api/app/settings', { cloud_sessions: 'yes' }, 'PUT')).status, 400);
+  assert.equal((await s.call('/api/app/settings', { cloud_sessions: true }, 'PUT')).data.cloud_sessions, true);
+  assert.equal((await s.call('/api/app/settings', { cloud_sessions: false }, 'PUT')).data.cloud_sessions, false);
 });
 
 test('none, and no source with no URL: no repo, plain folders for minions', async () => {

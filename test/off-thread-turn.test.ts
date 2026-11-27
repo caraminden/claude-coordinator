@@ -3,16 +3,21 @@
 // test/off-thread-fs.test.ts's, kept here so the turn's own cases don't share a file three other minions edit.
 import assert from 'node:assert/strict';
 import childProcess, { execFileSync } from 'node:child_process';
-import fs, { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
+import { ClaudeLink } from '../src/claude-link.ts';
+import { Containers, type RunCmd } from '../src/containers.ts';
+import { ContraptionTurns, parseTurn, type ClaudePlaces } from '../src/contraption-turns.ts';
+import { Contraptions } from '../src/contraptions.ts';
+import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { fillPinSpares } from '../src/pin-spares.ts';
 import { Runner } from '../src/runner.ts';
-import { transcriptPath } from '../src/sessions.ts';
+import { projectSlug, transcriptPath } from '../src/sessions.ts';
 import { followed, releaseFake, runnerInsides, stopTurns, testPins, until } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'off-thread-turn-'));
@@ -136,5 +141,96 @@ test("a minion's turn starts, takes a message and ends with no blocking disk cal
   assert.deepEqual(
     ended.filter((c) => !/\/release(\.tmp)?$/.test(c)),
     [],
+  );
+});
+
+test("an app's turn starts and ends with no blocking disk call or process start on the server's thread", async () => {
+  const data = join(root, 'app');
+  mkdirSync(data);
+  const store = new Store(join(data, 'db.sqlite'));
+  const scheme = store.createProject('Home', null);
+  const c = new Contraptions(store, 's'.repeat(40), join(data, 'keys')).register({ name: 'mandate', title: 'Mandate', port: 9101, icon: null, home_scheme: scheme.id, open_paths: '[]', default_model: null, turn_cap: null });
+  const person = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
+  store.setContraptionUser(c.id, person.id, true, person.id);
+  // claude: notes what it resumed, writes its transcript where claude keeps it, and replies.
+  const log = join(data, 'claude.log');
+  const fake = join(data, 'claude-fake');
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
+const fs = require('node:fs'), path = require('node:path');
+const argv = process.argv.slice(2), opt = (n) => argv[argv.indexOf(n) + 1];
+process.stdin.once('data', () => {
+  const session = argv.includes('--resume') ? opt('--resume') : opt('--session-id');
+  fs.appendFileSync(${JSON.stringify(log)}, (argv.includes('--resume') ? 'resume ' : 'new ') + session + '\\n');
+  const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, session + '.jsonl'), '{}\\n');
+  const out = (o) => console.log(JSON.stringify(o));
+  out({ type: 'system', subtype: 'init', session_id: session, tools: [] });
+  out({ type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: 'Done.' }] } });
+  out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: 'Done.', usage: {} });
+  process.exit(0);
+});
+`,
+  );
+  chmodSync(fake, 0o755);
+  // Two accounts: the session's newest transcript is on the other one, so the start carries it over before resuming.
+  const [mine, other] = [join(data, 'claude'), join(data, 'claude2')];
+  const places: ClaudePlaces = { place: () => ({ host: true }), codexPlace: () => null, expire: () => {}, configDirs: () => [mine, other], limitedView: () => null };
+  const turns = new ContraptionTurns(store, new Contraptions(store, 's'.repeat(40), join(data, 'keys')), places, { dataDir: data, claudeBin: fake, env: { PATH: process.env.PATH, HOME: data, CLAUDE_CONFIG_DIR: mine } });
+  const session = '11111111-2222-4333-8444-555555555555';
+  store.putContraptionSession(c.id, person.id, 'chat', session);
+  const cwd = join(data, 'contraption-scratch', 'mandate', String(person.id));
+  await mkdir(join(other, 'projects', projectSlug(cwd)), { recursive: true });
+  await writeFile(join(other, 'projects', projectSlug(cwd), `${session}.jsonl`), '{"prompt":"before"}\n');
+  const events: string[] = [];
+  const calls = await syncCallsUnder(data, () => turns.run(c, parseTurn({ person: person.id, session: 'chat', prompt: 'Hello', keep: true, mcp: [] }, c), (event) => events.push(event)));
+  assert.deepEqual(calls, []);
+  // The turn did its work: it resumed the carried-over session, ended well, kept itself for replays, and left no turn folder.
+  assert.deepEqual(
+    events.filter((e) => e === 'start' || e === 'end' || e === 'error'),
+    ['start', 'end'],
+  );
+  assert.equal(readFileSync(log, 'utf8'), `resume ${session}\n`);
+  assert.match(readFileSync(join(mine, 'projects', projectSlug(cwd), `${session}.jsonl`), 'utf8'), /before[^]*\{\}/);
+  const kept = join(data, 'projects', String(scheme.id), 'shared', 'project', '.replay', 'mandate');
+  assert.equal(fs.readdirSync(kept).length, 1);
+  assert.deepEqual(fs.readdirSync(join(data, 'run', 'contraption-turns')), []);
+});
+
+test("a container minion turn's start (its container's spec, folders and Gradle files) makes no blocking disk call on the server's thread", async () => {
+  const data = join(root, 'container');
+  mkdirSync(data);
+  process.env.CLAUDE_CONFIG_DIR = join(data, 'host-claude');
+  const store = new Store(join(data, 'db.sqlite'));
+  store.setProjectRepoDir(store.createProject('Turns', null).id, join(data, 'repo'));
+  const person = store.createUser({ name: 'Josh', login: 'josh', admin: true });
+  // The host's home: a tool folder to mount and Gradle's defaults to copy into the person's volume.
+  const home = join(data, 'home');
+  await mkdir(join(home, '.cargo', 'bin'), { recursive: true });
+  await mkdir(join(home, '.gradle'), { recursive: true });
+  await writeFile(join(home, '.gradle', 'gradle.properties'), 'org.gradle.daemon=false\n');
+  const vol = join(data, 'vol');
+  const ran: string[] = [];
+  const run: RunCmd = async (cmd, args) => {
+    ran.push([cmd, ...args].join(' '));
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: `${vol}\n`, stderr: '' };
+    // Running from an older spec: the start replaces it, then sees it running.
+    if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: 'true old\n', stderr: '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const claude = join(data, 'bin', 'claude');
+  await mkdir(dirname(claude), { recursive: true });
+  await writeFile(claude, '');
+  const link = Object.assign(new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), data, claude, new Containers(run), 'citadel-claude-t-'), { home });
+  const calls = await syncCallsUnder(data, () => link.ensure(person.id, true));
+  assert.deepEqual(calls, []);
+  // The start did its work: the person's volume has Gradle's defaults and the build cache's init script, and the container started.
+  assert.equal(readFileSync(join(vol, '.gradle', 'gradle.properties'), 'utf8'), 'org.gradle.daemon=false\n');
+  assert.ok(fs.readdirSync(join(vol, '.gradle', 'init.d')).length);
+  assert.ok(
+    ran.some((r) => r.includes(join(home, '.cargo', 'bin'))),
+    "the host's tool folder is mounted",
   );
 });

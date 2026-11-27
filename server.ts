@@ -166,8 +166,8 @@ import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { MainRollbacks, ROLLBACK_EVERY_MS } from './src/main-rollback.ts';
-import { Builds } from './src/builds.ts';
-import { CabalCards } from './src/cabal-cards.ts';
+import { type BuildSummary, Builds } from './src/builds.ts';
+import { type CabalCard, CabalCards } from './src/cabal-cards.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
@@ -1398,10 +1398,16 @@ const artifacts = new ArtifactScanner(store, DATA_DIR, broadcast);
 const sharedDir = artifacts.sharedDir;
 const ships = new ShipStatus({ store, runner, broadcast, liveHead: () => waiters.head, checkoutDir: import.meta.dirname });
 const ticketBranch = ships.branch;
+// A changed build or cabal list goes to the readers before the stream (#2181): a page load a reader answered before its
+// sweep caught up came back with the older list, and the page kept it until the list next changed.
+const listChanged = (msg: { type: 'builds'; projectId: number; builds: BuildSummary[] } | { type: 'cabals'; projectId: number; cabals: CabalCard[] }) => {
+  throughFront?.publish(msg.type === 'builds' ? { builds: { [msg.projectId]: msg.builds } } : { cabals: { [msg.projectId]: msg.cabals } });
+  broadcast(msg);
+};
 // Each build branch's header in the minions list (src/builds.ts): feeders folded in and open, commits behind main.
-const builds = new Builds({ store, broadcast });
+const builds = new Builds({ store, broadcast: listChanged });
 // Each open cabal's card in the minions list (src/cabal-cards.ts), polled with the build headers.
-const cabals = new CabalCards({ store, broadcast, parked: (t) => runner.parked(t) });
+const cabals = new CabalCards({ store, broadcast: listChanged, parked: (t) => runner.parked(t) });
 runner.ship = ships.ship;
 
 // What each minion waits on (#544): the land line in this checkout's git dir (tools/deploy-queue.sh), the heavy slots.

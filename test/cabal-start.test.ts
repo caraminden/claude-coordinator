@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, type Booted, fakeClaude, tempRoot, until } from './helpers.ts';
+import { agentToken, bootServer, type Booted, fakeClaude, holds, tempRoot, until } from './helpers.ts';
 import { whenText } from '../src/cabal-start.ts';
 import { json } from './typed.ts';
 
@@ -260,4 +260,22 @@ test("a row's start reads in words: now, after another piece by its title (label
   assert.equal(whenText({ after: 'VM piece' }, all), 'after A VM is a capability');
   assert.equal(whenText({ after: 'H1, #2179' }, all), 'after Owners piece, once #2179 is live');
   assert.equal(whenText({ after: '2179' }, all), 'once #2179 is live');
+});
+
+test('a page load never answers with an older cabal list than the stream sent: the readers have it the moment main does (#2181)', async () => {
+  const q = (await s.call('/api/projects', { name: 'Flip' })).data;
+  const chief = (await s.call(`/api/projects/${q.id}/tickets`, { title: 'Flip lead', message: 'Lead.', build: 10 })).data;
+  type Card = { lead: number; members: unknown[] };
+  const cards = async () => ((await s.call(`/api/projects/${q.id}?tickets=open`)).data.cabals ?? []) as Card[];
+  // Each write: once a page load has the change, every later one keeps it (the readers' sweep came 3 s behind, #2181).
+  for (const [n, body] of [
+    [0, { action: 'log', text: 'Laying out the roster' }],
+    [1, { action: 'row', label: 'A', title: 'Do a' }],
+    [2, { action: 'row', label: 'B', title: 'Do b' }],
+  ] as const) {
+    assert.equal((await board(chief.id, body)).status, 200);
+    const has = async () => (await cards()).some((c) => c.lead === chief.id && c.members.length === n);
+    await until(`a page load has the card with ${n} rows`, has);
+    await holds(`every page load keeps the card with ${n} rows`, has, { ms: 4000 });
+  }
 });

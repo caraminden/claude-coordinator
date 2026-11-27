@@ -67,9 +67,9 @@ export async function buildSummaries(store: Store, projectId: number): Promise<B
 export class Builds {
   private cache = new Map<number, { list: BuildSummary[]; json: string }>();
   private running = new Map<number, Promise<void>>();
-  private d: { store: Store; broadcast: (msg: object) => void };
+  private d: { store: Store; broadcast: (msg: { type: 'builds'; projectId: number; builds: BuildSummary[] }) => void };
 
-  constructor(d: { store: Store; broadcast: (msg: object) => void }) {
+  constructor(d: { store: Store; broadcast: (msg: { type: 'builds'; projectId: number; builds: BuildSummary[] }) => void }) {
     this.d = d;
   }
 

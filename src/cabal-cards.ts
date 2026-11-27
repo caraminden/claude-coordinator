@@ -80,9 +80,9 @@ export class CabalCards {
   private cache = new Map<number, { list: CabalCard[]; json: string }>();
   private running = new Map<number, Promise<void>>();
   private again = new Set<number>();
-  private d: { store: Store; broadcast: (msg: object) => void; parked: BoardDeps['parked'] };
+  private d: { store: Store; broadcast: (msg: { type: 'cabals'; projectId: number; cabals: CabalCard[] }) => void; parked: BoardDeps['parked'] };
 
-  constructor(d: { store: Store; broadcast: (msg: object) => void; parked: BoardDeps['parked'] }) {
+  constructor(d: { store: Store; broadcast: (msg: { type: 'cabals'; projectId: number; cabals: CabalCard[] }) => void; parked: BoardDeps['parked'] }) {
     this.d = d;
   }
 

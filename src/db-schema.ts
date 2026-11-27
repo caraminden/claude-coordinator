@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS machine_projects (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   PRIMARY KEY (machine_id, project_id)
 );
--- A machine's roles (Build 7 M1, src/machine-roles.ts): tools, screen, ci, turns, gpu; each switched on or off, with the owner's caps
+-- A machine's roles (Build 7 M1, src/machine-roles.ts): tools, screen, ci, turns, gpu, builds; each switched on or off, with the owner's caps
 -- (JSON; the Tools role's ticks too) and its setup's state (JSON: state, report, at). The truth since Build 7 M1 (#2052): machines.lend
 -- and machine_projects are written from these for one build, for a rollback, and read by nothing else.
 CREATE TABLE IF NOT EXISTS machine_roles (

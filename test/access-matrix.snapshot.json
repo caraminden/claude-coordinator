@@ -1121,7 +1121,7 @@
  },
  "PATCH /api/machines/:m/roles": {
   "anon": "401 Not logged in",
-  "person": "400 role must be one of tools, screen, ci, turns, gpu",
+  "person": "400 role must be one of tools, screen, ci, turns, gpu, builds",
   "member": "404 No such machine",
   "outsider": "404 No such machine",
   "tmA": "403 Only people manage machines",

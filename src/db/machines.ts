@@ -265,7 +265,7 @@ export const machineQueries = {
   },
 
   /**
-   * The one write of a machine's roles: all five rows and their lists, then the old columns from them (lend,
+   * The one write of a machine's roles: a row for each of ROLES and their lists, then the old columns from them (lend,
    * machine_projects, and scoped once a person gave a list: `listed`), so an older release reads the same (machine-roles.ts legacyFromRoles).
    */
   writeMachineRoles(this: Store, machineId: number, change: (roles: RoleRow[]) => RoleRow[], listed = false): RoleRow[] {

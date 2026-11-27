@@ -1,8 +1,8 @@
 # Citadel's build images for the Builds role (H1, tools/build-images/README.md): builds the Android, Node and Rust
 # images, checks the Android one builds the hello-world APK, pushes all three to ghcr.io, and prints each one's digest
 # and size for tools/build-images/images.json (machines pull them by that digest). Runs when a branch other than the
-# ship pipeline's changes tools/build-images/, and by hand. GitHub's own runner (Josh's pick on #2106's card): free for
-# this public repo, and nothing lands on a member's PC.
+# ship pipeline's changes tools/build-images/, and by hand. On GitHub's own runner: free for this public repo, and
+# nothing lands on a member's PC.
 name: build-images
 
 on:
@@ -30,8 +30,9 @@ jobs:
       - name: Sign in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build, test and push
+        shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
           echo '### images.json lines' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -40,7 +41,10 @@ jobs:
             docker build --pull -t "$tag" -f "tools/build-images/$kind/Dockerfile" tools/build-images
             if [ "$kind" = android ]; then
               docker volume create citadel-gradle >/dev/null
-              docker run --rm -v citadel-gradle:/cache/gradle "$tag" citadel-hello-apk | tail -n 3
+              # No image is pushed unless it builds the APK, as a machine's Set up asks of it.
+              docker run --rm -v citadel-gradle:/cache/gradle "$tag" citadel-hello-apk > hello.log 2>&1 || { tail -n 40 hello.log; exit 1; }
+              tail -n 3 hello.log
+              grep -Eq '^apk [0-9]+$' hello.log
             fi
             docker push "$tag"
             digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$tag")

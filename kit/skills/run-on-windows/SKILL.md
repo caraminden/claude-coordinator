@@ -13,7 +13,7 @@ and `git_sync` again there. A machine's own `mcp__<name>-ws__…` is for work th
 
 The test box is a Windows 11 VM whose screen is always signed in and unlocked. It runs at 125%
 with rounded corners and draws on the CPU (WARP) unless a job asks for the GPU. Its machine is
-`citadel-test-box`, and its own tools are `mcp__citadel-test-box-ws__…`. If your turn has
+`citadel-test-vm`, and its own tools are `mcp__citadel-test-vm-ws__…`. If your turn has
 neither set, no Windows machine is online and lent to your scheme with its tools on: say so (the
 Taskmaster's machines tool shows which) and use CI. Setup and costs:
 Citadel's `tools/win-test-box/README.md`. The loop below is the same through either set.

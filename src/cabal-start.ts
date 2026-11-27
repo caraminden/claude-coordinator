@@ -56,7 +56,14 @@ const clip = (t: string, n = 40) => (t.length > n ? `${t.slice(0, n - 1)}…` : 
 
 /** When a row starts, in words: "now", "after the VM piece", "once #2179 is live". A label names its row by its title, never as "H2". */
 export function whenText(r: Pick<CabalMemberRow, 'after'>, all: Pick<CabalMemberRow, 'label' | 'title'>[]): string {
-  const tokens = r.after.split(/[,;&\s]+|\band\b/i).filter(Boolean);
+  const whole = r.after.trim();
+  // A label may hold spaces (chainOf reads the whole string as one), so the whole string is tried first.
+  const tokens = all.some((x) => x.label && x.label.toLowerCase() === whole.toLowerCase())
+    ? [whole]
+    : whole
+        .split(/[,;&\s]+|\band\b/i)
+        .filter(Boolean)
+        .map((t) => (/^\d+$/.test(t) ? `#${t}` : t));
   if (!tokens.length) return 'now';
   const named = tokens.map((t) => (/^#\d+$/.test(t) ? null : all.find((x) => x.label && x.label.toLowerCase() === t.toLowerCase())?.title || t)).filter((t): t is string => t != null);
   const live = tokens.filter((t) => /^#\d+$/.test(t)).map((t) => `once ${t} is live`);
@@ -110,7 +117,7 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
     ...(rows.length ? { roster } : {}),
     multiSelect: false,
     options: [
-      { label: FORM_GO, description: `The Overseer starts them ${w} at a time (the rest wait their turn) and may unseal, stop and reseal its own members; the Taskmaster hears of each start. Anyone not listed needs another card.`, recommended: true },
+      { label: FORM_GO, description: `The Overseer starts them ${w} at a time (the rest wait their turn) and may unseal, stop and reseal its own members, and each start stands up to its row's cost; the Taskmaster hears of each start. Anyone not listed needs another card.`, recommended: true },
       { label: FORM_WAIT, description: 'Nothing starts. Say what to change and the Overseer posts a new card.' },
     ],
   };

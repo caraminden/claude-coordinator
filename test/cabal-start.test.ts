@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { agentToken, bootServer, type Booted, fakeClaude, tempRoot, until } from './helpers.ts';
+import { whenText } from '../src/cabal-start.ts';
 import { json } from './typed.ts';
 
 type Ev = { id: number; kind: string; data: string };
@@ -247,4 +248,16 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   assert.equal(await asked(), 2, 'the planned piece still holds it');
   assert.equal((await board(chief.id, { action: 'row', row: planned.data.row, remove: true })).status, 200);
   await until('asked once the piece is dropped', async () => (await asked()) === 3);
+});
+
+test("a row's start reads in words: now, after another piece by its title (labels with spaces too, an approved row too), once #N is live", () => {
+  const all = [
+    { label: 'H1', title: 'Owners piece' },
+    { label: 'VM piece', title: 'A VM is a capability' },
+  ];
+  assert.equal(whenText({ after: '' }, all), 'now');
+  assert.equal(whenText({ after: 'H1' }, all), 'after Owners piece');
+  assert.equal(whenText({ after: 'VM piece' }, all), 'after A VM is a capability');
+  assert.equal(whenText({ after: 'H1, #2179' }, all), 'after Owners piece, once #2179 is live');
+  assert.equal(whenText({ after: '2179' }, all), 'once #2179 is live');
 });

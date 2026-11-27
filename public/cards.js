@@ -844,7 +844,17 @@ export function questionCard(ticketId, card, opts = {}) {
         'div',
         { class: 'qtitle' },
         card.kind === 'merge' || q.header ? h('span', { class: 'chip' }, card.kind === 'merge' ? (card.into ? 'Merge' : 'Ship It') : q.header) : '',
-        card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.roster ? q.question.split('\n- ')[0] : q.question, ticketId), // a roster draws its rows below, so its "- " lines (the plain-text twin) stay out
+        card.recipe && i === 0
+          ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?`
+          : cardText(
+              q.roster
+                ? q.question
+                    .split('\n\n')
+                    .filter((para) => !para.startsWith('- '))
+                    .join('\n\n')
+                : q.question,
+              ticketId,
+            ), // a roster draws its rows below, so its "- " lines (the plain-text twin) stay out
         q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : '',
       ),
       card.recipe && i === 0 ? jobRecipe(card.recipe) : '',

@@ -338,7 +338,7 @@ MARK_B=$(printf '>%.0s' {1..31})' branch'
 merge3() { git merge-file -p --diff3 --marker-size=31 -L main -L base -L branch "$@"; } # <main's> <base> <branch's>
 # A diff3 merge on stdin, its clashes resolved by merge_hunk <rule> <regex>; fails on one it can't.
 merge_hunks() { # <rule> <regex> [<rule> <regex>...], on a merge with conflicts on stdin
-  local line part=out head='' sect='' prev=''
+  local line part=out head='' sect='' prev='' fence=''
   local -a M O B
   while IFS= read -r line || [ -n "$line" ]; do
     case $part in
@@ -346,6 +346,12 @@ merge_hunks() { # <rule> <regex> [<rule> <regex>...], on a merge with conflicts 
         if [ "$line" = "$MARK_M" ]; then part=m M=() O=() B=(); continue; fi
         printf '%s\n' "$line"
         prev=$line
+        # A fenced code block's lines are code, not a heading or a table: its pipes are never rows.
+        if [[ $line =~ ^\ {0,3}(\`{3,}|~{3,}) ]]; then
+          if [ -z "$fence" ]; then fence=${BASH_REMATCH[1]:0:1}; elif [ "${BASH_REMATCH[1]:0:1}" = "$fence" ]; then fence=''; fi
+          continue
+        fi
+        [ -z "$fence" ] || continue
         [[ ! $line =~ ^[^[:space:]] ]] || head=$line
         [[ ! $line =~ ^#{1,6}[[:space:]] ]] || sect=$line ;;
       m) if [ "$line" = "$MARK_O" ]; then part=o; else M+=("$line"); fi ;;
@@ -375,7 +381,7 @@ merge_hunk() { # <rule> <regex>, on M (main's lines), O (base) and B (the branch
       for l in "${M[@]}" "${B[@]}"; do [[ ! $l =~ ^[[:space:]]+([\'\"][^\'\"]+[\'\"]): ]] || echo "${BASH_REMATCH[1]}"; done | sort | uniq -d | grep -q . && return 1
       printf '%s\n' "${M[@]}" "${B[@]}" ;;
     rows)
-      [[ $sect =~ $2 ]] && [[ $prev =~ $MD_ROW ]] || return 1
+      [ -z "$fence" ] && [[ $sect =~ $2 ]] && [[ $prev =~ $MD_ROW ]] || return 1
       for l in "${M[@]}" "${B[@]}"; do [[ $l =~ $MD_ROW ]] || return 1; done
       n=${#O[@]}
       if [ "$n" = 0 ]; then
@@ -480,11 +486,11 @@ merge_driver() {
     cat "$out" >"$3" && rm -f "$out" && return 0
   fi
   rm -f "$out" "$out.2"
-  git merge-file "$3" "$2" "$4" >/dev/null 2>&1 # git's own markers, as with no rule: what git rerere's recorded fixes match
+  git merge-file --marker-size="${6:-7}" "$3" "$2" "$4" >/dev/null 2>&1 # git's own markers, as with no rule: what git rerere's recorded fixes match
   return 1
 }
 if [ "${1:-}" = --merge ]; then
-  [ $# = 6 ] || exit 2
+  [ $# = 6 ] || [ $# = 7 ] || exit 2 # a 7th: git's %L, the path's conflict-marker-size
   shift
   # trial()'s merge-tree runs in a scratch folder (attrs_of): its files made whole, the hook runs from the repo's top and
   # finds the repo as it does in the rebase.
@@ -515,7 +521,7 @@ land_git() {
   shift
   if [ -z "$merge_dir" ]; then git "$@"; return; fi
   git -c "core.attributesFile=$merge_dir/attributes" -c "merge.land-ship.name=land.sh's ship-time merges" \
-    -c "merge.land-ship.driver=bash '$merge_dir/land.sh' --merge $side %O %A %B %P" \
+    -c "merge.land-ship.driver=bash '$merge_dir/land.sh' --merge $side %O %A %B %P %L" \
     -c "merge.land-regen.name=land.sh: a Regenerate file, made again after the rebase" -c merge.land-regen.driver=true "$@"
 }
 

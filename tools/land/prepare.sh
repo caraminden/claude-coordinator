@@ -24,7 +24,7 @@ numbers_git() {
   shift
   git -c "core.attributesFile=${regen_attrs:-$tools/ship-numbers.attributes}" -c "merge.citadel-regen.name=land.sh: a Regenerate file, made again after the rebase" -c merge.citadel-regen.driver=true \
     -c "merge.citadel-numbers.name=land.sh's ship-time merges" \
-    -c "merge.citadel-numbers.driver=if [ -f '$tools/land-core.sh' ]; then CITADEL_TOOLS='$tools' bash '$tools/land-core.sh' --merge $side %O %A %B %P; elif [ -f '$tools/ship-numbers.ts' ]; then '$tools/citadel-node' --no-warnings '$tools/ship-numbers.ts' merge $side %O %A %B; else git merge-file %A %O %B; fi" "$@"
+    -c "merge.citadel-numbers.driver=if [ -f '$tools/land-core.sh' ]; then CITADEL_TOOLS='$tools' bash '$tools/land-core.sh' --merge $side %O %A %B %P %L; elif [ -f '$tools/ship-numbers.ts' ]; then '$tools/citadel-node' --no-warnings '$tools/ship-numbers.ts' merge $side %O %A %B; else git merge-file %A %O %B; fi" "$@"
 }
 
 # A src/db.ts conflict the driver couldn't sort out: the number to take, from <onto>'s history.

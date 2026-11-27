@@ -209,6 +209,17 @@ for (const [what, main, branch, base] of [
     assert.equal(shown, main, 'main stays');
   });
 
+/** A Layout section whose fenced example has pipe lines, as a table would: <lines> inside the fence. */
+const fenced = (lines: string[]) => `# R\n\n## Layout\n\nExample:\n\n\`\`\`\n| \`a\` | A |\n${lines.map((l) => `${l}\n`).join('')}\`\`\`\n\nEnd.\n`;
+
+test('the rows rule leaves pipe lines inside a fenced code example to a person: refused, main stays', () => {
+  const [main, branch] = [fenced([row('b')]), fenced([row('c')])];
+  const { out, shown } = readmeLanding(main, branch, fenced([]));
+  assert.equal(out.status, 1, out.stderr);
+  assert.match(out.stderr, /conflicted files: README\.md/);
+  assert.equal(shown, main, 'main stays');
+});
+
 /** The merge driver itself, as git runs it: <main's>, <base>, <the branch's>; its exit and what it left in main's file. */
 function driver(main: string, base: string, branch: string) {
   const r = setup('true', {}, ROWS);
@@ -226,6 +237,17 @@ for (const [what, main, branch, want] of [
   test(`the rows rule: ${what}, and both stay`, () => {
     assert.deepEqual(driver(main, readme([]), branch), { status: 0, text: want });
   });
+
+test("a clash no rule takes leaves git's own markers at the size the path's conflict-marker-size asks (git's %L)", () => {
+  const base = readme([]);
+  const r = setup('true', {}, ROWS);
+  for (const [f, text] of Object.entries({ m: base.replace('| A |', '| A2 |'), o: base, b: base.replace('| A |', '| A3 |') })) writeFileSync(join(r.dir, f), text);
+  const res = spawnSync('bash', [join(r.main, 'tools', 'land.sh'), '--merge', 'ours', join(r.dir, 'o'), join(r.dir, 'm'), join(r.dir, 'b'), README, '9'], { cwd: r.main, encoding: 'utf8', env });
+  assert.equal(res.status, 1);
+  const text = readFileSync(join(r.dir, 'm'), 'utf8');
+  assert.match(text, /^<{9} /m);
+  assert.doesNotMatch(text, /^<{7} /m);
+});
 
 test("a clash no rule takes leaves git's own conflict markers, so a fix recorded ahead of time with git rerere still replays", () => {
   const base = readme([]);

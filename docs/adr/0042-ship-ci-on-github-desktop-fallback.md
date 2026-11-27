@@ -81,6 +81,12 @@ another scheme takes it by its own ask.
 
 Push to verdict over real ships, against the desktop's 6 min 26 s median job: to come, once 10 ships have run on it.
 
+The first whole run on GitHub (run 45968345201, a hand-started probe on this branch, Nov 27): 20 shards, split by name
+(no times cached yet), every one started within 1 s of the others, the run 6 min 5 s from start to end, its shards
+1 min 20 s to 6 min 3 s. Its three red shards were this branch's own, fixed before it shipped: the runner-choice tests
+of an older commit, the leftovers sweep put after the tools step, and a stale base for the schema check. A split by file time should even the shards out; the ships'
+numbers will say.
+
 ## Not picked
 
 - 16 shards, #2198's fastest measured: Cara asked for all 20.

@@ -89,9 +89,18 @@
 set -uo pipefail
 
 say() { echo "citadel-heavy: $*" >&2; }
-# Whether the command is a ship script (#2236, the header's light list): land.sh itself, or run by sh or bash. Its first
-# word only, so a job that merely names land.sh (a tar of the repo, a lint) is judged as any other.
-ships() { local c=${1:-}; case ${c##*/} in bash|sh) c=${2:-} ;; esac; [ "${c##*/}" = land.sh ]; }
+# Whether the command is a ship script (#2236, the header's light list): land.sh as the command, past wrappers (env, nice,
+# timeout, time, sh or bash and their options, numbers and VAR=x). Only the command, so a job that merely names land.sh
+# (a tar of the repo, a lint) is judged as any other.
+ships() {
+  local w
+  for w in "$@"; do
+    case ${w##*/} in env | time | command | nice | ionice | timeout | nohup | bash | sh | -* | [0-9]* | [A-Za-z_]*=*) continue ;; esac
+    [ "${w##*/}" = land.sh ]
+    return
+  done
+  return 1
+}
 # The CPU seconds (user + system, in ticks of 1/100 s) of this shell's waited-for children: $$ is this shell's pid in a subshell too.
 cpu_ticks() { local s f; read -r s </proc/$$/stat 2>/dev/null || { echo 0; return; }; read -ra f <<<"${s##*) }"; echo $((${f[13]:-0} + ${f[14]:-0})); }
 # The clock for the history line's wait and run: microseconds, so a difference is the time that passed. Two reads of

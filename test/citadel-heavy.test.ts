@@ -976,6 +976,14 @@ test('a land.sh judged heavy by its past runs still runs in its own worktree: ne
   // With the judgment switched off too, and as sh's script; --long, CI alone, is refused before anything is pushed.
   const off = spawnSync(heavy, ['sh', 'tools/land.sh'], { cwd: repo, env: e.env, encoding: 'utf8', timeout: 30_000 });
   assert.equal(off.stdout, `landed from ${repo}\n`, off.stderr);
+  for (const wrapped of [
+    ['env', 'A=1', 'tools/land.sh'],
+    ['timeout', '-k', '30', '600', 'tools/land.sh'],
+    ['bash', '-x', 'tools/land.sh'],
+  ]) {
+    const w = spawnSync(heavy, wrapped, { cwd: repo, env: e.env, encoding: 'utf8', timeout: 30_000 });
+    assert.equal(w.stdout, `landed from ${repo}\n`, `${wrapped.join(' ')}: ${w.stderr}`);
+  }
   const long = spawnSync(heavy, ['--long', 'tools/land.sh'], { cwd: repo, env: e.env, encoding: 'utf8', timeout: 30_000 });
   assert.equal(long.status, 2, long.stderr);
   assert.match(long.stderr, /run it without --long/);

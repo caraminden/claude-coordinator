@@ -139,14 +139,9 @@ test('the move runs once: a later change to a list stays, and a machine an older
       .map((p) => p.id),
     [1],
   );
-  // A runner agent's row is one PC's row (Build 10 H6): its own Tools role still decides, and the flag took nothing off it.
-  assert.deepEqual(
-    store
-      .listProjects()
-      .filter((p) => lendsRole(store, turned, 'tools', p, [1, 2]))
-      .map((p) => p.id),
-    [1],
-  );
+  // An older release's runner host comes back from its legacy columns, Tools off as it lent it; Build 10 H6 makes it one PC's row, whose owner can switch Tools on.
+  assert.ok(!store.listProjects().some((p) => lendsRole(store, turned, 'tools', p, [1, 2])), 'Tools stays as the older release left it: off');
+  assert.equal(turned.last_check, null, 'the runners flag is gone');
   assert.equal(store.getMachine(id('ci-host'))!.scoped, 0, 'a runner host is never converted');
   store.db.close();
 });

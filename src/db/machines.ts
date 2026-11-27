@@ -89,15 +89,6 @@ export const machineQueries = {
   },
 
   /**
-   * Every machine has an owner (Build 10 H1; Cara, 2026-11-26: "every machine should have an owner"). A row with none
-   * (a shared one, #28 and #438, or one an older release added after a rollback) gets the person its created_by names
-   * (their name or login, one person only), else whoever made the join code that connected it (machine_joins). It
-   * keeps reaching the turns it reached while shared: each of its roles but Minion turns goes to every turn in its
-   * schemes (caps.everyone, access.ts lendsToEveryone), and its owner can take that back. A row none of those name is
-   * left without one and said, for a person to settle (it lends nothing meanwhile): an owner is never guessed. Every
-   * boot (Store's constructor, after machineRoleTables); says what it did, for the deploy's notes.
-   */
-  /**
    * Every boot, after the owner backfill (which reads the flag): a CI runner host's row (#328, or one an older release made)
    * becomes one PC's row, as any other (Build 10 H6, "one kind of machine"). Its last_check loses the runners flag, and its
    * CI role's runner_host becomes runner_agent, which says only that a runner agent has connected there, so the next one
@@ -126,6 +117,15 @@ export const machineQueries = {
     }
   },
 
+  /**
+   * Every machine has an owner (Build 10 H1; Cara, 2026-11-26: "every machine should have an owner"). A row with none
+   * (a shared one, #28 and #438, or one an older release added after a rollback) gets the person its created_by names
+   * (their name or login, one person only), else whoever made the join code that connected it (machine_joins). It
+   * keeps reaching the turns it reached while shared: each of its roles but Minion turns goes to every turn in its
+   * schemes (caps.everyone, access.ts lendsToEveryone), and its owner can take that back. A row none of those name is
+   * left without one and said, for a person to settle (it lends nothing meanwhile): an owner is never guessed. Every
+   * boot (Store's constructor, after machineRoleTables); says what it did, for the deploy's notes.
+   */
   machineOwners(this: Store) {
     const rows = this.db.prepare('SELECT id, name, created_by, scoped, last_check FROM machines WHERE owner_id IS NULL ORDER BY id').all() as { id: number; name: string; created_by: string; scoped: number; last_check: string | null }[];
     if (!rows.length) return;
@@ -176,18 +176,6 @@ export const machineQueries = {
         const on = (r: RoleRow, v: boolean) => ({ ...r, on: v, projects: v && !r.on ? one : r.projects });
         return roles.map((r) => (r.role === 'tools' ? { ...r, caps: { ...r.caps, ticks: l ? { server: l.server, workspaces: l.workspaces, ...(l.before_ticks ? { before_ticks: true as const } : {}) } : null } } : r.role === 'gpu' ? on(r, !l?.gpu_off) : r.role === 'turns' ? on(r, !!l?.worker) : r));
       });
-    }
-    // An older release (a rollback) made it a CI runner host: the CI role goes on, lent where the machine was, as its runner
-    // tokens were before roles (ci-runner.ts mayFetch); runnerHostRows makes it one PC's row again at the next boot.
-    // A row with no role rows yet reads its CI setup as runner_host (rolesFromLegacy), which this release never keeps.
-    if (keys.includes('last_check') && runnerHost(rest.last_check ?? null) && !this.machineRoles(id).find((r) => r.role === 'ci')?.setup?.runner_agent) {
-      this.writeMachineRoles(id, (roles) =>
-        roles.map((r) => {
-          if (r.role !== 'ci') return r;
-          const { runner_host: _, ...setup } = r.setup ?? {};
-          return { ...r, on: true, projects: r.on ? r.projects : legacyFromRoles(roles).projects, setup: { ...setup, runner_agent: true } };
-        }),
-      );
     }
   },
 

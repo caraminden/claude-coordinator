@@ -160,7 +160,7 @@ export class CiAuto {
     return out;
   }
 
-  /** Runners on one PC's row (a runner agent joined it, Build 7 M2b) for a scheme its CI no longer lends to come off. A CI runner host's row from before keeps what people added by hand. */
+  /** Runners on one PC's row (a runner agent joined it; a CI runner host's row is one since Build 10 H6) for a scheme its CI no longer lends to come off. */
   private async remove(): Promise<string[]> {
     const out: string[] = [];
     const projects = this.d.store.listProjects();

@@ -596,7 +596,6 @@ function machineTokenShow(m) {
   return h('div', { class: 'machine-token' }, value, h('div', { class: 'row' }, show, copy), h('p', { class: 'small muted' }, 'Use it to connect another tool on that computer; tools already connected keep working. Keep it out of chats.'));
 }
 
-/** A machine's notes for minions: a collapsed editor that keeps an open draft through re-renders. */
 /** Its name, which its owner changes here: a VM's row links to its Hyper-V VM by name (Build 10 H4), and a CI runner host's row (H6) keeps the host's.
  * @param {import('./types.js').MachineRow} m */
 function machineRename(m) {
@@ -609,6 +608,7 @@ function machineRename(m) {
   return h('div', { class: 'row' }, name, save);
 }
 
+/** A machine's notes for minions: a collapsed editor that keeps an open draft through re-renders. */
 function machineNotes(m) {
   const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What minions should know: never restart it, where the repo is cloned, what to check first…' });
   notes.value = m.notes ?? '';

@@ -472,8 +472,9 @@ export class MachineRelay {
     const agent = this.agents.get(machine.id);
     const check = storedCheck(machine);
     const runnersHere = this.runnersOn(machine.id);
-    // Only its CI runner agents are connected now (its machine agent is off, or was never installed): it reads as CI alone.
-    const runnersOnly = !agent && runnersHere.length > 0;
+    // Only its CI runner agents are connected, and its machine agent was never installed: it reads as CI alone. One that
+    // reported before is offline as any PC is, whatever its SYSTEM runner agents do while its person is signed out.
+    const runnersOnly = !agent && runnersHere.length > 0 && !storedReport(machine);
     // Its list of schemes (#438), and which of those schemes' turns get it: the ones its owner is in (and only the
     // turns they ask for, unless they lent its tools to everyone there).
     const projects = this.store.machineProjects(machine.id);

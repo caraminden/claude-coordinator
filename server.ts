@@ -798,7 +798,6 @@ const jobs = new MachineJobs({
   },
 });
 machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
-// One row per PC (Build 7 M2b): a runner agent connecting to the row a merge keeps finishes that merge.
 // A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).
 if (!BOOT_CHECK)
   machines.watchBoxes((id, text) => {

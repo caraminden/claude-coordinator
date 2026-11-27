@@ -151,7 +151,7 @@ test('every write keeps the old columns as a rollback reads them, and an older r
   fourth.db.close();
 });
 
-test('the old write paths go into the roles: the one list, a lend, a runner agent connecting', () => {
+test("the old write paths go into the roles: the one list and a lend; a runner host's flag goes", () => {
   const s = new Store(join(dir, 'writes.db'));
   const josh = s.createUser({ name: 'Josh', login: 'josh' });
   const a = s.createProject('a', null, josh.id);
@@ -176,13 +176,10 @@ test('the old write paths go into the roles: the one list, a lend, a runner agen
       ['gpu', [a.id, b.id]],
     ],
   );
-  // A runner agent connects with its key: the CI role goes on where the machine was lent, as its tokens were.
-  s.updateMachine(m.id, { last_check: JSON.stringify({ at: 1, results: [], runners: true }) });
-  assert.equal(mayFetch(s, s.getMachine(m.id)!, b), true);
-  assert.deepEqual(s.machineRoles(m.id).find((r) => r.role === 'ci')?.projects, [a.id, b.id]);
-  // Its next boot makes it one PC's row again (Build 10 H6): the flag goes, its CI role and schemes stay, and its tools lend as before.
+  // A runner host's flag (from a release before Build 10 H6) goes at the next boot and changes no role: its CI role is as it was.
+  s.db.prepare('UPDATE machines SET last_check = ? WHERE id = ?').run(JSON.stringify({ at: 1, results: [], runners: true }), m.id);
   s.runnerHostRows();
-  assert.deepEqual([s.getMachine(m.id)!.last_check, s.machineRoles(m.id).find((r) => r.role === 'ci')], [null, { role: 'ci', on: true, caps: {}, setup: { runner_agent: true }, projects: [a.id, b.id] }]);
+  assert.deepEqual([s.getMachine(m.id)!.last_check, s.machineRoles(m.id).find((r) => r.role === 'ci')], [null, { role: 'ci', on: false, caps: {}, setup: null, projects: [] }]);
   assert.equal(lendsRole(s, s.getMachine(m.id)!, 'tools', a, [josh.id]), true, 'no row is a runner host that lends turns nothing');
   s.db.close();
 });
@@ -313,7 +310,8 @@ test('each role decides alone: Tools for sessions, GPU jobs for machine jobs, CI
   // CI: a runner host fetches for the schemes on its CI list only while CI is on (machines.scoped is read no more,
   // Build 10 H1: the owner backfill lists an unscoped one's schemes).
   const ci = s.createMachine('ci-box', '', 'Cara', cara.id);
-  s.updateMachine(ci.id, { last_check: JSON.stringify({ at: 1, results: [], runners: true }) });
+  // A runner host's row from before, as the boot step leaves it (Build 10 H6): CI on, lent where its owner picks.
+  s.setMachineRole(ci.id, 'ci', { on: true, projects: [], setup: { runner_agent: true } });
   s.db.prepare('UPDATE machines SET scoped = 0 WHERE id = ?').run(ci.id);
   assert.equal(mayFetch(s, s.getMachine(ci.id)!, a), false, 'not on its CI list');
   s.setMachineRole(ci.id, 'ci', { projects: [a.id] });

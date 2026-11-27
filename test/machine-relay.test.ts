@@ -277,6 +277,21 @@ test('ships (#1268) go to every runner agent at each look, and to one that conne
   assert.ok(!lent.sent.some((m) => m.ships));
 });
 
+test("a PC's row whose machine agent is off reads offline, whatever its runner agents do; one with only runner agents ever reads as CI (Build 10 H6)", () => {
+  const { store, relay } = world();
+  const desk = store.createMachine('desk', 'y', 'Cara', owner(store));
+  store.updateMachine(desk.id, { report: JSON.stringify({ os: 'windows', threads: 8, memory_gb: 16, disk_gb: 100, gpu: null, v: 5 }) });
+  const bare = store.createMachine('bare', 'z', 'Cara', owner(store));
+  relay.connectAgent(store.getMachine(desk.id)!, stream(), { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+  relay.connectAgent(bare, stream(), { host: 'BARE', command: 'citadel runner agent', runners: true, os: 'linux' });
+  const seen = (id: number) => {
+    const v = relay.view(store.getMachine(id)!);
+    return [v.online, v.runners];
+  };
+  assert.deepEqual(seen(desk.id), [false, false], 'its person signed out: offline, as any PC');
+  assert.deepEqual(seen(bare.id), [true, true]);
+});
+
 test('a ship squeezes only the PC it runs on (#1934): two agents on two PCs, each told of its own ships, the other lifted', async () => {
   const { store, relay } = world();
   const ship = { repo: 'caraminden/claude-coordinator', runner: 'DESK-linux' };

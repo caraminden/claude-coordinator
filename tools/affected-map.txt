@@ -214,7 +214,9 @@ kit/skills/scheme-setup/templates/land.sh: test/land.test.ts test/scheme-setup-l
 public/style.css: test/media-browser.test.ts
 public/composer.js: test/model-effort.test.ts
 src/routes/machines.ts: test/off-thread-fs.test.ts
-public/manifest.webmanifest: test/own-path.test.ts
+public/manifest.webmanifest: test/own-path.test.ts test/share.test.js
+public/artifact-bridge.js: test/artifact-bridge-page.test.js
+tools/worker/install-worker.ps1: test/machine-setup.test.js
 deploy/claude-coordinator-prune.service: test/prune.test.ts
 src/mcp-scheme.ts: test/schedule-templates.test.ts
 tools/deploy-queue.sh: test/ship-core-parity.test.ts

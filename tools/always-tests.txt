@@ -37,3 +37,5 @@ test/runner-turn-maps.test.ts
 test/db-areas.test.ts
 test/db-writer-lists.test.ts
 test/pinned-tests.test.ts
+# settings-pages reads every public/*.js for page exports, 0.1 s; #2090 met it only in CI (effort retro "Overseer crews", Nov 26).
+test/settings-pages.test.js

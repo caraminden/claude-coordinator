@@ -22,7 +22,9 @@ const always = new Set(
 // The source paths a test reads: on a line that reads a file (readFileSync, a one-line helper around it, readdirSync, git
 // ls-files), a tracked path under src/, public/, tools/, kit/ or deploy/, or server.ts, written whole (after any ../) or
 // as join()'s parts.
-// shortcut: a read split over lines or through a helper of another shape is missed; widen the patterns when one bites.
+// shortcut: a read split over lines or through a helper of another shape is missed, and so is a folder scan through a
+// variable (settings-pages' readdirSync(dir)); widen the patterns when one bites. .test.js files count too (Overseer crews
+// retro, Nov 26: three of them read a source file no rule picked).
 export function pinnedPaths(text: string, isFile: (p: string) => boolean): string[] {
   const helpers = [...text.matchAll(/const (\w+) = \([^)]*\)(?:: \w+)? => readFileSync\(/g)].map((m) => m[1]);
   const reads = new RegExp(`readFileSync\\(|readdirSync\\(|ls-files${helpers.map((h) => `|\\b${h}\\(`).join('')}`);
@@ -53,7 +55,7 @@ test('the scan finds a source path a test reads, whole, in parts or through a he
 
 test('every test that reads a source file is picked when that file changes, or runs on every run', () => {
   const missed: string[] = [];
-  for (const t of tracked.filter((f) => /^test\/[^/]+\.test\.ts$/.test(f) && !always.has(f))) {
+  for (const t of tracked.filter((f) => /^test\/[^/]+\.test\.[jt]s$/.test(f) && !always.has(f))) {
     const paths = pinnedPaths(readFileSync(join(repo, t), 'utf8'), (p) => isTracked.has(p));
     const gone = paths.filter((p) => !affected(map, [p], tracked, repo).run.some((r) => r.test === t));
     if (gone.length) missed.push(`${t} reads ${gone.join(', ')}`);

@@ -81,7 +81,18 @@ test('the forming card approves the roster with who and when; an unapproved row 
   assert.equal((await board(lead.id, { action: 'row', label: 'X', title: 'Gone', handoff: 'handoffs/nope.md' })).status, 400, 'a handoff must exist');
 
   const { data, answer } = await form('Not yet');
-  assert.match(data.questions[0].question, /Do a · handoffs\/a\.md · Sonnet[^\n]*· ~\$40/, "each row with its handoff, its tier and its handoff's cost");
+  const q = data.questions[0] as { question: string; roster: { what: string; cost?: string; when: string; tier?: string }[] };
+  assert.match(q.question, /^- Do a · ~\$40 · now$/m, 'each row on its own line: what it does, its cost, when it starts');
+  assert.match(q.question, /^- Do b · ~\$5 · after Do a$/m, "a dependency by the other piece's title, not its label");
+  assert.doesNotMatch(q.question, /handoffs\/|Sonnet/, 'no handoff path or model on the text');
+  assert.deepEqual(
+    q.roster.map((r) => [r.what, r.when]),
+    [
+      ['Do a', 'now'],
+      ['Do b', 'after Do a'],
+    ],
+  );
+  assert.match(q.roster[0].tier!, /Sonnet/, 'the tier rides along for the muted draw');
   assert.equal(rowOf('A').approved_at, null, 'Not yet approves nothing');
   assert.ok(answer);
 
@@ -116,6 +127,7 @@ test('cabal_start starts an approved row in the build and Goal, with the lead as
   const a = minion('Do a')!;
   assert.equal(r.data.started, a.number);
   assert.equal(a.parent, lead.number);
+  assert.equal(String(((await s.call(`/api/tickets/${a.id}`)).data.ticket.properties ?? {}).requestedBy ?? ''), String(((await s.call(`/api/tickets/${lead.id}`)).data.ticket.properties ?? {}).requestedBy ?? 'none'), "the lead's requestedBy, as its assigned");
   assert.equal(a.build, 7, "the lead's build");
   assert.deepEqual([a.model, a.effort], ['claude-sonnet-5-5', 'medium'], "the row's tier");
   assert.equal(rowOf('A').ticket_id, a.id, 'on its own row');

@@ -41,6 +41,10 @@ test("GitHub's runners: each value has its own line", () => {
       .filter((l) => /runners/.test(l))
       .join('');
   assert.match(line('ask'), /ask a person first/);
+  assert.match(line('ask'), /free and unlimited on a public repo and needs no go/);
+  assert.match(line('ask'), /private repo[^.]*Actions minutes/);
+  assert.match(line('ask'), /larger runners[^.]*ask a person first/);
+  assert.doesNotMatch(line('never'), /cost Actions minutes/);
   assert.match(line('ok'), /needs no one/);
   assert.match(line('never'), /never use them/);
   assert.match(prompt({ ...base, gh_runners: 'never' }, minion), /never use them/);

@@ -103,7 +103,7 @@ export interface Project {
   builds: BuildsMode;
   /** Grilling before code (#1045): design, the Citadel-wide rule as written; all, every feature; never, none. */
   grill: GrillMode;
-  /** CI on GitHub's own runners (#1045, they cost Actions minutes): ask a person first, ok to use, or never. */
+  /** CI on GitHub's own runners (#1045; free on a public repo, may cost Actions minutes on a private one or larger runners): ask a person first, ok to use, or never. */
   gh_runners: GhRunnersMode;
   /** Screenshot widths in px, comma-separated, for a minion's UI checks (#1044); ui-shot's default. */
   shot_widths: string;

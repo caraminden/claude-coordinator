@@ -1176,7 +1176,7 @@ export class CiHealth {
   /**
    * #1074: the run that tests a red's fix. Once the fix minion's work is on GitHub's `branch` (deps.shipped), its
    * workflow is dispatched there once, unless a run on that tip is there already (queued, running or done: a push's
-   * own CI), or its jobs run on GitHub's own runners (Actions minutes: a person's call). A tip with no new work of the
+   * own CI), or its jobs run on GitHub's own runners (they may cost Actions minutes: a person's call). A tip with no new work of the
    * minion's (another land on top) starts nothing. A re-run gone red wakes the minion; green is the back-to-green loop's.
    */
   private async rerun(p: Project, slug: string, branch: string, w: number, mark: RedMark, runs: Run[], inputs: boolean, as: GithubEnv, now: number, save: () => void) {

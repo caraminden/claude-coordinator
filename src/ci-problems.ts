@@ -298,7 +298,7 @@ export interface RedMark {
 /**
  * The run that tests a red's fix (#1074): `sha`, the default branch's tip holding the fix minion's work (its branch at
  * `tip`), seen at `at`; `run` once GitHub lists it. `dispatched`: Citadel started it (else a run already there, a push's).
- * `hosted`: the workflow runs on GitHub's own runners, so Citadel left it for a person (Actions minutes). `error`: the
+ * `hosted`: the workflow runs on GitHub's own runners, so Citadel left it for a person (they may cost Actions minutes). `error`: the
  * dispatch GitHub refused, or lost twice. `failed`: it went red and the fix minion was woken. `inputs`: each run of the
  * workflow takes an input, so a person starts it. `resent`: when a dispatch GitHub never listed was sent again.
  */
@@ -327,7 +327,7 @@ export interface Fix {
  * A red on main (#968, Cara: "Quiet item, Taskmaster fixes"): a quiet item while a fix is on its way, ringing when none
  * started within RED_FIX_MS of the Taskmaster hearing, the newest verdict, made after the fix minion closed, is still
  * red RED_FIX_MS after it ended with no new minion on it (#1662), that minion closed RED_FIX_MS ago with no newer run, or the
- * fix shipped and only a person can start its re-run (#1662: hosted runners cost Actions minutes). `newest` is the workflow's newest verdict there; green, and there is nothing to say.
+ * fix shipped and only a person can start its re-run (#1662: hosted runners may cost Actions minutes). `newest` is the workflow's newest verdict there; green, and there is nothing to say.
  */
 export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
   const red = redProblemOf(file, branch, mark, newest, fix, now, slug);
@@ -368,10 +368,13 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
     if (re.hosted || re.inputs || re.error) {
       return {
         key,
-        plain: { what: `${red}; #${fix.number}'s fix shipped but the tests need re-running by hand`, next: `${re.hosted ? "They run on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start them. " : ''}Re-run them on ${branch} from the CI page; this clears when they pass` },
+        plain: {
+          what: `${red}; #${fix.number}'s fix shipped but the tests need re-running by hand`,
+          next: `${re.hosted ? "They run on GitHub's own runners, which may cost Actions minutes (private repo or larger runners), so Citadel doesn't start them. " : ''}Re-run them on ${branch} from the CI page; this clears when they pass`,
+        },
         title: `${what}: fix minion ${n} shipped; re-run ${file} on ${branch} by hand`,
-        why: re.hosted ? `${file} runs on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start it` : re.inputs ? `each ${file} run takes an input, so Citadel doesn't start it` : `Citadel's re-run didn't start: ${re.error}`,
-        fix: `a person re-runs ${file} on ${branch}${re.hosted ? ' (it costs Actions minutes)' : ''}; this clears when it's green, and ${n} closes then`,
+        why: re.hosted ? `${file} runs on GitHub's own runners, which may cost Actions minutes (private repo or larger runners), so Citadel doesn't start it` : re.inputs ? `each ${file} run takes an input, so Citadel doesn't start it` : `Citadel's re-run didn't start: ${re.error}`,
+        fix: `a person re-runs ${file} on ${branch}${re.hosted ? ' (it may cost Actions minutes)' : ''}; this clears when it's green, and ${n} closes then`,
       };
     }
     return {

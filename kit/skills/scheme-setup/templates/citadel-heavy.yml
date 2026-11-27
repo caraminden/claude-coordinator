@@ -20,7 +20,7 @@
 #      where it says so below. Jobs that need perigee itself (data only it has, its Android emulator) stay there
 #      with `citadel-heavy --here`, and jobs that run Claude never come here, so leave those out.
 #   3. Ship it: GitHub starts a dispatch only from the default branch's copy.
-# Buying compute: the repo variable CI_RUNNER=github runs it on GitHub's own runners, which cost Actions minutes, so
+# Buying compute: the repo variable CI_RUNNER=github runs it on GitHub's own runners, which may cost Actions minutes (private repo or larger runners), so
 # ask a person first. Keep the name, run-name, inputs and markers: heavy-ci.ts finds the run and the output by them.
 name: citadel-heavy
 run-name: heavy ${{ inputs.id }}

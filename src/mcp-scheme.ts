@@ -243,7 +243,7 @@ export const SET_PROJECT_SETTINGS = {
       fable_ok: { type: 'string', enum: ['on', 'off'], description: "off: no Fable in this scheme, for any session or Grunt; the Taskmaster's model table, the model picker and the Grunt rule drop it. Only when a member asks." },
       builds: { type: 'string', enum: ['suggest', 'off'], description: "off: this scheme doesn't use numbered builds, so its Taskmaster never suggests one. Only when a member asks." },
       grill: { type: 'string', enum: ['design', 'all', 'never'], description: "Grilling before code: design (citadel:grilling's rule, design-shaped features only), all (every feature), never. Only when a member asks." },
-      gh_runners: { type: 'string', enum: ['ask', 'ok', 'never'], description: "CI on GitHub's own runners costs Actions minutes: ask a person first (default), ok to use, never. Only when a member asks." },
+      gh_runners: { type: 'string', enum: ['ask', 'ok', 'never'], description: "CI on GitHub's own runners is free on a public repo but may cost Actions minutes (private repo or larger runners): ask a person first (default), ok to use, never. Only when a member asks." },
       screenshot_widths: { type: 'array', items: { type: 'integer', minimum: 200, maximum: 5000 }, description: 'Pixel widths a minion shoots a UI change at, like [1440, 390]; tools/ui-shot.ts takes them as its default --widths.' },
       screenshot_themes: { type: 'array', items: { type: 'string', enum: ['light', 'dark'] }, description: "Themes a minion shoots a UI change in; ui-shot's default --themes." },
       screenshots_required: { type: 'boolean', description: "true (the default): a minion's ready note for a UI change carries its screenshots." },

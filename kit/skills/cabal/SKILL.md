@@ -46,6 +46,11 @@ asks, merges since your last wake, then every other open ask, answered together.
   (`message_coordinator`).
 - Asks: a member's non-blocking ask is held mail. Answer them together at your next wake (`cabal_board` answer). A
   blocking one woke you: answer it first. A claim to move is an ask too (section 4).
+  - **Settled** by the build's spec, its decisions log or a person's earlier pick: answer it yourself on the board and
+    quote the source. These stay off people's cards.
+  - **Silent**, or the answer would bend or reverse a person's pick: ask people on a card (`ask_question`, `to` the
+    build's requester, your pick marked). The asking member waits on it and the others carry on. Put the answer in the
+    spec's decisions log, quoted and dated, and on the board.
 - If no member has made progress (a merge, a ship, a note) for 3 days, ask people with a card: carry on, cut the
   roster, or close the cabal.
 
@@ -88,7 +93,7 @@ Your build is `build/<n>`. In a container, each `tools/land.sh` below is the lan
    against main with a claude-fable-5-2 reviewer at medium effort, label the build with the highest of its members'
    labels and that review's, `git rm build-claims.md` and merge that into `build/<n>` (`--build` refuses while it is
    there), and post one go card (ask_question, kind merge) with the roster, the label and what wasn't verified,
-   whatever the label. On the go, run `tools/land.sh --build` from your worktree with your branch at the build's tip:
+   whatever the label, and the calls you made yourself from the spec and picks, so people can send any back. On the go, run `tools/land.sh --build` from your worktree with your branch at the build's tip:
    one CI run, one deploy. Stay open for the retro (section 7): the land tool takes `stay_open: true` with
    `waiting_on: "the cabal retro"`; after a `land.sh` you ran yourself, call `wake_when_live`.
 

@@ -295,6 +295,9 @@
 .github-strip button.small { padding: 0.2rem 0.65rem; font-size: 0.9em; }
 .github-owner .row { gap: 0.5rem; }
 .github-owner input { max-width: 16rem; }
+/* The cloud sessions switch (#2193): the house switch keeps its size on a phone, its words beside it. */
+.cloud-sessions .row { gap: 0.6rem; flex-wrap: nowrap; align-items: center; }
+.cloud-sessions .rules-switch { min-height: 0; }
 .inbox-toggle { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.35rem 0.7rem; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 0.9em; text-align: left; cursor: pointer; }
 .inbox-toggle:hover { color: var(--accent); }
 .inbox-toggle { min-height: 2rem; box-sizing: border-box; }

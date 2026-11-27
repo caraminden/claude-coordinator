@@ -113,17 +113,18 @@ test('a turn the line put on a machine picks its account only among those signed
 test('the worker agent watches every account folder machine-worker.mjs names, so a raised count follows', async () => {
   const { WorkerAgent } = await import('../public/worker-agent.mjs');
   const { ACCOUNTS } = await import('../public/machine-worker.mjs');
-  const vol = tempRoot('agent-accounts-').dir;
+  const vol = tmp.path('agent-accounts');
   const last = accountDir(ACCOUNTS);
   mkdirSync(join(vol, last), { recursive: true });
   writeFileSync(join(vol, last, '.credentials.json'), '{}');
   let checked = 0;
   class FakeWorker {
+    cfg = {};
     call() {}
   }
   const run = async () => ({ code: 0, out: `${vol}\n`, err: '' });
-  const agent = new WorkerAgent({ config: { root: '/w' }, appUrl: 'http://x', token: 't', Worker: FakeWorker as never, accounts: { ACCOUNTS, accountDir }, run, exit: () => {} });
-  agent.worker = { signedIn: { slots: [] }, checkSignIn: async () => void checked++ } as never;
+  const agent = new WorkerAgent({ config: { root: '/w', workers: 6, threads: 8, memory_gb: 24, disk_gb: 60 }, appUrl: 'http://x', token: 't', Worker: FakeWorker as never, accounts: { ACCOUNTS, accountDir }, run, exit: () => {} });
+  Object.assign(agent.worker, { signedIn: { slots: [] }, checkSignIn: async () => void checked++ });
   agent.at.signIn = 0;
   await agent.keepFacts();
   assert.equal(checked, 1, `a sign-in in ${last} (account ${ACCOUNTS}) is seen`);

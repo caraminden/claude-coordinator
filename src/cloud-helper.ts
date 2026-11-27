@@ -1,4 +1,4 @@
-// citadel-cloud (#2200, docs/adr/0041-cloud-helpers.md): one step of a home minion's turn run in a Claude Code cloud session,
+// citadel-cloud (#2200, docs/adr/0042-cloud-helpers.md): one step of a home minion's turn run in a Claude Code cloud session,
 // the way it runs a Grunt or citadel-heavy. The minion keeps its chat, cards, tools and shared folder; the session runs on
 // the turn's own Claude login (sender pays) and draws on that person's plan. On every turn's PATH (src/turn-launch.ts pins
 // this file with cloud-turn.mjs and cloud-run-vm.mjs beside it), so it imports nothing that reaches the database.
@@ -291,7 +291,7 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
 /** A finished step's state on its chat line: plain words for success and its limit (124, as `timeout`), the exit code kept for a failure. */
 const ended = (code: number | null | undefined, mins: number) => (code === 0 ? `✔ done after ${mins} min` : code === 124 ? `stopped at its time limit, after ${mins} min` : `✗ failed (exit ${code}) after ${mins} min`);
 
-/** Where a step runs (ADR 0041, Cara's four priorities and her pick "Helper checks first", 2026-11-27). */
+/** Where a step runs (ADR 0042, Cara's four priorities and her pick "Helper checks first", 2026-11-27). */
 export type Place = 'machine' | 'github' | 'cloud' | 'home';
 /** What the pick reads. `slower`: the cloud's runs of this command over perigee's (medians), null with none of either. */
 export interface Facts {

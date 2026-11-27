@@ -175,7 +175,7 @@ export function tierRows() {
   return TIERS.map((t) => ({ work: t.work, tier: tierLabel(t.model, t.effort), model: t.model, effort: t.effort, then: t.then ?? null }));
 }
 
-/** When the advisor trial ends, read from its TIERS row ("until 2026-11-30"), or null once the row is gone. */
+/** When the advisor trial ends, read from its TIERS row ("until 2026-12-14"), or null once the row is gone. */
 export function advisorTrialEnd() {
   const row = TIERS.find((t) => /advisor/.test(t.model));
   return row ? (/until (\d{4}-\d{2}-\d{2})/.exec(row.work)?.[1] ?? null) : null;

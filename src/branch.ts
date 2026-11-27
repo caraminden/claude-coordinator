@@ -165,10 +165,15 @@ export async function uncommittedFiles(worktree: string): Promise<number> {
   try {
     // --no-optional-locks: never take index.lock, which would make the minion's own `git commit` fail meanwhile.
     const { stdout } = await run('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd: worktree, timeout: 15_000 });
-    return stdout.split('\n').filter((l) => l && !(l.startsWith('?? ') && !l.slice(3).replace(/\/"?$/, '').includes('/'))).length;
+    return workLines(stdout);
   } catch {
     return 0;
   }
+}
+
+/** How many lines of `git status --porcelain` are work (uncommittedFiles): a new top-level file or folder is scratch. */
+export function workLines(porcelain: string): number {
+  return porcelain.split('\n').filter((l) => l && !(l.startsWith('?? ') && !l.slice(3).replace(/\/"?$/, '').includes('/'))).length;
 }
 
 /**

@@ -7,8 +7,9 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import type { Session } from './auth.ts';
-import { branchStatus } from './branch.ts';
+import { workLines } from './branch.ts';
 import { tellTaskmaster } from './ci-armed.ts';
+import { gitOut } from './git.ts';
 import { buildOwnerKey, EFFORTS, MODELS, type Ticket } from './db.ts';
 import { buildNumber, HttpError, oneOf, str, type App } from './http.ts';
 import { money, START_CARD_USD, startHoldKey } from './minion-budget.ts';
@@ -146,24 +147,38 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
 
 /**
  * Why the owner of a card whose pick started everything still has something left for people, or null when nothing is (#2175):
- * then the server dismisses it, as the Closing rule asks. Kept open by another card, a state other than ready (try,
- * pending-deploy, sealed, outside, complete, blocked), a turn running or waiting, a build or cabal lead, and a branch with work
- * main doesn't have (commits, or files not committed yet).
+ * then the server dismisses it, as the Closing rule asks. Kept open by a branch with work main lacks (commits, or files not
+ * committed yet), or one git can't read; another card; a state other than ready (try, pending-deploy, sealed, outside,
+ * complete, blocked); a turn running or owed; and leading a build or cabal. The git reads come first, so the checks that
+ * can change meanwhile are read last, with no wait between them and the close.
  */
-export async function leftForPeople(app: { store: Pick<App['store'], 'getTicket' | 'getProject' | 'getCabal' | 'getSetting'>; runner: Pick<App['runner'], 'isRunning' | 'keptOpen'> }, id: number): Promise<string | null> {
+export async function leftForPeople(app: { store: Pick<App['store'], 'getTicket' | 'getProject' | 'getCabal' | 'getSetting'>; runner: Pick<App['runner'], 'busy' | 'keptOpen'> }, id: number): Promise<string | null> {
   const { store, runner } = app;
+  const first = store.getTicket(id);
+  const repo = first && store.getProject(first.project_id)?.repo_dir;
+  if (repo && first.branch) {
+    // Fail closed: a git call that fails (a timeout under load) keeps the minion open.
+    const tip = await gitOut(['for-each-ref', '--format=%(objectname)', `refs/heads/${first.branch}`], repo);
+    if (tip === null) return "git couldn't read its branch";
+    if (tip) {
+      const main = (await gitOut(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repo))?.replace(/^origin\//, '') || 'main';
+      const ahead = await gitOut(['rev-list', '--count', `refs/heads/${main}..${tip}`], repo);
+      if (ahead === null) return `git couldn't compare its branch with ${main}`;
+      if (Number(ahead) > 0) return `its branch has commits ${main} lacks`;
+    }
+    if (first.cwd) {
+      const status = await gitOut(['--no-optional-locks', 'status', '--porcelain'], first.cwd, { trim: false });
+      if (status === null) return "git couldn't read its worktree";
+      if (workLines(status)) return 'its worktree has work not committed';
+    }
+  }
   const t = store.getTicket(id);
   if (!t || t.status === 'closed') return 'it is closed already';
   if (t.kind !== 'ticket') return 'it is a Taskmaster';
   if (t.state && t.state !== 'ready') return `its state is ${t.state}`;
-  if (runner.isRunning(id)) return 'a turn of its own is running';
+  if (runner.busy(id)) return 'a turn of its own runs or is owed';
   const kept = runner.keptOpen(id, true);
   if (kept) return kept;
   if (store.getCabal(id) || (t.build != null && store.getSetting<number>(buildOwnerKey(t.project_id, t.build)) === id)) return 'it leads a build or cabal';
-  const repo = store.getProject(t.project_id)?.repo_dir;
-  if (!repo || !t.branch) return null;
-  const s = await branchStatus(repo, t.branch, t.created_at, false, null, null, t.cwd);
-  if (s && !s.empty && !s.merged) return 'its branch has commits main lacks';
-  if (s?.uncommitted) return 'its worktree has work not committed';
   return null;
 }

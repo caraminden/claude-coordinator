@@ -181,7 +181,7 @@ test('leftForPeople keeps an owner open for its state, a turn, a card, a lead, a
     const seen = { running: false, kept: null as string | null, cabal: false, owner: null as number | null };
     const app: Parameters<typeof leftForPeople>[0] = {
       store: { getTicket: () => t, getProject: () => ({ repo_dir: repo }) as Project, getCabal: () => (seen.cabal ? ({} as CabalRow) : undefined), getSetting: <T>() => seen.owner as T | null },
-      runner: { isRunning: () => seen.running, keptOpen: () => seen.kept },
+      runner: { busy: () => seen.running, keptOpen: () => seen.kept },
     };
     assert.equal(await leftForPeople(app, 1), null, 'ready, idle, no card, a branch with nothing of its own: nothing left');
     for (const state of ['try', 'pending-deploy', 'parked', 'outside']) {
@@ -191,7 +191,7 @@ test('leftForPeople keeps an owner open for its state, a turn, a card, a lead, a
     t = { ...base, state: null };
     assert.equal(await leftForPeople(app, 1), null, 'no state is fine too');
     seen.running = true;
-    assert.ok(await leftForPeople(app, 1), 'a turn running');
+    assert.ok(await leftForPeople(app, 1), 'a turn running or owed');
     seen.running = false;
     seen.kept = 'a question card is still waiting on people';
     assert.equal(await leftForPeople(app, 1), seen.kept, 'another card');
@@ -211,6 +211,15 @@ test('leftForPeople keeps an owner open for its state, a turn, a card, a lead, a
     assert.match((await leftForPeople(app, 1)) ?? '', /commits main lacks/, 'commits not on main');
     git('merge', '-q', '--ff-only', 'ticket/1');
     assert.equal(await leftForPeople(app, 1), null, 'once main has them, nothing is left');
+    // A git that can't answer keeps it open (fail closed): a branch whose ref git can't read, a worktree gone.
+    t = { ...base, cwd: join(repo, 'gone') };
+    assert.match((await leftForPeople(app, 1)) ?? '', /couldn't read its worktree/);
+    const store = app.store;
+    app.store = { ...store, getProject: () => ({ repo_dir: join(repo, 'not-a-repo') }) as Project };
+    assert.match((await leftForPeople(app, 1)) ?? '', /couldn't read its branch/);
+    app.store = store;
+    t = { ...base, branch: 'ticket/never-made' };
+    assert.equal(await leftForPeople(app, 1), null, 'a branch never made has nothing of its own');
   } finally {
     rmSync(repo, { recursive: true, force: true }); // timing-ok: own temp dir
   }

@@ -268,6 +268,7 @@ test('a question left open in the session is read off its screen: each question 
       { question: 'Keep it?', header: 'Keep it?', options: [{ label: 'Yes', recommended: true }, { label: 'No' }, { label: 'Later' }], multiSelect: false },
     ],
   });
+  assert.equal(questionsIn(`\u25cfInterrupted\u00b7noanswersavedforClaude'squestions:\r  \u23bf  \u00b7 Old one? (X / Y)\rlater work\r${askScreen}`)?.questions.length, 2, 'the last block, not an earlier one');
   assert.equal(questionsIn('working on it\r'), null);
   assert.equal(questionsIn("\u25cfInterrupted\u00b7noanswersavedforClaude'squestions:\r  \u23bf  \u00b7 No options here\r"), null, 'a card needs 2 options');
 });

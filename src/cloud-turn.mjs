@@ -85,7 +85,7 @@ export function readResult(text) {
  */
 export function questionsIn(screen) {
   const text = plain(screen);
-  const m = /no\s*answer\s*saved\s*for\s*Claude's\s*questions:?/i.exec(text);
+  const m = [...text.matchAll(/no\s*answer\s*saved\s*for\s*Claude's\s*questions:?/gi)].at(-1); // the last: an earlier one was answered since (an answered question reads as an error, not Interrupted)
   if (!m) return null;
   const questions = [];
   for (const line of text.slice(m.index + m[0].length).split(/\r\n|\r|\n/)) {

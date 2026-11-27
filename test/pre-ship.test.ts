@@ -330,3 +330,27 @@ test("a closed minion's branches that GitHub wouldn't delete are deleted next ro
   assert.equal(w.pushed(), null);
   assert.equal(w.record(), undefined);
 });
+
+test("a cancel GitHub refuses when the go is answered is asked again; a closed minion's run is cancelled before its branches go", async () => {
+  const r = repo();
+  const w = world(r);
+  await w.pre.tick();
+  const commit = w.pushed()!;
+  w.run(commit, 'in_progress', null);
+  w.set({ cards: [] });
+  w.gh.post = 500;
+  await w.pre.tick();
+  assert.notEqual(w.record()?.stopped, true);
+  w.gh.post = 202;
+  await w.pre.tick();
+  assert.deepEqual(w.posts, ['repos/someone/other/actions/runs/70/cancel', 'repos/someone/other/actions/runs/70/cancel']);
+  assert.equal(w.record()?.stopped, true);
+  w.set({ cards: [SHIP_CARD] });
+  w.run(commit, 'in_progress', null);
+  await w.pre.tick();
+  w.ticket.status = 'closed';
+  await w.pre.tick();
+  assert.equal(w.posts.at(-1), 'repos/someone/other/actions/runs/70/cancel', 'the run is cancelled, not left going');
+  assert.equal(w.pushed(), null);
+  assert.equal(w.record(), undefined);
+});

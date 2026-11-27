@@ -48,7 +48,7 @@ export interface PreRun {
   yielded?: boolean;
   /** Stopped because the go stopped waiting: runs again if it comes back on the same commit. */
   stopped?: boolean;
-  /** Failed tries of a rerun or of deleting the branches: given up at TRIES. */
+  /** Failed tries of a rerun, a cancel for a stop or deleting the branches: given up at TRIES. */
   tries?: number;
 }
 
@@ -174,13 +174,14 @@ export class PreShip {
       const p = projects.get(r.project);
       const t = store.getTicket(r.ticket);
       if (!p || !t || t.status === 'closed') {
-        if (!p || !r.commit || (await this.unpush(p, r)) || (r.tries = (r.tries ?? 0) + 1) >= TRIES) delete runs[id];
+        // Deleting the branch doesn't stop its run: cancel it first.
+        if (!p || !r.commit || ((await this.cancel(p, r)) && (await this.unpush(p, r))) || (r.tries = (r.tries ?? 0) + 1) >= TRIES) delete runs[id];
         continue;
       }
       if (r.told || r.stopped) continue;
       if (!waiting.has(r.ticket)) {
-        await this.cancel(p, r);
-        r.stopped = true;
+        // A cancel GitHub refused is asked again next round, up to TRIES times.
+        if ((await this.cancel(p, r)) || (r.tries = (r.tries ?? 0) + 1) >= TRIES) [r.stopped, r.tries] = [true, 0];
       } else if (await yielding(p)) {
         r.yielded = true;
         await this.cancel(p, r);

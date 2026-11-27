@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Project, Ticket } from '../src/db-rows.ts';
-import { systemPrompt, turnContext, type TurnMachine } from '../src/prompts.ts';
+import { CHECKOUT, systemPrompt, turnContext, type TurnMachine } from '../src/prompts.ts';
 import { fake } from './typed.ts';
 
 // The starting prompt's size budget (#415): every API call re-reads it, so it only grows by decision.
@@ -19,9 +21,14 @@ const BUDGET = {
 const app = 'x'.repeat(11_664);
 const project = fake<Project>({ id: 2, name: 'Citadel', instructions: 'y'.repeat(10_123), approval_rules: '', onboarding: 'done', repo_dir: '/repo' });
 const minion = fake<Ticket>({ id: 929, number: 415, title: 'Prompt size budget check', kind: 'ticket', branch: 'ticket/415-prompt-size-budget-check' });
+// The Citadel scheme's Taskmaster prompt names the live checkout's path (prompts.ts CHECKOUT), so its length depended on where the
+// tests ran: a worktree's path and a CI runner's differ (#2172; #2158 passed here and ran 16 characters over in CI). Every length is
+// measured with that path pinned to the live checkout's own.
+const PINNED_CHECKOUT = '/home/cara/claude-coordinator';
+const pinned = (prompt: string, checkout = CHECKOUT): string => prompt.replaceAll(checkout, PINNED_CHECKOUT);
 const prompts = {
-  minion: systemPrompt(project, minion, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app),
-  taskmaster: systemPrompt(project, { ...minion, kind: 'coordinator' }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app),
+  minion: pinned(systemPrompt(project, minion, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app)),
+  taskmaster: pinned(systemPrompt(project, { ...minion, kind: 'coordinator' }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app)),
 };
 
 /** Each line's length, keyed by how it starts, to say which lines grew since the baseline. */
@@ -68,10 +75,36 @@ for (const role of ['minion', 'taskmaster'] as const) {
 // Build branches (#592): the build minion's steps and the Taskmaster's test for a build fit the same budgets.
 test("a build minion's and a Taskmaster's prompt with builds on stay within the budgets too", () => {
   // With an open PR too, the longest minion prompt (#760: the PR line's details come only then).
-  const owner = systemPrompt(project, { ...minion, build: 7 }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], { build: 7, branch: null, owner: true }, true, null, null, true);
-  const taskmaster = systemPrompt(project, { ...minion, kind: 'coordinator' }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], null, true);
+  const owner = pinned(systemPrompt(project, { ...minion, build: 7 }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], { build: 7, branch: null, owner: true }, true, null, null, true));
+  const taskmaster = pinned(systemPrompt(project, { ...minion, kind: 'coordinator' }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, app, null, [], null, true));
   assert.ok(owner.length <= BUDGET.minion, `build minion: ${owner.length} > ${BUDGET.minion}`);
   assert.ok(taskmaster.length <= BUDGET.taskmaster, `Taskmaster: ${taskmaster.length} > ${BUDGET.taskmaster}`);
+});
+
+// #2172: the same prompt, from two copies of the code in checkouts of different path lengths, measures the same once the path is pinned.
+test("a Taskmaster's measured length doesn't depend on where the checkout is", () => {
+  const root = new URL('../', import.meta.url).pathname;
+  const probe = `import { CHECKOUT, systemPrompt } from './src/prompts.ts';
+const project = { id: 2, name: 'Citadel', instructions: 'y'.repeat(10_123), approval_rules: '', onboarding: 'done', repo_dir: '/repo' };
+const minion = { id: 929, number: 415, title: 'Prompt size budget check', kind: 'coordinator', branch: 'ticket/415-prompt-size-budget-check' };
+console.log(JSON.stringify({ checkout: CHECKOUT, prompt: systemPrompt(project, minion, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, 'x'.repeat(11_664)) }));`;
+  const base = mkdtempSync(join(tmpdir(), 'prompt-budget-'));
+  try {
+    const sizes = ['a', 'a/much/longer/checkout/path/than/the/first'].map((sub) => {
+      const dir = join(base, sub);
+      for (const d of ['src', 'public']) cpSync(join(root, d), join(dir, d), { recursive: true, filter: (p) => !p.includes('node_modules') });
+      writeFileSync(join(dir, 'probe.ts'), probe);
+      const run = spawnSync(process.execPath, ['--no-warnings', 'probe.ts'], { cwd: dir, encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const out = JSON.parse(run.stdout.trim().split('\n').at(-1) as string) as { checkout: string; prompt: string };
+      assert.ok(out.prompt.includes(out.checkout), 'the probe prompt names its checkout');
+      return { raw: out.prompt.length, pinned: pinned(out.prompt, out.checkout).length };
+    });
+    assert.notEqual(sizes[0].raw, sizes[1].raw, 'the raw lengths differ with the path');
+    assert.equal(sizes[0].pinned, sizes[1].pinned);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('saving instructions says what they cost, the same in the settings page and the Taskmaster tools', async () => {

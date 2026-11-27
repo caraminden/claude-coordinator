@@ -645,7 +645,7 @@ function historyTab(s) {
       'section',
       { class: 'ci-block ci-history' },
       h('h3', { class: 'settings-section', 'data-hue': reds ? 'danger' : 'running' }, 'Ships'),
-      statTiles([String(shown.length), 'ship runs, last day', 'running'], med != null && [mmss(med), 'median push to verdict on GitHub', 'running'], [String(moved), 'to the desktop', moved ? 'held' : 'done'], [String(reds), `red of ${done.length}`, reds ? 'danger' : 'done']),
+      statTiles([String(shown.length), 'ship tries, last day', 'running'], med != null && [mmss(med), 'median push to verdict on GitHub', 'running'], [String(moved), 'to the desktop', moved ? 'held' : 'done'], [String(reds), `red of ${done.length}`, reds ? 'danger' : 'done']),
       showFirst({ key: `ci-ships-${s.id}`, items: shown.map(shipItem), n: 6, noun: 'ship runs', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows.flat()) }),
     ),
     block(null, otherReds ? 'danger' : 'held', 'ci-other', otherRow),

@@ -620,9 +620,9 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-place-head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 /* A place's heavy jobs (#2109): what, then running or what it waits on; a long command is cut, its title says all. */
 .st-heavy { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
-.st-heavy li { display: flex; gap: var(--space-2); justify-content: space-between; min-width: 0; }
-.st-heavy-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.st-heavy .muted { flex: none; }
+.st-heavy li { display: flex; flex-wrap: wrap; column-gap: var(--space-2); justify-content: space-between; min-width: 0; }
+.st-heavy-what { overflow-wrap: anywhere; min-width: 0; }
+.st-heavy .muted { margin-left: auto; }
 .st-place .meter-text { min-width: 8.5rem; }
 .runs-on-opt { display: flex; gap: var(--space-3); align-items: flex-start; margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .runs-on-opt input { width: auto; margin: var(--space-1) 0 0; }

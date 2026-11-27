@@ -41,8 +41,8 @@ test('each place lists its heavy jobs, running first, with what a waiting one wa
       jobs: [
         { scheme: 'Peek Auras', what: 'cargo test', threads: 8, waiting: null },
         { scheme: 'Delve', what: 'train (GPU job)', threads: 4, waiting: null },
-        { scheme: 'Peek Auras', what: 'cargo build', threads: 8, waiting: 'waiting for room' },
-        { scheme: '', what: 'APK build in o/r', threads: 6, waiting: 'waiting for room' },
+        { scheme: 'Peek Auras', what: 'cargo build', threads: 8, waiting: 'no room yet' },
+        { scheme: '', what: 'APK build in o/r', threads: 6, waiting: 'no room yet' },
       ],
     },
   ]);

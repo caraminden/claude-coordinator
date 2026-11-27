@@ -71,9 +71,10 @@ export function hostLoadBlock(l) {
   );
 
   // The same week by where each job ran (#2109), from the history's place column.
+  const placed = l.places.reduce((a, p) => a + p.jobs, 0);
   const away = l.places.filter((p) => p.place !== 'here').reduce((a, p) => a + p.jobs, 0);
   const [places] = settingsRow(
-    { key: 'host-places', icon: 'box', hue: 'accent', title: 'Where jobs ran this week', summary: l.places.length ? `${total.toLocaleString()} jobs · ${away.toLocaleString()} off perigee` : 'No heavy jobs ran this week' },
+    { key: 'host-places', icon: 'box', hue: 'accent', title: 'Where jobs ran this week', summary: l.places.length ? `${placed.toLocaleString()} jobs · ${away.toLocaleString()} off perigee` : 'No heavy jobs ran this week' },
     l.places.length
       ? showFirst({
           key: 'host-places',
@@ -83,7 +84,7 @@ export function hostLoadBlock(l) {
           wrap: (ps) =>
             h(
               'table',
-              { class: 'look-table host-week' },
+              { class: 'look-table host-week host-places' },
               h('thead', {}, h('tr', {}, h('th', {}, 'Place'), h('th', { class: 'num' }, 'Jobs'), h('th', { class: 'num host-median' }, 'Median wait'), h('th', {}, 'Waited on'))),
               h(
                 'tbody',

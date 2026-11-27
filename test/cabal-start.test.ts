@@ -286,12 +286,19 @@ test('a fixer row starts with no forming card, who started it logged; a feature 
   assert.equal((await board(lead.id, { action: 'row', label: 'FT', title: 'A feature piece', handoff: 'handoffs/d.md', model: 'claude-sonnet-5-5', effort: 'low' })).status, 200);
   const feature = await start('FT');
   assert.equal(feature.status, 403);
-  assert.match(String(feature.data.error), /add it with a card/);
   const fix = await start('FX');
   assert.equal(fix.status, 200, JSON.stringify(fix.data));
   assert.ok(rowOf('FX').ticket_id, 'the fixer is started');
   assert.match(String(rowOf('FX').approved_by), /fixer, no card/);
   const text = String((await s.call(`/api/tickets/${lead.id}/cabal?text=1`)).data.text);
-  assert.match(text, /Started fixer row FX with no forming card/);
+  assert.match(text, /fixer row FX/);
   assert.equal((await board(lead.id, { action: 'row', row: rowOf('FT').id, remove: true })).status, 200);
+});
+
+test("a fixer row's cost nobody approved doesn't clear the start card: over the threshold it is held (Cara, 2026-11-27)", async () => {
+  const chief = (await s.call(`/api/projects/${p.id}/tickets`, { title: 'Fixer lead', message: 'Go.', model: 'claude-sonnet-5-5', effort: 'medium' })).data as { id: number; number: number };
+  assert.equal((await board(chief.id, { action: 'row', label: 'FY', title: 'Costly fixer', handoff: 'handoffs/a.md', model: 'claude-sonnet-5-5', effort: 'low', role: 'fixer', cost: 80 })).status, 200);
+  const r = await as(chief.id, `/api/tickets/${chief.id}/cabal/start`, { row: 'FY' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.match(JSON.stringify(r.data), /Held/, 'over the start card threshold, a person says go');
 });

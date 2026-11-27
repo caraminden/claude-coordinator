@@ -41,7 +41,7 @@ asks, merges since your last wake, then every other open ask, answered together.
   Taskmaster starts it on its own people's go). Start every row whose `after` is met; past your width it waits as
   next up and starts by itself. Members chained on another's work start when it is in.
 - A feature piece people didn't approve (a new row, a changed handoff, model or cost) goes on a new forming card. Never
-  start around one. A fixer row (a red run, a failing test or a bug in the cabal's work) is the exception: add it and
+  start around one. A fixer row in your own scheme (a red run, a failing test or a bug in the cabal's work) is the exception: add it and
   start it at once, no card; the start card's budget threshold still applies.
 - Unseal, stop or reseal your own members with `cabal_member`; everything outside the cabal stays the Taskmaster's
   (`message_coordinator`).

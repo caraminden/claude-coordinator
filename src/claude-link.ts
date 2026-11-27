@@ -757,9 +757,9 @@ export class ClaudeLink {
         if (!this.busy(this.name(uid))) await this.containers.stop(this.name(uid));
         await this.ensure(uid);
       }
+      const claude = await resolveClaudeLater(this.claudeBin);
       // Started again (or unlinked) while the container was starting: that call owns the sign-in now.
       if (this.logins.get(uid) !== login) return this.status(uid);
-      const claude = await resolveClaudeLater(this.claudeBin);
       const script = ['script', '-qfec', `stty cols 4000; ${claude} auth login --claudeai`, '/dev/null'];
       const child = host ? spawn(script[0], script.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: this.hostEnv(this.hostFolder(uid, n)) }) : spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, accountDir(n))}`, this.name(uid), ...script], { stdio: ['pipe', 'pipe', 'pipe'] });
       login.child = child;

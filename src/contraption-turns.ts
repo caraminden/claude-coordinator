@@ -555,8 +555,8 @@ export class ContraptionTurns {
       const a = live.audit;
       if (a) this.store.putTurnAudit(id, { model: a.model, blind: req.blind, images: req.imageBlocks?.length ?? 0, system: clip(a.system), prompt: clip(a.prompt), output: clip(a.output) });
       // The files go last, off the thread: the turn's records above are written before anything waits.
-      await rm(dir.onHost, { recursive: true, force: true }).catch(() => {});
-      if (blind) await this.dropBlind(req.person, blind, at).catch(() => {});
+      await rm(dir.onHost, { recursive: true, force: true }).catch((err) => console.warn(`contraption ${c.name}: couldn't remove turn ${id}'s folder: ${thrown(err).code ?? 'error'}`));
+      if (blind) await this.dropBlind(req.person, blind, at).catch((err) => console.warn(`contraption ${c.name}: couldn't remove turn ${id}'s blind folder: ${thrown(err).code ?? 'error'}`));
     }
   }
 
@@ -890,6 +890,8 @@ export class ContraptionTurns {
             text: cap(kept.text),
             stop: String(result.stop_reason ?? result.subtype ?? 'end_turn'),
           });
+          // And after: an opt-out or delete during the write's awaits records itself first, then drops files, so one of the two removes it.
+          if (this.store.getSetting(optOutKey(req.person)) || !this.store.contraptionSession(c.id, req.person, req.session)) await rm(keepAt, { force: true });
         } catch (err) {
           console.warn(`contraption ${c.name}: couldn't keep a turn for replay: ${thrown(err).code ?? 'error'}`); // no content in the log
         }

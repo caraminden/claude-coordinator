@@ -15,6 +15,7 @@
  * Rust has no Citadel-wide cache: Peek Auras, the only Rust scheme, shares one sccache across its worktrees
  * through its own tools/rustc-wrapper (its cap is SCCACHE_CACHE_SIZE there).
  */
+import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { exists } from './build-output.ts';
@@ -47,8 +48,10 @@ export async function ensureGradleInit(home: string): Promise<boolean> {
   if ((await readFile(file, 'utf8').catch(() => null)) === GRADLE_INIT_SCRIPT) return false;
   await mkdir(dirname(file), { recursive: true });
   // A rename, so a build starting meanwhile never reads half a script.
-  await writeFile(`${file}.new`, GRADLE_INIT_SCRIPT);
-  await rename(`${file}.new`, file);
+  // Its own temporary name: a person's container and their Taskmaster's share the volume and start apart.
+  const temp = `${file}.${randomBytes(4).toString('hex')}.new`;
+  await writeFile(temp, GRADLE_INIT_SCRIPT);
+  await rename(temp, file);
   return true;
 }
 

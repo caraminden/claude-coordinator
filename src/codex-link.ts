@@ -137,8 +137,11 @@ export class CodexLink {
           clearTimeout(expire);
           if (code !== 0 && !login.error && this.logins.get(uid) === login) login.error = signInError(code, login.out);
           login.child = null;
-          login.done = true;
-          resolve();
+          // Done only once the login file has been looked at: a turn starting meanwhile sees the sign-in still waiting, never "not linked".
+          void this.refresh(uid).finally(() => {
+            login.done = true;
+            resolve();
+          });
         });
       });
     } catch (err) {

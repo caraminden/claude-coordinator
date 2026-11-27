@@ -530,7 +530,10 @@ const wait = setInterval(() => {
     rmSync(go);
     await codex.link(2);
     writeFileSync(go, 'ok');
-    await until("codex.status(2).state === 'linked'", () => codex.status(2).state === 'linked');
+    // A turn starting as the sign-in ends sees it waiting, then linked: never "not linked" in between.
+    let now = codex.status(2);
+    await until("codex.status(2).state !== 'waiting'", () => (now = codex.status(2)).state !== 'waiting');
+    assert.deepEqual(now, { state: 'linked' });
     // Signing out runs codex logout in the container, which deletes the login.
     await codex.unlink(2);
     assert.deepEqual(codex.status(2), { state: 'not linked' });

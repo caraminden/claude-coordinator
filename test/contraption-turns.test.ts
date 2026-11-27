@@ -4,6 +4,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -833,6 +835,28 @@ test("a kept turn writes the prompt, tool calls and reply to the home scheme's .
   assert.deepEqual(readdirSync(dir), []);
   assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', keep: true, blind: true }, mandate), /not both/);
   assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', keep: 'yes' }, mandate), /keep must be true or false/);
+});
+
+test('an opt-out that lands while a kept turn is being written leaves nothing of it', async () => {
+  const home = store.createProject('Peek write', null);
+  const app = contraptions.register({ name: 'kept-write', ...fields, home_scheme: home.id });
+  store.setContraptionUser(app.id, cara.id, true, cara.id);
+  const dir = join(data, 'projects', String(home.id), 'shared', 'project', '.replay', 'kept-write');
+  const real = fsp.appendFile;
+  // The opt-out route's first step lands between the turn's last check and its write; its file drop then finds nothing.
+  fsp.appendFile = (file, ...rest) => {
+    if (String(file).startsWith(dir)) store.setSetting(`replay_optout:${cara.id}`, true);
+    return real(file, ...rest);
+  };
+  syncBuiltinESMExports();
+  try {
+    await turn(app, { session: 'w1', keep: true });
+  } finally {
+    fsp.appendFile = real;
+    syncBuiltinESMExports();
+    store.setSetting(`replay_optout:${cara.id}`, false);
+  }
+  assert.deepEqual(existsSync(dir) ? readdirSync(dir) : [], []);
 });
 
 test('a person who opts out while a kept turn runs has nothing of it kept', async () => {

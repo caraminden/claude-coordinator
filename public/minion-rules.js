@@ -482,7 +482,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
   const ghRunners = () =>
     choice(
       { icon: 'spark', hue: 'running', title: "GitHub's own runners" },
-      settingsHelp("CI on GitHub's runners (CI_RUNNER=github) is free on a public repo, but may cost Actions minutes (private repo or larger runners).", "Ask makes a minion get a person's go first; OK lets it use them; Never keeps CI on this scheme's own runners."),
+      settingsHelp("CI on GitHub's runners (CI_RUNNER=github) costs Actions minutes.", "Ask makes a minion get a person's go first; OK lets it use them; Never keeps CI on this scheme's own runners."),
       'gh_runners',
       [
         ['ask', 'Ask first'],

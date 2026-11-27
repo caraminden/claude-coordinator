@@ -59,6 +59,7 @@ const RUNS_SCRIPTS = [
   'land-2.test.ts',
   'land-3.test.ts',
   'land-4.test.ts',
+  'land-github.test.ts',
   'land-deploy.test.ts',
   'land-queue.test.ts',
   'land-recover.test.ts',

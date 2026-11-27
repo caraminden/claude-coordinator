@@ -39,6 +39,7 @@ paths:
   - "test/land-2.test.ts"
   - "test/land-3.test.ts"
   - "test/land-4.test.ts"
+  - "test/land-github.test.ts"
   - "test/land-setup.ts"
   - "test/land-build.test.ts"
   - "test/land-queue.test.ts"

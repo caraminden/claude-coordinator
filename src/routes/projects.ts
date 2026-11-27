@@ -33,7 +33,7 @@ import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
-import { helpersOn, type SweepNight, sweepsKey } from '../cloud-flakes.ts';
+import { HELPERS_SWITCH, helpersOn, type SweepNight, sweepsKey } from '../cloud-flakes.ts';
 import { LAND_REDS_MS, landReds, readRetro } from '../land-reds.ts';
 import { runsOnPick } from './workers.ts';
 import { MODEL_REQUIRED, scheduleFields, scheduleTemplate, scheduleView } from './schedule-api.ts';
@@ -926,7 +926,8 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    // Citadel-wide settings: the GitHub owner new schemes' repos are made under, and whether cloud sessions may start (#2193).
+    // Citadel-wide settings: the GitHub owner new schemes' repos are made under, whether cloud sessions may start (#2193), and
+    // whether citadel-cloud may hand a step to one (#2200).
     method: ['GET', 'PUT'],
     path: '/api/app/settings',
     who: ['person'],
@@ -937,14 +938,16 @@ export const projectRoutes: Route[] = [
         const owner = typeof body.github_owner === 'string' ? body.github_owner.trim() : '';
         if (body.github_owner !== undefined && owner && !validOwner(owner)) throw new HttpError(400, 'GitHub owner must be an account or organisation name, like caraminden');
         if (body.cloud_sessions !== undefined && typeof body.cloud_sessions !== 'boolean') throw new HttpError(400, 'cloud_sessions is true or false');
-        // Both checked before either is saved.
+        if (body.cloud_helpers !== undefined && typeof body.cloud_helpers !== 'boolean') throw new HttpError(400, 'cloud_helpers is true or false');
+        // All checked before either is saved.
         if (body.github_owner !== undefined) {
           if (owner) app.store.setSetting(GITHUB_OWNER, owner);
           else app.store.deleteSetting(GITHUB_OWNER);
         }
         if (body.cloud_sessions !== undefined) app.store.setSetting(CLOUD_SWITCH, body.cloud_sessions);
+        if (body.cloud_helpers !== undefined) app.store.setSetting(HELPERS_SWITCH, body.cloud_helpers);
       }
-      return json(res, 200, { github_owner: app.store.getSetting<string>(GITHUB_OWNER), github_owner_default: await citadelOwner(), cloud_sessions: app.runner.cloud.on() });
+      return json(res, 200, { github_owner: app.store.getSetting<string>(GITHUB_OWNER), github_owner_default: await citadelOwner(), cloud_sessions: app.runner.cloud.on(), cloud_helpers: helpersOn(app.store) });
     },
   },
   {

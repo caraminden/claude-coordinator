@@ -116,7 +116,7 @@ test("the GitHub owner defaults to the owner of Citadel's origin and can be set"
   })();
   const r = await s.call('/api/app/settings');
   assert.equal(r.status, 200);
-  assert.deepEqual(r.data, { github_owner: null, github_owner_default: repoSlug(origin)?.split('/')[0] ?? null, cloud_sessions: false });
+  assert.deepEqual(r.data, { github_owner: null, github_owner_default: repoSlug(origin)?.split('/')[0] ?? null, cloud_sessions: false, cloud_helpers: false });
   assert.equal((await s.call('/api/app/settings', { github_owner: 'not a name' }, 'PUT')).status, 400);
   assert.equal((await s.call('/api/app/settings', { github_owner: 'test-owner' }, 'PUT')).data.github_owner, 'test-owner');
   // The cloud sessions switch (#2193): off by default, a boolean only, and kept.
@@ -124,6 +124,11 @@ test("the GitHub owner defaults to the owner of Citadel's origin and can be set"
   assert.equal((await s.call('/api/app/settings', { cloud_sessions: true }, 'PUT')).data.cloud_sessions, true);
   assert.equal((await s.call('/api/app/settings', { cloud_sessions: false }, 'PUT')).data.cloud_sessions, false);
   assert.equal((await s.call('/api/app/settings', { github_owner: 'other-owner', cloud_sessions: 'yes' }, 'PUT')).status, 400);
+  // The cloud helpers switch (#2200): the same, and apart from the sessions switch.
+  assert.equal((await s.call('/api/app/settings', { cloud_helpers: 1 }, 'PUT')).status, 400);
+  const helpers = (await s.call('/api/app/settings', { cloud_helpers: true }, 'PUT')).data;
+  assert.deepEqual([helpers.cloud_helpers, helpers.cloud_sessions], [true, false]);
+  assert.equal((await s.call('/api/app/settings', { cloud_helpers: false }, 'PUT')).data.cloud_helpers, false);
   assert.equal((await s.call('/api/app/settings')).data.github_owner, 'test-owner', 'a refused PUT saves neither field');
   // Off, create_ticket's cloud mark is no refusal (a scheme with no GitHub repo can't keep one): the minion runs here, and the reply says so.
   const plain = (await create({ name: 'Cloud off', source: 'none' })).data;

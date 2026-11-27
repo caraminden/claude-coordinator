@@ -157,11 +157,13 @@ test('one scheme a tick, once a Pacific day, not 3-6 AM; a failure keeps the las
   now += DAY;
   fail = true;
   assert.equal(await jobs.tick(), peek.id);
+  stamp(peek.id); // the write's own mtime is the real clock's, which would count as "today" once the real date reaches the fake one
   const { kept } = await jobs.view(peek.id);
   assert.equal(kept?.error, 'git broke');
   assert.equal(kept?.at, now - DAY);
   assert.equal(kept?.files.length, 1);
   assert.equal(await jobs.tick(), spec.id); // the failed one doesn't hold up the next
+  stamp(spec.id);
   now += DAY;
   fail = false;
   assert.equal(await jobs.tick(), peek.id);

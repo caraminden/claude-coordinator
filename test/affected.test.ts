@@ -305,7 +305,7 @@ test('--narrow picks only touched, same-name and @pinned tests, however many imp
   const wide = affected(map, changed, tracked, repo);
   const only = (a: typeof narrow) => a.run.map((r) => r.test);
   assert.ok(only(wide).length > only(narrow).length + 10, 'a change to runner.ts and db.ts has many dependants');
-  assert.ok(only(narrow).every((t) => narrow.run.find((r) => r.test === t)!.why.every((w) => w === 'touched' || w.startsWith('name ') || (w.startsWith('map:') && map.pinned.includes(t)))));
+  assert.ok(only(narrow).every((t) => narrow.run.find((r) => r.test === t)!.why.every((w) => w === 'touched' || w.startsWith('name ') || ((w.startsWith('map:') || w.startsWith('inherit ')) && map.pinned.includes(t)))));
   assert.ok(only(narrow).includes('test/affected.test.ts') && only(narrow).includes('test/inbox.test.ts'));
   assert.ok(only(wide).includes('test/db-setup.test.ts') && !only(narrow).includes('test/db-setup.test.ts'));
   assert.deepEqual([narrow.unmapped, narrow.full], [[], false], 'an unmapped path is not an error in the narrow pick');
@@ -330,7 +330,7 @@ test("Citadel's map: a change to runner.ts or db.ts runs the slow pinning tests 
   for (const t of ['test/list-reads.test.ts', 'test/boot-check.test.ts']) assert.ok(narrow('src/runner.ts').includes(t), `src/runner.ts picks ${t}`);
   for (const t of ['test/list-reads.test.ts', 'test/access-matrix.test.ts']) assert.ok(narrow('src/db.ts').includes(t), `src/db.ts picks ${t}`);
   assert.ok(narrow('src/http.ts').includes('test/access-matrix.test.ts'));
-  assert.ok(!narrow('src/inbox.ts').some((t) => map.pinned.includes(t)), 'a file no rule ties to them runs none');
+  assert.ok(!narrow('src/wording.ts').some((t) => map.pinned.includes(t)), 'a file no rule ties to them runs none');
 });
 
 test('the command with --narrow says how many more tests the wide pick would run', () => {

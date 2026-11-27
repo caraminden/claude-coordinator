@@ -111,3 +111,9 @@ test("a ship that adds the case a burn-in failed is that red's change, not a rac
   const [red] = landReds([run(50, 'ticket/50-a', '01:00', '01:10')], lines, SINCE).reds;
   assert.deepEqual([red.cause, red.why], ['change', '#51 adds the failing test case']);
 });
+
+test("a run the ship script moved off GitHub isn't a ship of its own: the desktop run that took over counts once (#2231)", () => {
+  const runs = [run(50, 'ticket/50-a', '01:00', '01:01', 'cancelled'), { ...run(51, 'ticket/50-a', '01:01', '01:09', 'success'), event: 'workflow_dispatch' }, run(52, 'ticket/52-b', '02:00', '02:01', 'cancelled')];
+  const out = landReds(runs, day('- 01:01:05Z · ci to desktop · ticket/50-a · not every shard started within 60 s of the push'), SINCE);
+  assert.deepEqual({ runs: out.runs, green: out.green, other: out.other }, { runs: 2, green: 1, other: 1 }, 'the cancel by hand still counts as other; the moved one is gone');
+});

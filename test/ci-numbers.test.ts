@@ -355,3 +355,22 @@ test("a proof's or heavy job's window marks the ship suite it crossed as overlap
   assert.match(readFileSync(join(win, '9-1'), 'utf8'), /^100 [1-9]\d+$/m);
   assert.equal(readFileSync(join(win, '8-1'), 'utf8'), '100 0\n');
 });
+
+test("ship runs' push-to-verdict from GitHub's times is kept once a run on main's line, and a step in it flags (#2231)", () => {
+  const store = new Store(join(root, 'push-to-verdict.db'));
+  const p = store.createProject('Peek', 'https://github.com/caraminden/peek-auras', null);
+  const numbers = new CiNumbers(store, () => Date.UTC(2026, 10, 27));
+  const told: number[] = [];
+  numbers.onStep = (_p, step) => told.push(step.level);
+  const at = (i: number) => Date.UTC(2026, 10, 27, 0, i);
+  const times = (from: number, values: number[]) => values.map((value, i) => ({ runId: from + i, sha: `s${from + i}`, branch: `land/ticket/${from + i}-a`, workflow: 'tests on GitHub', at: at(from + i), value }));
+  numbers.own(p, times(1, Array(10).fill(200)));
+  // Every refresh hands the same runs back: each is kept once.
+  numbers.own(p, times(1, Array(10).fill(200)));
+  const kept = store.ciNumbers(p.id, 'push-to-verdict');
+  assert.equal(kept.length, 10);
+  assert.deepEqual([...new Set(kept.map((n) => `${n.ref} ${n.unit} ${n.workflow}`))], ['refs/heads/main s tests on GitHub']);
+  assert.deepEqual(told, []);
+  numbers.own(p, times(11, [300, 300, 300]));
+  assert.deepEqual(told, [300]);
+});

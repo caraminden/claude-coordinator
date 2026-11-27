@@ -25,6 +25,7 @@ export interface LandRun {
   created_at: string;
   updated_at?: string;
   html_url?: string;
+  event?: string;
 }
 /** One retro-log line: when, its kind (`ship train red`), the rest split on ` · `, and the run its link names. */
 export interface RetroLine {

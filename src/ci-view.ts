@@ -173,10 +173,10 @@ export function fallbacksOf(lines: { at: number; kind: string; parts: string[] }
     .sort((a, b) => a.at - b.at);
 }
 
-/** A ship run on GitHub that the ship script moved off it (#2231): a `ci to desktop` line for its branch from its push until shortly after it stopped (land.sh cancels it, then writes the line). */
+/** A ship run on GitHub that the ship script moved off it (#2231): a `ci to desktop` line for its branch from its push until shortly after it stopped (land.sh cancels it, dispatches the desktop run, then writes the line, so the dispatched take-over is never the moved one). */
 export const MOVED_TAIL_MS = 3 * 60_000;
-export function movedOff(r: { head_branch: string; created_at: string; updated_at?: string }, fallbacks: Fallback[]): Fallback | undefined {
-  if (!r.head_branch.startsWith('land/')) return undefined;
+export function movedOff(r: { head_branch: string; created_at: string; updated_at?: string; event?: string }, fallbacks: Fallback[]): Fallback | undefined {
+  if (!r.head_branch.startsWith('land/') || r.event === 'workflow_dispatch') return undefined;
   const branch = r.head_branch.slice('land/'.length);
   const from = Date.parse(r.created_at),
     to = Date.parse(r.updated_at ?? r.created_at) + MOVED_TAIL_MS;

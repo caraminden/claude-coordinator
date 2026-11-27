@@ -30,7 +30,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   );
 
   // Stands in for claude: records its arguments, talks to each machine server it was given, writes
-  // what came back, then ends the turn.
+  // what came back, then ends the turn. So the turn may already be over once its line is in turns.jsonl: a check that
+  // needs it running (an owned machine opens only then, Build 10 H1) belongs in here; one after waits for its end.
   const fakeClaude = join(root, 'claude-fake');
   writeFileSync(
     fakeClaude,

@@ -52,6 +52,8 @@ asks, merges since your last wake, then every other open ask, answered together.
   - **Silent**, or the answer would bend or reverse a person's pick: ask people on a card (`ask_question`, `to` the
     build's requester, your pick marked). The asking member waits on it and the others carry on. Put the answer in the
     spec's decisions log, quoted and dated, and on the board.
+  - An answer that gives another member work ("H3's switch writes it") goes on that member's row note as a done-when
+    line, and you check it is built when that member merges (Build 10: a flag nothing on the page wrote).
 - If no member has made progress (a merge, a ship, a note) for 3 days, ask people with a card: carry on, cut the
   roster, or close the cabal.
 

@@ -106,6 +106,9 @@ public/**: test/boot-check.test.ts test/ui-contract.test.ts test/relative-urls.t
 public/reviews.js: test/review-set-api.test.ts
 # home.js imports the app shell (core, sidebar), which node can't load; inbox.js loads it lazily (Build 5).
 public/home.js: test/inbox.test.js test/home.test.ts
+# The Machines page's browser tests drive it through a server, so @imports can't pick them (Build 10 retro).
+public/settings-machines.js: test/machine-worker-browser.test.ts test/machine-remove-browser.test.ts test/machine-setup-browser.test.ts
+public/machine-*.js: test/machine-worker-browser.test.ts test/machine-remove-browser.test.ts test/machine-setup-browser.test.ts
 src/theme.ts: test/ui-contract.test.ts test/theme.test.ts
 test/ui-contract.json: test/ui-contract.test.ts
 src/previews.ts: test/relative-urls.test.ts

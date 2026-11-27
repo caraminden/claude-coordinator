@@ -115,12 +115,14 @@ export function hostMounts(folders, mounted) {
 }
 
 export class WorkerAgent {
-  /** @param {{ config: unknown, appUrl: string, token: string, Worker: typeof import('./machine-worker.mjs').Worker, installed?: number, log?: (...a: unknown[]) => void, run?: typeof run, exit?: (code: number) => void }} o */
+  /** @param {{ config: unknown, appUrl: string, token: string, Worker: typeof import('./machine-worker.mjs').Worker, accounts?: { ACCOUNTS: number, accountDir: (n: number) => string }, installed?: number, log?: (...a: unknown[]) => void, run?: typeof run, exit?: (code: number) => void }} o */
   constructor(o) {
     this.cfg = agentConfig(o.config);
     this.appUrl = o.appUrl;
     this.token = o.token;
     this.Worker = o.Worker;
+    /** The account folders to watch for a sign-in: machine-worker.mjs's own (ACCOUNTS, accountDir), so a raised count follows; without them (an older copy of it) the first only. */
+    this.accountDirs = o.accounts ? Array.from({ length: o.accounts.ACCOUNTS }, (_, i) => o.accounts.accountDir(i + 1)) : ['.claude'];
     this.log = o.log ?? (() => {});
     this.exec = o.run ?? run;
     /** @type {typeof run} */
@@ -312,7 +314,7 @@ export class WorkerAgent {
       this.github = has('.config/gh/hosts.yml');
       // The worker looks for itself every few minutes; a sign-in just made there shows at once.
       // Each account's folder (machine-worker.mjs accountDir): a sign-in made or gone in any of them is read again.
-      const slots = ['.claude', '.claude-2', '.claude-3'].map((dir) => has(`${dir}/.credentials.json`));
+      const slots = this.accountDirs.map((dir) => has(`${dir}/.credentials.json`));
       const known = this.worker.signedIn.slots?.map((s) => s.n) ?? null;
       if (!slots.includes(null) && String(slots.flatMap((is, i) => (is ? [i + 1] : []))) !== String(known)) await this.worker.checkSignIn();
     }
@@ -578,9 +580,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const res = await fetch(new URL('/machine-worker.mjs', appUrl), { signal: AbortSignal.timeout(30_000) }).catch(() => null);
     if (res?.ok) writeFileSync(to, await res.text());
     else if (!existsSync(to)) throw new Error(`could not download machine-worker.mjs (${res?.status ?? 'no answer'})`);
-    const { Worker } = await import('./machine-worker.mjs');
+    const mod = await import('./machine-worker.mjs');
+    const { Worker } = mod;
     const installed = Number(safeRead(join(dirname(file), 'installed'))) || 0;
-    await new WorkerAgent({ config, appUrl, token, installed, Worker, log }).start();
+    await new WorkerAgent({ config, appUrl, token, installed, Worker, accounts: mod.accountDir && mod.ACCOUNTS ? { ACCOUNTS: mod.ACCOUNTS, accountDir: mod.accountDir } : undefined, log }).start();
   } catch (err) {
     log(`This worker can't start: ${err.message}`);
     process.exit(1);

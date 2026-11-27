@@ -2337,12 +2337,18 @@ const preShip = new PreShip({
 if (!BOOT_CHECK && !PREVIEW) {
   every('pre-ship runs', PRE_TICK_MS, () => preShip.tick(), 2 * 60_000);
   // A landing's mark, the moment it pushes a ship's run: the pre-ship runs give it GitHub's slots now, not at the next tick.
+  // No land line here yet (a fresh checkout): the tick finds a ship's mark instead, within TICK_MS.
   if (deployState)
-    try {
-      watch(deployState, (_e, name) => void (String(name ?? '').startsWith('pre-yield.') && preShip.tick().catch((e) => console.error('Pre-ship:', e)))).unref();
-    } catch (err) {
-      console.error(`Pre-ship: can't watch ${deployState}:`, err);
-    }
+    void stat(deployState).then(
+      () => {
+        try {
+          watch(deployState, (_e, name) => void (String(name ?? '').startsWith('pre-yield.') && preShip.tick().catch((e) => console.error('Pre-ship:', e)))).unref();
+        } catch (err) {
+          console.error(`Pre-ship: can't watch ${deployState}:`, err);
+        }
+      },
+      () => {},
+    );
 }
 // After the first read of the long jobs: before it, a held one would look free to start again in the day.
 if (!BOOT_CHECK && !PREVIEW) void longJobs.refresh().then(() => ciHold.start());

@@ -136,6 +136,7 @@ test('a command runs on the minion commit in the cloud: progress lines, its outp
     said.some((l) => /^citadel-cloud: \d+ min: /.test(l)),
     `a progress line: ${said.join('\n')}`,
   );
+  assert.ok(!said.some((l) => /min:\s*$/.test(l)), `a beat before any output reads "N min", not "N min:": ${said.join('\n')}`);
   const reply = said.find((l) => l.includes('after 0 min in the cloud')) ?? '';
   assert.match(reply, /exit 0/);
   assert.match(reply, /the minion commit[\s\S]*all done/, 'ran on the unpushed commit');
@@ -353,7 +354,7 @@ test('check: a step on its own that goes quiet or passes its limit is due; colle
   const hand = { cwd: work, branch: 'cloud/t7-quiet', ref: 'cloud/src-t7-quiet', beat, url: 'https://claude.ai/code/session_q', began: Date.now(), minutes: 60, quietMs: 60_000, job: job('echo here', { out }), event: 9 };
   writeFileSync(join(out, '.hand.json'), JSON.stringify(hand));
   assert.equal(due(out), null, 'a fresh beat: still running');
-  assert.match(due(out, Date.now() + 5 * 60_000) ?? '', /^no progress for [45] minutes$/);
+  assert.match(due(out, Date.now() + 5 * 60_000) ?? '', /^no progress for [45] min$/);
   assert.equal(due(out, Date.now() + 76 * 60_000), 'it passed its time limit');
   assert.equal(await collect(out), 0);
   assert.deepEqual(

@@ -388,7 +388,7 @@ async function heavy(place: Exclude<Place, 'cloud'>, job: Job, on: (state: strin
   const tail = (n: number) => out.trimEnd().split('\n').slice(-n).join('\n');
   const began = Date.now();
   const mins = () => Math.round((Date.now() - began) / 60_000);
-  const timer = setInterval(() => on(`${mins()} min: ${tail(1).slice(0, 200)}`, tail(30)), io.lineMs);
+  const timer = setInterval(() => on(`${mins()} min${tail(1) ? `: ${tail(1).slice(0, 200)}` : ''}`, tail(30)), io.lineMs);
   stopping = () => child.kill('SIGTERM');
   const code = await new Promise<number>((r) => {
     child.once('error', () => r(127));
@@ -425,7 +425,7 @@ export function due(out: string, now = Date.now()): string | null {
   const fetched = git('fetch', '-q', 'origin', `+refs/heads/${h.beat}:refs/citadel-cloud/${h.beat}`);
   const at = fetched.status === 0 ? Number(git('log', '-1', '--format=%ct', `refs/citadel-cloud/${h.beat}`).stdout.trim()) * 1000 : 0;
   // The VM's clock writes the beat's time; a skew of minutes only moves this by as much.
-  return at && now - at > h.quietMs ? `no progress for ${Math.round((now - at) / 60_000)} minutes` : null;
+  return at && now - at > h.quietMs ? `no progress for ${Math.round((now - at) / 60_000)} min` : null;
 }
 
 /** Bring a step that ran on its own home: its reply, exit code and files, or a run here when it didn't deliver. */

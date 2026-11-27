@@ -461,7 +461,7 @@ export async function cloudTurn(job) {
         break;
       }
       emit({ type: 'system', subtype: 'cloud', session, quiet: true });
-      return end(`No progress from the cloud session ${session ?? '(its id never showed)'} for ${Math.round(job.quietMs / 60_000)} minutes, and no result through teleport: it isn't running the job.${failed ? `\n\nThe last error: ${failed}` : ''}`, true);
+      return end(`No progress from the cloud session ${session ?? '(its id never showed)'} for ${Math.round(job.quietMs / 60_000)} min, and no result through teleport: it isn't running the job.${failed ? `\n\nThe last error: ${failed}` : ''}`, true);
     }
     // shortcut: a start with no id keeps no branch for a later look, so a push after this turn ends is lost; save the branch alone if that bites.
     // Quiet for idleMs with no push: read the session back. It may have a question open that only claude.ai shows (#2191).

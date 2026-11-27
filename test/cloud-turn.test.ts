@@ -358,6 +358,6 @@ test("a helper's progress commits show as live lines, the exit code comes back, 
 test("a helper's session with no progress for quietMs is read back once and then ends as not delivered, long before its limit", async () => {
   const evs = await drive({ branch: 'cloud/t7-hush', session: 'session_01FAKEabc123', beat: 'cloud/t7-hush-beat', quietMs: 1500, text: 'cloud/t7-hush', limitMs: 600_000, teleportMs: 1000 }, { FAKE_MODE: 'stuck' });
   assert.ok(evs.some((e) => e.subtype === 'cloud' && e.quiet === true));
-  assert.match((evs.at(-1) as { result: string }).result, /No progress from the cloud session session_01FAKEabc123 for \d+ minutes/);
+  assert.match((evs.at(-1) as { result: string }).result, /No progress from the cloud session session_01FAKEabc123 for \d+ min,/);
   assert.equal((evs.at(-1) as { is_error: boolean }).is_error, true);
 });

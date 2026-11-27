@@ -117,7 +117,8 @@ async function child(job) {
       return;
     }
     try {
-      push(commitOf({}, `${SKIP} ${minutes()} min: ${tail(3).split('\n').at(-1)?.slice(0, 300) ?? ''}`), job.beat);
+      const last = tail(3).split('\n').at(-1)?.slice(0, 300) ?? '';
+      push(commitOf({}, `${SKIP} ${minutes()} min${last ? `: ${last}` : ''}`), job.beat);
     } catch (err) {
       writeFileSync(join(DIR, 'beat-error'), String(err));
     }

@@ -178,6 +178,7 @@ jobs:
           # Overlapped (#1811, #2221): another run's window shared at least a fifth of this suite's time. An open window (end 0)
           # counts to now only while its job's pid (the name's last part) lives and the file was written in the last 30 min:
           # a dead job's orphaned toucher kept its window fresh and marked every clean suite as shared.
+          # (The pid is read on this machine: every runner here shares one pid space, as the distro's runners do.)
           rm -f "$RUNNER_TEMP/suite-overlap"
           for f in "$win"/*; do
             [ "$f" != "$me" ] || continue

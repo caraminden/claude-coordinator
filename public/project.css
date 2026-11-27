@@ -525,16 +525,21 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-shards { display: grid; grid-template-columns: repeat(var(--n, 20), minmax(0, 1fr)); gap: 3px; margin-top: var(--space-2); }
 .ci-shard { display: block; aspect-ratio: 1 / 1.4; border-radius: 3px; background: var(--c, var(--line)); }
 .ci-shard[data-s="done"] { --c: var(--done); }
-.ci-shard[data-s="red"] { --c: var(--danger); }
+.ci-shard[data-s="red"] { --c: var(--error); }
 .ci-shard[data-s="run"] { --c: var(--running); animation: ci-shard-pulse 1.4s ease-in-out infinite; }
 .ci-shard[data-s="queued"] { --c: transparent; outline: 1.5px dashed var(--waiting); outline-offset: -1.5px; }
 @keyframes ci-shard-pulse { 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) { .ci-shard[data-s="run"] { animation: none; } }
 .ci-shard-key { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin-top: 0.35rem; font-size: 0.8em; }
 .ci-shard-key .ci-shard { display: inline-block; width: 0.55rem; margin-right: 0.3rem; vertical-align: -0.1rem; animation: none; }
-.ci-ship-meta { display: inline-flex; align-items: center; gap: 0.4rem; }
-.ci-ship-meta .meter { width: 8.5rem; }
+.ci-ship-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.8rem; margin-top: 0.15rem; font-size: 0.85em; }
+.ci-ship-meta:empty { display: none; }
+.ci-ship-meta .meter { width: 11rem; max-width: 100%; }
 .ci-history .hue-rows { margin-top: var(--space-2); }
+.ci-history .hue-rows > *, .ci-history .queue-sub .hue-row { min-width: 0; }
+.ci-ship-head { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+.ci-ship-head > :nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-ship-head > :not(:nth-child(2)) { flex: none; }
 .ci-runs { display: grid; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .ci-runs > * + * { border-top: 1px solid var(--line); }
 .ci-run { display: grid; grid-template-columns: 0.6rem 5.5rem minmax(0, 1fr) minmax(0, 1.6fr) 6rem; gap: 0.6rem; align-items: center; padding: 0.4rem 0.7rem; font-size: 0.88em; color: inherit; text-decoration: none; }

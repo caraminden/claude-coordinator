@@ -526,19 +526,18 @@ function fallbacksBlock(s) {
   const own = fb.filter((f) => f.to === 'own').length,
     perigee = fb.length - own;
   const ringing = s.problems.some((x) => x.key === 'land:off-github' || x.key === 'land:fallback');
-  const items = [...fb]
-    .reverse()
-    .map((f) =>
-      hueRow(
-        { hue: f.to === 'own' ? 'held' : 'waiting', lead: pacificClockBare(f.at), meta: age(f.at) },
-        h('span', { class: 'ci-tag', 'data-to': f.to }, f.to === 'own' ? 'Desktop' : 'perigee'),
-        ' ',
-        f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion}`) : h('span', {}, f.branch),
-        h('span', { class: 'ci-detail-line muted' }, f.why || (f.to === 'own' ? 'moved off GitHub' : 'ran the suite on perigee')),
-      ),
-    );
+  const newest = [...fb].sort((a, b) => b.at - a.at);
+  const items = newest.map((f) =>
+    hueRow(
+      { hue: f.to === 'own' ? 'held' : 'waiting', lead: pacificClockBare(f.at), meta: age(f.at) },
+      h('span', { class: 'ci-tag', 'data-to': f.to }, f.to === 'own' ? 'Desktop' : 'perigee'),
+      ' ',
+      f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion}`) : h('span', {}, f.branch),
+      h('span', { class: 'ci-detail-line muted' }, f.why || (f.to === 'own' ? 'moved off GitHub' : 'ran the suite on perigee')),
+    ),
+  );
   const [row] = settingsRow(
-    { key: `ci-fallbacks-${s.id}`, icon: 'rows', hue: fb.length ? 'held' : 'done', title: 'Fallbacks', summary: fb.length ? [toneChip(ringing ? 'danger' : 'warn', `${fb.length} in a day`), `last ${age(/** @type {CiFallback} */ (fb.at(-1)).at)}`] : [toneChip('ok', 'None'), 'every ship ran on GitHub'] },
+    { key: `ci-fallbacks-${s.id}`, icon: 'rows', hue: fb.length ? 'held' : 'done', title: 'Fallbacks', summary: fb.length ? [toneChip(ringing ? 'danger' : 'warn', `${fb.length} in a day`), `last ${age(newest[0].at)}`] : [toneChip('ok', 'None'), 'every ship ran on GitHub'] },
     statTiles([String(own), 'to the desktop', own ? 'held' : 'done'], [String(perigee), 'to perigee', perigee ? 'waiting' : 'done'], [String(onGithub), 'ships stayed on GitHub', 'running']),
     items.length ? showFirst({ key: `ci-fallbacks-${s.id}`, items, n: 5, noun: 'fallbacks' }) : emptyCard('No fallbacks', 'Every ship in the last day ran its CI on GitHub.', { mark: '✓', hue: 'done' }),
     h('p', { class: 'look-prose' }, "From the ship script's retro log. Two in a row off GitHub wake the Taskmaster, then ring people after the wait, as fallbacks to perigee do."),
@@ -550,9 +549,8 @@ function fallbacksBlock(s) {
  * History: one row per ship try (where it ran, push to verdict as a bar, green or red), a run moved off GitHub inside the run that
  * took it over; the other workflows in a row that opens. A scheme with no ship runs keeps the plain list.
  * @param {CiScheme} s
- * @param {number} now
  */
-function historyTab(s, now) {
+function historyTab(s) {
   const runs = s.view.runs;
   const ships = runs.filter((r) => r.branch.startsWith('land/'));
   if (!ships.length) return [h('section', { class: 'ci-block' }, h('h4', {}, 'Recent runs'), runs.length ? h('div', { class: 'ci-runs' }, ...runs.map((r) => runRow(r))) : h('p', { class: 'muted' }, 'No runs in the last day.'))];
@@ -578,13 +576,9 @@ function historyTab(s, now) {
     const red = r.shards?.red ? `${plural(r.shards.red, 'shard')} red` : '';
     return [
       hueRow(
-        { hue, lead: word, meta: h('span', { class: 'ci-ship-meta' }, secs != null ? meter(secs / max, mmss(secs)) : going ? shortSpan(now - Date.parse(r.at)) : '', h('span', { class: 'muted' }, ` ${age(r.at)}`)) },
-        h('span', { class: 'ci-tag', 'data-to': r.where ?? '' }, r.where === 'github' ? `GitHub${r.shards ? ` · ${r.shards.n}` : ''}` : r.where === 'own' ? 'Desktop' : '…'),
-        ' ',
-        whoText(r),
-        ' ',
-        ext(r.url, 'run'),
-        r.moved && !nested.has(r.id) ? h('span', { class: 'ci-detail-line muted' }, `moved to the desktop: ${r.moved}`) : red && !going ? h('span', { class: 'ci-detail-line muted' }, red) : null,
+        { hue, lead: word, meta: age(r.at) },
+        h('span', { class: 'ci-ship-head' }, h('span', { class: 'ci-tag', 'data-to': r.where ?? '' }, r.where === 'github' ? `GitHub${r.shards ? ` · ${r.shards.n}` : ''}` : r.where === 'own' ? 'Desktop' : '…'), whoText(r), ext(r.url, 'run')),
+        h('span', { class: 'ci-ship-meta muted' }, secs != null ? meter(secs / max, mmss(secs)) : null, r.moved && !nested.has(r.id) ? h('span', {}, `moved to the desktop: ${r.moved}`) : red && !going ? h('span', {}, red) : null),
       ),
       m ? h('div', { class: 'queue-sub' }, hueRow({ hue: 'held', lead: 'moved', meta: m.secs != null ? mmss(m.secs) : null }, h('span', { class: 'muted' }, 'GitHub run · ', m.moved || 'moved off GitHub', ' · '), ext(m.url, 'run'))) : null,
     ];
@@ -989,7 +983,7 @@ export function releasesShell() {
           ? testHealth(s, health.get(s.id) ?? null, readTab)
           : tab === 'numbers'
             ? numbersTab(s, numbers.get(s.id) ?? null, readTab, s.view.runs.some(githubShip))
-            : historyTab(s, Date.now())),
+            : historyTab(s)),
     );
   };
 

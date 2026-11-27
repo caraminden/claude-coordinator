@@ -76,7 +76,6 @@ test('with both readers stalled, page reads are answered by the readers started 
     );
     await healthAnswers(srv, pages);
     for (const got of await pages) assert.deepEqual([got.status, got.by], [200, 'reader']);
-    // timing-ok: one page read reaching the main thread holds it 2 s; a health answer takes a few ms
     assert.equal(mainReads('one.log'), before, 'a page read ran on the main thread');
     // timing-ok: the stalled readers are stuck for 15 s, so these answers came from new ones
     assert.ok(Date.now() - t0 < 14_000, `pages took ${Date.now() - t0} ms`);
@@ -113,7 +112,6 @@ test('readers that are alive but answer nothing are replaced, and the journal an
     );
     await healthAnswers(srv, pages);
     for (const got of await pages) assert.deepEqual([got.status, got.by], [200, 'reader']);
-    // timing-ok: one page read reaching the main thread holds it 2 s; a health answer takes a few ms
     assert.equal(mainReads('wedge.log'), before, 'a page read ran on the main thread');
     gone.abort();
     await Promise.all(sent);
@@ -154,7 +152,6 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
     const got = await first;
     assert.deepEqual([got.status, got.by], [503, 'front']);
     assert.equal(JSON.parse(got.body).retry, true);
-    // timing-ok: as above
     assert.equal(mainReads('two.log'), before, 'a page read ran on the main thread');
     // Slow, not stuck: the same readers answer once their disk does, neither thrown away.
     await until('a reader answers again', async () => (await get(srv, PAGE)).by === 'reader');
@@ -174,16 +171,15 @@ test('a page read before the first reader is up waits for it past its usual wait
   const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_READER_BOOT_WAIT: may }, log: join(root, 'four.log') });
   try {
     // Its reader, once up, takes 1.5 s over it: it has the whole wait from then, not what was left of the read's own.
+    const before = mainReads('four.log');
     const first = get(srv, `${PAGE}&citadel-test-reader=stall-1500`);
     const sent = Date.now();
-    const before = mainReads('four.log');
     const health = healthAnswers(srv, first);
     // timing-ok: past the 4 s a read waits for readers that have been up, where it got a 503
     await until('the usual wait to be over', () => Date.now() - sent > 5000);
     writeFileSync(may, '');
     const got = await first;
     assert.deepEqual([got.status, got.by], [200, 'reader']);
-    // timing-ok: as above
     await health;
     assert.equal(mainReads('four.log'), before, 'a page read ran on the main thread');
   } finally {
@@ -204,7 +200,6 @@ test('while writes are backed up, page reads wait for them in a reader, the main
     const reads = (async () => {
       while (!over) seen.push((await get(srv, PAGE)).by);
     })();
-    // timing-ok: as above
     await healthAnswers(srv, reads);
     assert.equal(mainReads('three.log'), before, 'a page read ran on the main thread');
     assert.equal((await sent).status, 202);

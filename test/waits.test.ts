@@ -182,7 +182,7 @@ test('median, and a live process told apart from a reused pid or a zombie', asyn
   assert.ok(!procAlive(''));
   // A landing that died but wasn't reaped yet (a zombie: its parent never waited) holds no lock: its start time still matches.
   // The child outlives the shell: a shell reaps a child that exits before its exec, leaving no zombie (#2222).
-  const parent = spawn('sh', ['-c', 'sleep 30 & echo $!; exec sleep 30'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const parent = spawn('sh', ['-c', 'sleep 300 & echo $!; exec sleep 300'], { stdio: ['ignore', 'pipe', 'ignore'] });
   let child = 0;
   try {
     const [pid] = (await once(parent.stdout!, 'data')).map(String);
@@ -192,10 +192,11 @@ test('median, and a live process told apart from a reused pid or a zombie', asyn
     await until('the shell to become a sleep, which never waits for a child', () => readFileSync(`/proc/${parent.pid}/stat`, 'utf8').includes('(sleep)'));
     assert.ok(procAlive(`${zombie} ${fields()[19]}`), 'still running, it is alive');
     process.kill(child);
+    child = 0;
     await until('the child to exit unreaped', () => fields()[0] === 'Z');
     assert.ok(!procAlive(`${zombie} ${fields()[19]}`));
   } finally {
-    // Unreaped until its parent goes, so the pid is still its own; already a zombie, the signal does nothing.
+    // Failed before the kill: the child still runs under a parent that never reaps, so the pid is its own.
     if (child) process.kill(child);
     parent.kill();
     if (parent.exitCode === null && parent.signalCode === null) await once(parent, 'exit');

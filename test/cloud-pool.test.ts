@@ -2,7 +2,7 @@
 // putting a turn it may take there first, on a fake host and a mocked clock.
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { CLOUD, CLOUD_PLACE, CLOUD_SWITCH, CloudPool, cloudSpend, cloudPrompt, handoffBrief, markRefusal, newMark, staysHome, startBlock, type StartIn } from '../src/cloud-pool.ts';
+import { CLOUD, CLOUD_OFF, CLOUD_PLACE, CLOUD_SWITCH, CloudPool, cloudSpend, cloudPrompt, handoffBrief, markRefusal, newMark, staysHome, startBlock, type StartIn } from '../src/cloud-pool.ts';
 import { TurnLine, type LineHost } from '../src/turn-line.ts';
 
 /** A settings store; the admin switch is on (`on`), as the rules below are what the cloud does while it is. */
@@ -83,7 +83,7 @@ test('with the admin switch off (its default), no new cloud session starts: not 
     [3, 'chore'],
   ] as const) {
     assert.equal(pool.may(id, type), false, `#${id} may not`);
-    assert.match(pool.takes(id, asks(type)) ?? '', /cloud sessions are off/, `#${id} stays home`);
+    assert.equal(pool.takes(id, asks(type)), CLOUD_OFF, `#${id} stays home`);
   }
   assert.ok(pool.mark(2) && pool.mark(3), 'its mark is kept for when the switch is on again');
   store.setSetting(CLOUD_SWITCH, true);

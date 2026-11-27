@@ -1423,15 +1423,16 @@ function githubOwnerField() {
 
 /** The admin switch for every scheme's cloud sessions (#2193): off, a minion's turns run at perigee or a machine; a running session keeps its follow-ups. */
 function cloudSessionsField() {
-  const state = h('span', { class: 'muted', role: 'status' }, 'Loading…');
+  const state = h('span', {}, 'Loading…');
   /** @type {boolean | null} */
   let on = null;
-  const flip = h('button', { type: 'button', class: 'rules-switch', role: 'switch', 'aria-checked': 'false', 'aria-label': 'Cloud sessions for every scheme', disabled: true });
+  // The switch and its words are one button, so the whole line is the tap target.
+  const flip = h('button', { type: 'button', class: 'cloud-flip', role: 'switch', 'aria-checked': 'false', 'aria-label': 'Cloud sessions for every scheme', disabled: true }, h('span', { class: 'rules-switch', 'aria-hidden': 'true' }), state);
   const show = (/** @type {boolean} */ v) => {
     on = v;
     flip.setAttribute('aria-checked', String(v));
     flip.disabled = false;
-    state.textContent = v ? 'On: research, ideation and marked minions start as cloud sessions.' : 'Off: every new turn runs at perigee or a machine.';
+    state.textContent = v ? 'On: research, ideation and marked minions start as cloud sessions.' : 'Off: no new cloud sessions; sessions already running keep their follow-ups.';
   };
   flip.onclick = () => {
     const was = !!on;
@@ -1456,7 +1457,7 @@ function cloudSessionsField() {
     { class: 'cloud-sessions settings-anchor', id: 'cloud-sessions-section' },
     h('h3', { class: 'settings-label' }, 'Cloud sessions'),
     settingsHelp("Whether a minion's first turn may start as a Claude Code cloud session, in every scheme.", 'Off, a session already running keeps its follow-ups, and a minion that runs a turn here stays here once it is back on.'),
-    h('div', { class: 'row' }, flip, state),
+    flip,
   );
 }
 

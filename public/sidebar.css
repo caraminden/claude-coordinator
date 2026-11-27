@@ -295,10 +295,11 @@
 .github-strip button.small { padding: 0.2rem 0.65rem; font-size: 0.9em; }
 .github-owner .row { gap: 0.5rem; }
 .github-owner input { max-width: 16rem; }
-/* The cloud sessions switch (#2193): the house switch keeps its size on a phone, its words beside it. */
-.cloud-sessions .row { gap: 0.6rem; flex-wrap: nowrap; align-items: center; }
-.cloud-sessions .rules-switch { min-height: 0; }
-.cloud-sessions .rules-switch::before { content: ''; position: absolute; inset: -0.7rem -0.35rem; }
+/* The cloud sessions switch (#2193): the house switch and its words in one button, a control tall, so the line is the tap target. */
+.cloud-flip { display: flex; align-items: center; gap: 0.6rem; min-height: var(--citadel-control-h); padding: 0; border: 0; background: none; color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
+.cloud-flip .rules-switch { min-height: 0; }
+.cloud-flip[aria-checked=true] .rules-switch { background: var(--done); }
+.cloud-flip[aria-checked=true] .rules-switch::after { transform: translateX(1rem); }
 .inbox-toggle { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.35rem 0.7rem; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 0.9em; text-align: left; cursor: pointer; }
 .inbox-toggle:hover { color: var(--accent); }
 .inbox-toggle { min-height: 2rem; box-sizing: border-box; }

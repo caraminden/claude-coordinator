@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { DEP, ci, depsRepo, git, seen } from './land-fixture.ts';
+import { DEP, ci, depsRepo, git, seen, type setup } from './land-fixture.ts';
 import { type Ship, line, shipped, shared } from './land-train-fixture.ts';
 import { until } from './wait.ts';
 import { prepped, retro, own, pushLog, pushes } from './land-train-early-setup.ts';

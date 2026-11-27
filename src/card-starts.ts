@@ -4,11 +4,12 @@
 // the duplicate-handoff check, the start card over START_CARD_USD, the worker pool), as the person who picked. A pick that comes with
 // typed words or a picture starts nothing: the words may change the brief, so the card's owner is woken, as before.
 // Every scheme's cards get this. Choices pages don't yet: their Send still goes to the minion, which passes the picks on.
-import { realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import type { Session } from './auth.ts';
 import { workLines } from './branch.ts';
 import { tellTaskmaster } from './ci-armed.ts';
+import { handoffBrief } from './cloud-pool.ts';
 import { gitOut } from './git.ts';
 import { buildOwnerKey, EFFORTS, MODELS, type Ticket } from './db.ts';
 import { buildNumber, HttpError, oneOf, str, type App } from './http.ts';
@@ -108,15 +109,15 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
     starting.add(s.handoff);
     try {
       // Again at the pick: a handoff moved or deleted since the card was posted would start a minion with no brief.
-      await handoffPath(projectSharedDir(app.dataDir, owner.project_id), s.handoff);
+      const shared = projectSharedDir(app.dataDir, owner.project_id);
+      const text = await readFile(await handoffPath(shared, s.handoff), 'utf8');
       const t = await createMinion(
         app,
         project,
         {
           title: s.title,
-          message: startBrief(s.handoff),
+          message: handoffBrief(startBrief(s.handoff), text, s.type, shared), // #2153
           properties: { type: s.type },
-          cloud: false, // its brief is a handoff in the shared folder, which a cloud session can't read (#2153)
           model: s.model ?? null,
           effort: s.effort ?? null,
           parent: owner.number,

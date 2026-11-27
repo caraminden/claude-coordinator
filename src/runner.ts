@@ -85,7 +85,7 @@ import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, type OnAccount } from './line-place.ts';
 import { runningTurn, runningTurnOff, START_GRACE_MS, wrapperAlive, wrapperAliveOff, wrapperInProc, type TurnAt } from './running-turn.ts';
 import { type CloudHost, TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
-import { CLOUD, CLOUD_PLACE, CloudPool } from './cloud-pool.ts';
+import { CLOUD_PLACE, CloudPool } from './cloud-pool.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
@@ -2680,16 +2680,10 @@ export class Runner {
     takes: (id, via) => {
       const ask = this.cloudAsk(id, via);
       if (typeof ask === 'string') return ask;
-      const { payer, account } = this.accountOf(ask.ticket, ask.person);
+      const { account } = this.accountOf(ask.ticket, ask.person);
       if (account === 0) return 'none of their Claude accounts can run a turn now';
-      const usage = this.store.getSetting<Usage>(accountUsageKey(payer, account ?? 1));
-      return this.cloud.takes(id, ask.person, { type: ask.type, ran: !!ask.ticket.session_id || !!this.store.lastTurnOn(id), usage, repoUrl: ask.project.repo_url }, this.now());
+      return this.cloud.takes(id, { type: ask.type, ran: !!ask.ticket.session_id || !!this.store.lastTurnOn(id), repoUrl: ask.project.repo_url });
     },
-    started: (id, via) => {
-      const ask = this.cloud.session(id) ? null : this.cloudAsk(id, via);
-      if (ask && typeof ask !== 'string') this.cloud.counted(ask.person, this.now());
-    },
-    size: () => CLOUD.size,
   };
 
   /** Only an ordinary minion's turn on Claude is ever placed on a machine (spec section 2): why this one, a fresh start's step or one that Codex runs, isn't. */

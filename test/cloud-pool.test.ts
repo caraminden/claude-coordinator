@@ -2,8 +2,7 @@
 // putting a turn it may take there first, on a fake host and a mocked clock.
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { CLOUD, CLOUD_PLACE, CloudPool, cloudSpend, cloudPrompt, markRefusal, newMark, staysHome, startBlock, type StartIn } from '../src/cloud-pool.ts';
-import { pacificDay } from '../src/pacific.ts';
+import { CLOUD, CLOUD_PLACE, CloudPool, cloudSpend, cloudPrompt, handoffBrief, markRefusal, newMark, staysHome, startBlock, type StartIn } from '../src/cloud-pool.ts';
 import { TurnLine, type LineHost } from '../src/turn-line.ts';
 
 const settings = () => {
@@ -17,7 +16,7 @@ const settings = () => {
 };
 
 const NOW = Date.UTC(2026, 10, 26, 20, 0);
-const ok: StartIn = { mark: null, go: true, github: true, type: 'research', ran: false, usage: null, runsToday: 0, now: NOW };
+const ok: StartIn = { mark: null, go: true, github: true, type: 'research', ran: false };
 
 test('a research or ideation minion create_ticket let go may start in the cloud with no mark; each rule that stops it says why', () => {
   assert.equal(startBlock(ok), null);
@@ -30,15 +29,6 @@ test('a research or ideation minion create_ticket let go may start in the cloud 
   assert.equal(startBlock({ ...ok, ran: true }), 'it has run here before');
   assert.match(startBlock({ ...marked, type: 'feature' }) ?? '', /marked research but its type is feature/);
   assert.equal(startBlock({ ...marked, mark: { ...marked.mark, kind: 'sweep' }, type: 'chore' }), null, 'a marked test sweep may be of any type');
-  assert.match(startBlock({ ...ok, runsToday: CLOUD.dailyRuns }) ?? '', /10 cloud sessions today/);
-  assert.equal(startBlock({ ...ok, runsToday: CLOUD.dailyRuns - 1 }), null);
-});
-
-test('weekly use at 85% stops new cloud sessions; a week past its reset counts as empty', () => {
-  const week = (utilization: number, resetsAt: number) => ({ weekly: { utilization, resetsAt, status: null }, session: null, updatedAt: NOW });
-  assert.match(startBlock({ ...ok, usage: week(0.85, NOW + 3600_000) }) ?? '', /weekly plan use at 85%/);
-  assert.equal(startBlock({ ...ok, usage: week(0.84, NOW + 3600_000) }), null);
-  assert.equal(startBlock({ ...ok, usage: week(0.99, NOW - 1) }), null);
 });
 
 test('a job with a step over 25 minutes is refused for the cloud, and so is a kind not on the allow list', () => {
@@ -65,28 +55,16 @@ test("create_ticket lets a research minion go unless cloud: false or its brief n
   assert.match(String(newMark(null, { kind: 'sweep', minutes: 20 }, 'chore', 'x', dir)), /isn't on GitHub/);
   assert.deepEqual([cloudSpend({ cloud_cost_usd: 0.4 }), cloudSpend({ total_cost_usd: 3 }), cloudSpend({ cloud_cost_usd: -1 }), cloudSpend({ cloud_cost_usd: '1' })], [0.4, null, null, null]);
   const pool = new CloudPool(settings());
-  const asks = { type: 'research', ran: false, usage: null, repoUrl: gh };
+  const asks = { type: 'research', ran: false, repoUrl: gh };
   assert.equal(pool.may(1, 'research'), false, 'made elsewhere (a schedule, a trigger): home');
-  assert.match(pool.takes(1, 2, asks, NOW) ?? '', /kept at perigee/);
+  assert.match(pool.takes(1, asks) ?? '', /kept at perigee/);
   pool.made(1, { go: true }, 'Cara');
   assert.equal(pool.may(1, 'research'), true);
   assert.equal(pool.may(1, 'feature'), false, 'retyped since: home');
-  assert.equal(pool.takes(1, 2, asks, NOW), null);
-  assert.match(pool.takes(1, 2, { ...asks, repoUrl: null }, NOW) ?? '', /isn't on GitHub/);
+  assert.equal(pool.takes(1, asks), null);
+  assert.match(pool.takes(1, { ...asks, repoUrl: null }) ?? '', /isn't on GitHub/);
   pool.made(3, { kind: 'sweep', minutes: 20 }, 'Cara');
   assert.equal(pool.may(3, 'chore'), true);
-});
-
-test('runs count per person per Pacific day', () => {
-  const pool = new CloudPool(settings());
-  // 23:30 PST on Nov 26 is Nov 27 in UTC, still Nov 26 here.
-  const late = Date.UTC(2026, 10, 27, 7, 30);
-  assert.equal(pacificDay(late), '2026-11-26');
-  pool.counted(2, late);
-  pool.counted(2, late);
-  assert.equal(pool.runsToday(2, late), 2);
-  assert.equal(pool.runsToday(3, late), 0);
-  assert.equal(pool.runsToday(2, late + 3600_000), 0, 'a new day in Pacific time starts again');
 });
 
 test("the driver's word of its session is kept on the minion with its person and account, and only when it looks like one", () => {
@@ -98,7 +76,6 @@ test("the driver's word of its session is kept on the minion with its person and
   pool.heard(5, 2, 2, { session: 'session_01abcdefgh', url: 'https://claude.ai/code/session_01abcdefgh', branch: 'cloud/t5-x' }, NOW);
   pool.heard(5, 3, 1, { session: 'session_01abcdefgh', branch: 'cloud/t5-y', sha }, NOW + 1);
   assert.deepEqual(pool.session(5), { session: 'session_01abcdefgh', url: 'https://claude.ai/code/session_01abcdefgh', branch: 'cloud/t5-y', person: 2, account: 2, sha, at: NOW });
-  assert.equal(pool.runsToday(2, NOW), 0, 'a start is counted when the line sends it, not when its id is heard');
   pool.heard(5, 2, 1, { session: 'session_01otherxyz', gone: true }, NOW + 2);
   assert.equal(pool.session(5)?.session, 'session_01abcdefgh', "another session's gone leaves this one");
   pool.heard(5, 2, 1, { session: 'session_01abcdefgh', gone: true }, NOW + 2);
@@ -132,6 +109,21 @@ test('a brief stays home when it needs the shared folder, by path or by name, or
   assert.equal(staysHome('Compare Android push libraries and their prices', dir), false);
 });
 
+test("a card's research start carries its handoff's text and goes to the cloud; one whose handoff needs the shared folder stays home", () => {
+  const dir = '/home/x/.local/share/claude-coordinator/projects/2/shared/project';
+  const pointer = `Start from the handoff ${dir}/handoffs/a.md`;
+  const plain = '# Handoff\n\n## Goal\nCompare X and Y.\n';
+  const research = handoffBrief(pointer, plain, 'research', dir);
+  assert.ok(research.startsWith(pointer), 'the path stays first: the duplicate check, ideas and the tidy read it there');
+  assert.ok(research.endsWith(plain), "the session can't open the shared folder, so the text comes along");
+  assert.deepEqual(newMark('https://github.com/a/b', undefined, 'research', research, dir), { go: true }, 'the same rule as a create_ticket start');
+  assert.equal(handoffBrief(pointer, plain, 'feature', dir), pointer, 'a feature runs at perigee: only the pointer');
+  const needs = handoffBrief(pointer, `${plain}Read ${dir}/specs/s.md first.\n`, 'research', dir);
+  assert.equal(needs, pointer, 'a handoff that reads the shared folder stays home');
+  assert.equal(newMark('https://github.com/a/b', undefined, 'research', needs, dir), null);
+  assert.equal(newMark('https://github.com/a/b', undefined, 'research', `${pointer}\n\nAlso read the shared folder`, dir), null, 'a typed brief naming the shared folder still stays home');
+});
+
 test('the first message names the branch, the time and what the session lacks; a follow-up only how to answer', () => {
   const first = cloudPrompt({ ticket: 9, branch: 'cloud/t9-a', minutes: 15, first: true, messages: '[Josh]: compare X and Y' });
   assert.match(first, /minion #9's cloud session/);
@@ -145,15 +137,14 @@ test('the first message names the branch, the time and what the session lacks; a
   assert.doesNotMatch(next, /minion #9/);
 });
 
-/** A line over `size` perigee workers and a cloud of `cloud` sessions: the ones it may take (`marked`) go there first, bound ones only there. */
-function line(t: TestContext, size = 1, cloud = 1) {
+/** A line over `size` perigee workers and the cloud, which has no cap: the ones it may take (`marked`) go there first, bound ones only there. */
+function line(t: TestContext, size = 1) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
   const store: LineHost['store'] = { ...settings(), addHealthEvent: () => {} };
   store.setSetting('turn-pool', { size, at: 0, fixed: { size, by: 'cara' } });
   const marked = new Set<number>();
   const bound = new Set<number>();
   const started: string[] = [];
-  const sent: number[] = [];
   const steps = new Map<number, () => void>();
   let l!: TurnLine;
   const run = (id: number) => {
@@ -174,7 +165,7 @@ function line(t: TestContext, size = 1, cloud = 1) {
     pauseTurn: () => {},
     changed: () => {},
     carded: () => [],
-    cloud: { bound: (id) => bound.has(id), takes: (id) => (marked.has(id) ? null : 'not marked cloud-ok'), started: (id) => sent.push(id), size: () => cloud },
+    cloud: { bound: (id) => bound.has(id), takes: (id) => (marked.has(id) ? null : 'not marked cloud-ok') },
     gapMs: 0,
     detached: false,
   };
@@ -186,7 +177,6 @@ function line(t: TestContext, size = 1, cloud = 1) {
     marked,
     bound,
     started,
-    sent,
     async end(id: number) {
       steps.get(id)!();
       for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -195,66 +185,38 @@ function line(t: TestContext, size = 1, cloud = 1) {
   };
 }
 
-test('a turn the cloud may take goes there first, though perigee has room; perigee takes it once the cloud is full', (t) => {
+test('every turn the cloud may take goes there, though perigee has room, with no cap of ours; the rest wait for perigee', (t) => {
   const x = line(t);
-  x.marked.add(1).add(2);
+  x.marked.add(1).add(2).add(4);
   assert.equal(x.run(1), true);
-  assert.equal(x.l.placeOf(1), CLOUD_PLACE, 'the cloud first while it has room');
+  assert.equal(x.l.placeOf(1), CLOUD_PLACE, 'the cloud first');
   assert.equal(x.run(2), true);
-  assert.equal(x.l.placeOf(2), 0, 'the cloud is full: perigee, as usual');
-  assert.equal(x.run(3), false, 'one the cloud may not take waits for perigee');
-  x.marked.add(4);
-  assert.equal(x.run(4), false, 'both are full');
-  assert.deepEqual(x.sent, [1], 'the start told the host, to count it');
+  assert.equal(x.l.placeOf(2), CLOUD_PLACE, 'and the next: no cap on sessions at once (Josh, "we shouldnt be adding any limits")');
+  assert.equal(x.run(3), true);
+  assert.equal(x.l.placeOf(3), 0, 'one the cloud may not take runs at perigee');
+  assert.equal(x.run(5), false, 'perigee is full');
+  assert.equal(x.run(4), true);
+  assert.equal(x.l.placeOf(4), CLOUD_PLACE, 'perigee full is nothing to the cloud');
 });
 
-test('a waiting turn the cloud may take runs at perigee when perigee frees first', async (t) => {
-  const x = line(t, 1, 1);
-  x.marked.add(1).add(3);
-  x.run(1);
-  x.run(2);
-  assert.equal(x.run(3), false);
-  await x.end(2);
-  assert.deepEqual(x.started, ['3']);
-  assert.equal(x.l.placeOf(3), 0);
-  assert.deepEqual(x.sent, [1]);
-});
-
-test('Start now on a minion bound to its cloud session waits for the cloud, never perigee', async (t) => {
-  const x = line(t, 2, 1);
-  x.bound.add(1).add(2);
-  x.run(1);
-  assert.equal(x.run(2), false);
-  x.l.force(2);
-  assert.deepEqual(x.started, [], 'not started at perigee, though a worker is free there');
-  await x.end(1);
-  assert.deepEqual(x.started, ['2']);
-  assert.equal(x.l.placeOf(2), CLOUD_PLACE);
-});
-
-test('a minion whose session is in the cloud runs there and nowhere else, waiting while the cloud is full', async (t) => {
+test('a minion whose session is in the cloud runs there and nowhere else', (t) => {
   const x = line(t, 2);
-  x.bound.add(2);
+  x.bound.add(2).add(3);
   assert.equal(x.run(2), true);
   assert.equal(x.l.placeOf(2), CLOUD_PLACE, 'bound: the cloud though perigee has room');
-  x.bound.add(3);
-  assert.equal(x.run(3), false, 'never perigee, though a worker is free there');
-  assert.match(x.l.wait(3)?.machine?.why ?? '', /busy: 1 of 1 cloud sessions/);
-  assert.equal(x.run(5), true, 'an ordinary one takes the free perigee worker');
-  await x.end(2);
-  assert.deepEqual(x.started, ['3']);
+  assert.equal(x.run(3), true);
   assert.equal(x.l.placeOf(3), CLOUD_PLACE);
+  assert.equal(x.run(5), true, 'an ordinary one takes a free perigee worker');
+  assert.equal(x.l.placeOf(5), 0);
 });
 
-test('a marked turn waiting while perigee is full is started in the cloud when a cloud session frees', async (t) => {
-  const x = line(t, 1, 1);
-  x.marked.add(2).add(3);
+test('a waiting turn the cloud comes to take goes there the next time the line moves', async (t) => {
+  const x = line(t);
   x.run(1);
-  x.run(2);
-  assert.equal(x.l.placeOf(2), CLOUD_PLACE);
-  assert.equal(x.run(3), false);
-  await x.end(2);
-  assert.deepEqual(x.started, ['3']);
+  assert.equal(x.run(3), false, 'perigee is full and the cloud does not take it yet');
+  x.marked.add(3);
+  x.run(4);
+  await x.end(1);
   assert.equal(x.l.placeOf(3), CLOUD_PLACE);
 });
 

@@ -124,7 +124,6 @@ test("a research minion's first turn goes to the cloud though perigee is free; i
   const s = runner.cloud.session(research);
   assert.equal(s?.session, 'session_01RUNNERabc');
   assert.equal(s?.person, cara.id, "on its sender's own login");
-  assert.equal(runner.cloud.runsToday(cara.id), 1);
   assert.equal(git(origin, 'branch', '--list', 'cloud/*'), '', 'its branch is deleted once read');
 
   // Its conversation is in the cloud: its next turn goes there.
@@ -134,7 +133,7 @@ test("a research minion's first turn goes to the cloud though perigee is free; i
   const next = ofMinion(research).at(-1)!;
   assert.deepEqual([next[1], next.slice(3)], ['-p', ['--cloud', 'session_01RUNNERabc', '--effort', 'high', '--output-format', 'json']], "with the minion's own effort");
   assert.match(next[2], /\[Cara\]: go with A/);
-  assert.equal(runner.cloud.runsToday(cara.id), 1, 'a follow-up is no new session');
+  assert.equal(ofMinion(research).filter((a) => a[1] !== '-p').length, 1, 'a follow-up is no new session');
   // Each turn is counted its own estimate: a running total would book the second at nothing.
   const want = CLOUD.costUsd.start + CLOUD.costUsd.followUp;
   await until('both cloud turns counted', () => Math.abs(store.ticketCost(research) - want) < 1e-9);

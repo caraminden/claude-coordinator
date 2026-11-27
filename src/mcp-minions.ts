@@ -135,7 +135,7 @@ export const CREATE_TICKET = {
       cloud: {
         type: ['object', 'boolean'],
         description:
-          "A research or ideation minion runs first as a Claude Code cloud session on its sender's own login while one is free (#2153), with only the repo and the web; one whose brief names the shared folder, or builds Android (gradle, an APK), stays at perigee. Pass false when its brief needs anything else a session lacks: the database, Citadel's tools (read_minion and the like), perigee's files or machine tools. For a self-contained test sweep, pass {kind: 'sweep', minutes} to send it too (minutes: its longest single step, at most 25). Its result comes back as a reply, files and at most one card.",
+          "A research or ideation minion runs first as a Claude Code cloud session on its sender's own login (#2153), with only the repo and the web; one whose brief names the shared folder, or builds Android (gradle, an APK), stays at perigee. Pass false when its brief needs anything else a session lacks: the database, Citadel's tools (read_minion and the like), perigee's files or machine tools. For a self-contained test sweep, pass {kind: 'sweep', minutes} to send it too (minutes: its longest single step, at most 25). Its result comes back as a reply, files and at most one card.",
         properties: { kind: { type: 'string', enum: ['research', 'ideation', 'sweep'] }, minutes: { type: 'number' } },
         required: ['kind', 'minutes'],
       },

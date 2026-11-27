@@ -12,31 +12,23 @@
 //     go to the cloud with no loss of value should prioritize running there"; src/turn-line.ts);
 //   - a job whose longest single step runs over CLOUD.stepMinutes is refused: a cloud session stops one background command at
 //     30 minutes, not the session (Cara, 2026-11-26: "I feel like even medium jobs could be moved right? 30m isn't THAT short");
-//   - at most CLOUD.dailyRuns new sessions a day per person, and none once their weekly plan use reaches CLOUD.weekFull;
+//   - no cap of ours on sessions at once, a day or by weekly plan use (Josh, 2026-11-26: "we shouldnt be adding any limits,
+//     we should get any value we can out of cloud sessions"); Anthropic documents none either;
 //   - never a Taskmaster's turn, the Overlord's or a ship's: only a minion's ordinary turns are ever placed (the line and
 //     src/runner.ts startPlace), and land.sh's CI gate is not a turn at all.
 // Once a minion's first turn ran in the cloud its session is kept on it (`cloud-session:<id>`), and every later turn of it is a
 // follow-up to that session (src/cloud-turn.mjs), on the same person's login: sender pays, never another person's.
 import type { Store } from './db.ts';
-import { windowNow } from './account-pick.ts';
 import { githubRepo } from './github.ts';
-import { pacificDay } from './pacific.ts';
-import type { Usage } from './turn-messages.ts';
 
 /** The line's place for the cloud: perigee is 0, a connected machine its id. */
 export const CLOUD_PLACE = -1;
 
 export const CLOUD = {
-  /** Cloud sessions running at once, across everyone. Each costs plan usage, not perigee's RAM. */
-  size: 3,
   /** The longest single step a job may have: the VM stops one background command at 30 minutes (#2147). */
   stepMinutes: 25,
   /** How long a turn waits for its session's result before reading it back through teleport: a session may run several steps. */
   turnMinutes: 90,
-  /** New cloud sessions a day per person, Pacific days (#2147: "a fair budget is 10–20 cloud runs a day"). */
-  dailyRuns: 10,
-  /** Weekly plan use from which no new session starts on that person's login. */
-  weekFull: 0.85,
   /** How often the driver looks for the session's branch. */
   pollMs: 20_000,
   /**
@@ -58,7 +50,20 @@ const ANDROID_BRIEF = /\b(gradlew?|apks?|android sdk|assemble(debug|release)|cap
 
 /** Whether create_ticket keeps a brief home: it needs the shared folder (by its path, or by name), which a session can't read, or builds Android. */
 export function staysHome(brief: string, sharedDir: string): boolean {
-  return brief.includes(sharedDir) || /\bshared\/project\b|\bshared (folder|dir(ectory)?|project( folder)?)\b/i.test(brief) || ANDROID_BRIEF.test(brief);
+  // A card start's pointer to its handoff is no need when the handoff's text comes with it: only that text is judged.
+  const at = brief.indexOf(HANDOFF_TEXT);
+  const own = at < 0 ? brief : brief.slice(at + HANDOFF_TEXT.length);
+  return own.includes(sharedDir) || /\bshared\/project\b|\bshared (folder|dir(ectory)?|project( folder)?)\b/i.test(own) || ANDROID_BRIEF.test(own);
+}
+
+const HANDOFF_TEXT = "\n\nThe handoff as it reads now, for a cloud session, which can't open the shared folder:\n\n";
+
+/** A card start's brief (src/card-starts.ts): the pointer to its handoff, and the handoff's text too when a session may take it, by
+ * the same rule as any start (Josh, 2026-11-26: "Same rules as the rest"; "We should off load any and everything to the cloud
+ * that we can do without loss of value"). The pointer stays first: the duplicate check, ideas and the handoff tidy read it. */
+export function handoffBrief(pointer: string, text: string, type: unknown, sharedDir: string): string {
+  const go = CLOUD_TYPES.includes(typeof type === 'string' ? type : '') && !staysHome(text, sharedDir) && pointer.length + text.length < 90_000;
+  return go ? `${pointer}${HANDOFF_TEXT}${text}` : pointer;
 }
 
 /** What a cloud turn's result says it cost (src/cloud-turn.mjs's `cloud_cost_usd`, an estimate), or null: not one, or not a sane number. */
@@ -94,7 +99,6 @@ export interface CloudSession {
 export const markKey = (ticketId: number) => `cloud-mark:${ticketId}`;
 export const sessionKey = (ticketId: number) => `cloud-session:${ticketId}`;
 const goKey = (ticketId: number) => `cloud-go:${ticketId}`;
-const runsKey = (person: number) => `cloud-runs:${person}`;
 
 /** A cloud result branch for one turn of a minion's session: `cloud/<id>`, its id the minion's and when the turn started. */
 export const cloudBranch = (ticketId: number, now: number) => `cloud/t${ticketId}-${now.toString(36)}`;
@@ -117,9 +121,6 @@ export interface StartIn {
   type: string | null;
   /** It has run a turn before, on perigee or a machine: its conversation is there, so it stays. */
   ran: boolean;
-  usage: Usage | null;
-  runsToday: number;
-  now: number;
 }
 
 /** create_ticket's `cloud` for a minion of `type` in a scheme whose repo is `repoUrl`, its brief `brief`: the mark,
@@ -148,13 +149,10 @@ export function startBlock(i: StartIn): string | null {
     if (i.mark.kind !== 'sweep' && i.type !== i.mark.kind) return `marked ${i.mark.kind} but its type is ${i.type ?? 'unset'}`;
   }
   if (!i.github) return "its scheme's repo isn't on GitHub, where a cloud session clones it";
-  if (i.runsToday >= CLOUD.dailyRuns) return `${i.runsToday} cloud sessions today, the most a day`;
-  const week = windowNow(i.usage?.weekly, i.now, 7 * 24 * 3600_000);
-  if (week && week.utilization >= CLOUD.weekFull) return `weekly plan use at ${Math.round(week.utilization * 100)}%`;
   return null;
 }
 
-/** The cloud pool's saved state: marks, sessions and each person's runs today. */
+/** The cloud pool's saved state: marks and sessions. */
 export class CloudPool {
   private store: Pick<Store, 'getSetting' | 'setSetting' | 'deleteSetting'>;
 
@@ -198,19 +196,9 @@ export class CloudPool {
     this.store.setSetting(sessionKey(ticketId), s);
   }
 
-  runsToday(person: number, now = Date.now()): number {
-    const r = this.store.getSetting<{ day: string; n: number }>(runsKey(person));
-    return r && r.day === pacificDay(now) ? r.n : 0;
-  }
-
-  /** A new session is starting on `person`'s login: counted when the line sends it to the cloud, before its id is known. */
-  counted(person: number, now = Date.now()) {
-    this.store.setSetting(runsKey(person), { day: pacificDay(now), n: this.runsToday(person, now) + 1 });
-  }
-
-  /** Why `ticketId`'s first turn can't start as a cloud session on `person`'s login now, or null. `usage`: the account it would run on. */
-  takes(ticketId: number, person: number, i: Pick<StartIn, 'type' | 'ran' | 'usage'> & { repoUrl: string | null }, now = Date.now()): string | null {
-    return startBlock({ ...i, github: !!githubRepo(i.repoUrl ?? ''), mark: this.mark(ticketId), go: !!this.store.getSetting<boolean>(goKey(ticketId)), runsToday: this.runsToday(person, now), now });
+  /** Why `ticketId`'s first turn can't start as a cloud session now, or null. */
+  takes(ticketId: number, i: Pick<StartIn, 'type' | 'ran'> & { repoUrl: string | null }): string | null {
+    return startBlock({ ...i, github: !!githubRepo(i.repoUrl ?? ''), mark: this.mark(ticketId), go: !!this.store.getSetting<boolean>(goKey(ticketId)) });
   }
 
   /**

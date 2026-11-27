@@ -21,9 +21,9 @@
 // The lane is perigee's and comes last: a forced start or perigee's free worker first, then the person's machine, then the lane.
 //
 // The cloud (#2153, src/cloud-pool.ts) is CLOUD_PLACE, and the first place for a job it may take (Cara, 2026-11-26: "Anything
-// that can go to the cloud with no loss of value should prioritize running there"): such a minion's first turn starts there
-// while it has room, and at perigee or a machine as usual when it is full. One whose session is there runs every later turn
-// there and nowhere else, as one marked for a machine does, waiting while the cloud's sessions are all busy.
+// that can go to the cloud with no loss of value should prioritize running there"): such a minion's first turn starts there,
+// with no cap of ours on how many run at once. One whose session is there runs every later turn there and nowhere else, as
+// one marked for a machine does.
 import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
@@ -198,10 +198,6 @@ export interface CloudHost {
   bound(ticketId: number): boolean;
   /** Why its turn can't start as a new cloud session, or null: it may. */
   takes(ticketId: number, via?: RetryKind): string | null;
-  /** The line is sending it to the cloud now: a new session's start counts toward its person's day here, before the next one is asked. */
-  started(ticketId: number, via?: RetryKind): void;
-  /** Cloud sessions that may run at once. */
-  size(): number;
 }
 
 const inLane = (g: { lent?: true; lane?: { moved?: true } }) => !!g.lane && !g.lane.moved && !g.lent;
@@ -344,8 +340,7 @@ export class TurnLine {
 
   private machineWait(entry: LineEntry): Pick<WorkerWait, 'machine'> {
     if (this.bound(entry.ticket)) {
-      const [used, size] = [this.used(CLOUD_PLACE), this.size(CLOUD_PLACE)];
-      return { machine: { name: 'its cloud session', why: used >= size ? `busy: ${used} of ${size} cloud sessions` : 'next there' } };
+      return { machine: { name: 'its cloud session', why: 'next there' } };
     }
     const need = this.need(entry.ticket);
     if (!need) return {};
@@ -390,7 +385,7 @@ export class TurnLine {
     this.reordered();
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return;
-    // A machine's size and its owner's cap hold for everyone, and so does the cloud's: there it only goes first.
+    // A machine's size and its owner's cap hold for everyone: there it only goes first; a cloud-bound turn goes there.
     if (this.away(ticketId)) return this.pumpIn(0);
     if (this.admitting === null && !this.host.busy(ticketId) && !this.heldBy(entry)) this.admit(entry, 0);
   }
@@ -427,7 +422,6 @@ export class TurnLine {
 
   /** A machine's is never over its owner's cap, which its agent holds too. */
   size(place = 0): number {
-    if (place === CLOUD_PLACE) return this.host.cloud?.size() ?? 0;
     if (!place) return this.pool().fixed?.size ?? this.pool().size;
     const m = this.host.pools?.machines().find((x) => x.id === place);
     return m ? this.sizeOf(m) : 0;
@@ -634,7 +628,6 @@ export class TurnLine {
       const me = own ?? { ticket: ticketId, since: Date.now(), via };
       // The cloud first, for a job it may take (#2153).
       if (this.cloudFor(me)) {
-        this.host.cloud?.started(ticketId, via);
         return this.grant(ticketId, via, CLOUD_PLACE);
       }
       const place = this.placeFor(me, via);
@@ -684,10 +677,10 @@ export class TurnLine {
     return ready.some((e) => e.ticket === me.ticket) && this.isFirst(me, ready);
   }
 
-  /** The waiting turns that could start in the cloud now: none while its sessions are all busy. */
+  /** The waiting turns that could start in the cloud now: it has no cap of ours (Josh, 2026-11-26: "we shouldnt be adding any limits"). */
   private cloudReady(entries = this.entries): LineEntry[] {
     const cloud = this.host.cloud;
-    if (!cloud || this.used(CLOUD_PLACE) >= cloud.size()) return [];
+    if (!cloud) return [];
     // A minion marked for a machine keeps to it.
     return entries.filter((e) => !this.host.busy(e.ticket) && (cloud.bound(e.ticket) || (this.host.pools?.mark(e.ticket) == null && cloud.takes(e.ticket, e.via) === null)));
   }
@@ -799,7 +792,6 @@ export class TurnLine {
     // The cloud first, for the jobs it may take (#2153).
     const cloud = this.best(this.cloudReady());
     if (cloud) {
-      this.host.cloud?.started(cloud.ticket, cloud.via);
       return this.admit(cloud, CLOUD_PLACE);
     }
     const ready = this.ready();

@@ -2219,6 +2219,7 @@ const ciAuto = new CiAuto({
     const taskmaster = store.getOverlord(project.id);
     if (taskmaster) postCard(app, taskmaster, { questions: [noMachineCard(store, project, os, could)] });
   },
+  settle: (card, line) => settleCard(card, APP_NAME, line),
 });
 if (!BOOT_CHECK && !PREVIEW) every('ci runners by themselves', CI_AUTO_PASS_MS, () => ciAuto.pass(), CI_AUTO_PASS_MS);
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an

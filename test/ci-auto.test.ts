@@ -2,7 +2,7 @@
 // asking; an unticked scheme's runners come off; only when no PC lends CI while jobs wait do its members get a card.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { askedIn, BUSY_MS, CiAuto, type CiAutoDeps, osOfLabel, RETRY_MS, type Os } from '../src/ci-auto.ts';
+import { askedIn, BUSY_MS, CiAuto, type CiAutoDeps, noMachineCard, osOfLabel, RETRY_MS, type Os } from '../src/ci-auto.ts';
 import { type RunnerAsk, RunnerBusy } from '../src/ci-runner.ts';
 import { Store } from '../src/db.ts';
 
@@ -29,6 +29,8 @@ function world() {
   let now = 1_000_000;
   const started: string[] = [];
   const cards: string[] = [];
+  const settled: { ticket: number; question: string; line: string }[] = [];
+  const taskmaster = store.createTicket({ project_id: delve.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Claude' });
   const deps: CiAutoDeps = {
     store,
     runnerMachines: (os) => store.listMachines().filter((m) => online.get(os)!.has(m.id)),
@@ -36,7 +38,15 @@ function world() {
     queuedLabels: () => queued,
     start: async (p, ask: RunnerAsk) => void started.push(`${ask.op} ${p.name} ${ask.os} ${ask.host}`),
     room: (id) => room.get(id) ?? null,
-    card: (p, os, could) => void cards.push(`${p.name} ${os}: ${could.map((m) => m.name).join(', ')}`),
+    card: (p, os, could) => {
+      cards.push(`${p.name} ${os}: ${could.map((m) => m.name).join(', ')}`);
+      store.addEvent(taskmaster.id, 'question', { id: `q${cards.length}`, questions: [noMachineCard(store, p, os, could)] });
+    },
+    settle: (card, line) => {
+      settled.push({ ...card, line });
+      const e = store.openCardsOf(card.ticket).find((q) => JSON.parse(q.data).id === card.question)!;
+      store.setEventData(e.id, { ...JSON.parse(e.data), settled: { at: now, by: 'Citadel' } });
+    },
     workflows: async (p) => workflows[p.id] ?? [],
     now: () => now,
     log: () => {},
@@ -54,6 +64,8 @@ function world() {
     room,
     started,
     cards,
+    settled,
+    taskmaster,
     setWorkflows: (w: Record<number, string[]>) => (workflows = w),
     tick: (ms: number) => (now += ms),
     auto: new CiAuto(deps),
@@ -124,6 +136,41 @@ test('a PC the scheme is unticked on is never picked; with none lending, waiting
   w.store.writeMachineRoles(elsewhere.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [other.id, w.delve.id] } : r)));
   await w.auto.pass();
   assert.deepEqual(w.started, ['add Delve linux cara-desktop']);
+});
+
+test('an open no-machine card is withdrawn once a PC lends the scheme CI or serves its repo, not just because the queue reads empty (#2220)', async () => {
+  const w = world();
+  const other = w.store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras.git', w.cara.id);
+  const pc = w.pc('cara-desktop', w.cara.id, [other.id]);
+  w.up(pc);
+  w.queued.set('caraminden/delve', new Set(['delve-ci-linux']));
+  await w.auto.pass();
+  assert.equal(w.cards.length, 1);
+  // ShipWatch's read goes empty (a restart, a cancelled job): nothing lends Delve CI still, so the card stays true.
+  w.queued.clear();
+  await w.auto.pass();
+  assert.equal(w.settled.length, 0);
+  // Someone ticks Delve there: nothing is left to ask, so the card goes before anyone answers it.
+  w.store.writeMachineRoles(pc.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [other.id, w.delve.id] } : r)));
+  await w.auto.pass();
+  await w.auto.pass();
+  assert.deepEqual(
+    w.settled.map((s) => [s.ticket, s.question]),
+    [[w.taskmaster.id, 'q1']],
+  );
+  assert.match(w.settled[0].line, /cara-desktop/);
+  // Unticked again with jobs waiting: a new card at once, not after the week's wait.
+  w.store.writeMachineRoles(pc.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [other.id] } : r)));
+  w.queued.set('caraminden/delve', new Set(['delve-ci-linux']));
+  await w.auto.pass();
+  assert.equal(w.cards.length, 2);
+  // A runner for the repo showing up on a connected PC settles it too.
+  w.samples.set(`${pc.id}:linux`, new Set(['caraminden/delve']));
+  await w.auto.pass();
+  assert.deepEqual(
+    w.settled.map((s) => s.question),
+    ['q1', 'q2'],
+  );
 });
 
 test('a queued job with a label no runner has gets one even with no workflow file read; a failed add waits longer, a busy agent only a few minutes', async () => {

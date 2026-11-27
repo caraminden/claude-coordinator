@@ -7,7 +7,8 @@
 // ticking a scheme makes that PC register its runners; Josh, 2026-11-25: "load balance across all valid machines"), one
 // PC at a time in M6's order, through the runner agent there (src/ci-runner.ts RunnerJobs). A scheme unticked under a PC's
 // CI runners has that PC's runners taken off. People hear of it only when it fails (the job's note) or when no PC lends CI
-// to a scheme whose jobs wait: one card to its members naming the PCs they could ask. `ci_runners` stays for odd cases.
+// to a scheme whose jobs wait: one card to its members naming the PCs they could ask, withdrawn once a PC lends it CI or
+// serves its repo (#2220). `ci_runners` stays for odd cases.
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { lendsRole } from './access.ts';
@@ -72,6 +73,8 @@ export interface CiAutoDeps {
   room(machineId: number): number | null;
   /** Tell the scheme's members no PC lends it CI while its jobs wait, naming the PCs that could (CI on elsewhere). */
   card(project: Project, os: Os, could: Machine[]): void;
+  /** Take back an open no-machine card, with a line in its chat saying why (server.ts settleCard). */
+  settle(card: { ticket: number; question: string }, line: string): void;
   workflows?: (project: Project) => Promise<string[]>;
   now?: () => number;
   log?: (line: string) => void;
@@ -110,6 +113,7 @@ export class CiAuto {
     try {
       for (const project of this.d.store.listProjects()) {
         try {
+          this.withdraw(project);
           started.push(...(await this.add(project)));
         } catch (err) {
           this.say(`CI runners: ${project.name}: ${thrown(err).message}`);
@@ -187,9 +191,35 @@ export class CiAuto {
     return out;
   }
 
+  /**
+   * An unanswered no-machine card whose question no longer holds comes down (#2220: one sat 8 hours after the scheme was
+   * ticked, and its person answered a stale question). Only on a PC lending the scheme CI or serving its repo: an empty
+   * queue read (a restart, a cancelled job) proves nothing. Found by its words, so cards posted before this count too.
+   */
+  private withdraw(project: Project) {
+    const { store } = this.d;
+    const slug = repoSlug(project.repo_url)?.toLowerCase();
+    const taskmaster = store.getOverlord(project.id);
+    if (!slug || !taskmaster) return;
+    for (const e of store.openCardsOf(taskmaster.id)) {
+      if (e.kind !== 'question') continue;
+      const card = JSON.parse(e.data) as { id: string; questions?: CardQuestion[] };
+      const [q, more] = card.questions ?? [];
+      if (more || q?.header !== CARD_HEADER || !q.question.startsWith(waiting(project))) continue;
+      const os: Os = q.question.startsWith(`${waiting(project)}Linux`) ? 'linux' : 'windows';
+      const lent = store.listMachines().find((m) => lendsCi(store, m, project));
+      const serving = lent ? undefined : this.d.runnerMachines(os).find((m) => this.d.reposOn(m.id, os).has(slug));
+      const pc = lent ?? serving;
+      if (!pc) continue;
+      this.d.settle({ ticket: taskmaster.id, question: card.id }, `Withdrew the CI runners card: ${pc.name} ${lent ? `now lends ${project.name} its CI runners` : `has a runner for ${project.name}`}, so there's nothing to answer.`);
+      // Should the PC go again while jobs wait, that's news: ask at once, not after CARD_MS.
+      store.deleteSetting(cardKey(project));
+    }
+  }
+
   /** Jobs wait and no PC lends CI here: one card, again only after CARD_MS (kept in settings, so a restart doesn't repeat it). */
   private noMachine(project: Project, os: Os) {
-    const key = `ci_auto_card:${project.id}`;
+    const key = cardKey(project);
     const at = this.d.store.getSetting<number>(key);
     if (at !== null && this.now() - at < CARD_MS) return;
     this.d.store.setSetting(key, this.now());
@@ -197,6 +227,12 @@ export class CiAuto {
     this.d.card(project, os, could);
   }
 }
+
+const CARD_HEADER = 'CI runners';
+/** When the scheme's no-machine card last went up, in settings. */
+const cardKey = (project: Project) => `ci_auto_card:${project.id}`;
+/** How the no-machine card's question begins, up to the runner's kind: how an open one is found again. */
+const waiting = (project: Project) => `${project.name}'s CI jobs are waiting for a `;
 
 /** The no-machine card's one question, for the scheme's members (in its Taskmaster's chat): the PCs they could ask to be lent, by whose they are. */
 export function noMachineCard(store: Store, project: Project, os: Os, could: Machine[]): CardQuestion {
@@ -207,10 +243,10 @@ export function noMachineCard(store: Store, project: Project, os: Os, could: Mac
     description: `${m.name} runs CI for other schemes. Once ${project.name} is ticked under its CI runners, it gets a runner by itself.`,
   }));
   return {
-    header: 'CI runners',
+    header: CARD_HEADER,
     question: could.length
-      ? `${project.name}'s CI jobs are waiting for a ${kind} runner, and no computer lends its CI runners to ${project.name}. ${could.length === 1 ? 'One computer could' : `${could.length} computers could`}: ${could.map((m) => `${m.name} (${whose(m)}'s)`).join(', ')}. What do you want to do?`
-      : `${project.name}'s CI jobs are waiting for a ${kind} runner, and no computer hosts CI runners yet. A member can connect one (Machines, Connect a computer) and switch its CI runners on; ${project.name} then gets a runner by itself. What do you want to do?`,
+      ? `${waiting(project)}${kind} runner, and no computer lends its CI runners to ${project.name}. ${could.length === 1 ? 'One computer could' : `${could.length} computers could`}: ${could.map((m) => `${m.name} (${whose(m)}'s)`).join(', ')}. What do you want to do?`
+      : `${waiting(project)}${kind} runner, and no computer hosts CI runners yet. A member can connect one (Machines, Connect a computer) and switch its CI runners on; ${project.name} then gets a runner by itself. What do you want to do?`,
     options: [...(asks.length ? asks : [{ label: "I'll connect a computer", description: 'Connect it on the Machines page and switch on its CI runners.' }]), { label: 'Leave the jobs waiting', description: 'Nothing changes; they run once a computer lends CI here.' }],
   };
 }

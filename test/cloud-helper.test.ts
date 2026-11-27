@@ -74,10 +74,19 @@ writeFileSync(
   fakeHeavy,
   `#!${process.execPath}
 require('node:fs').appendFileSync(${JSON.stringify(join(root, 'heavy.log'))}, JSON.stringify({ args: process.argv.slice(2), github: process.env.CITADEL_HEAVY_GITHUB ?? null, what: process.env.CITADEL_HEAVY_WHAT }) + '\\n');
+if (process.env.FAKE_HEAVY_CHILD) require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(root, 'grandchild.js'))}], { stdio: 'inherit' });
 setTimeout(() => process.exit(Number(process.env.FAKE_HEAVY_CODE || 0)), Number(process.env.FAKE_HEAVY_MS || 0));
 `,
 );
 chmodSync(fakeHeavy, 0o755);
+// The command citadel-heavy runs: it notes its pid, and its finish only once it outlives a stop.
+writeFileSync(
+  join(root, 'grandchild.js'),
+  `const fs = require('node:fs');
+fs.writeFileSync(${JSON.stringify(join(root, 'grandchild.pid'))}, String(process.pid));
+setTimeout(() => fs.writeFileSync(${JSON.stringify(join(root, 'grandchild.finished'))}, 'finished'), Number(process.env.FAKE_HEAVY_MS));
+`,
+);
 function heavyCalls(): { args: string[]; github: string | null; what: string }[] {
   if (!existsSync(join(root, 'heavy.log'))) return [];
   const text = readFileSync(join(root, 'heavy.log'), 'utf8'); // raw-read-ok: read only after the fake citadel-heavy has exited
@@ -149,8 +158,8 @@ test('a command runs on the minion commit in the cloud: progress lines, its outp
   assert.equal(git(work, 'rev-parse', 'HEAD'), head);
 });
 
-test('a command that fails in the cloud exits 1 with its exit code in the reply', async () => {
-  assert.equal(await cloud(job('echo broke; exit 3')), 1);
+test('a command that fails in the cloud exits with its own code, as at home, and says so in the reply', async () => {
+  assert.equal(await cloud(job('echo broke; exit 3')), 3);
   assert.match(said.join('\n'), /exit 3 after/);
   assert.equal(cloudBranches(), '');
 });
@@ -297,6 +306,29 @@ test('at home --minutes still holds (exit 124) and --files come to --out, as fro
   assert.equal(readFileSync(join(j.out, 'made.txt'), 'utf8'), 'made here');
 });
 
+test('at home a stop or the limit ends the command citadel-heavy runs too, not only citadel-heavy', async () => {
+  io.place = async () => ({ on: false, machine: false });
+  io.minuteMs = 300;
+  process.env.FAKE_HEAVY_MS = '30000';
+  process.env.FAKE_HEAVY_CHILD = '1';
+  try {
+    assert.equal(await helper(job('npm test', { minutes: 1 })), 124);
+    const pid = Number(readFileSync(join(root, 'grandchild.pid'), 'utf8'));
+    const alive = () => {
+      try {
+        return (process.kill(pid, 0), true);
+      } catch {
+        return false;
+      }
+    };
+    await until('the command is gone', () => !alive());
+    assert.ok(!existsSync(join(root, 'grandchild.finished')), 'the command ran on past its limit');
+  } finally {
+    delete process.env.FAKE_HEAVY_CHILD;
+    delete process.env.FAKE_HEAVY_MS;
+  }
+});
+
 test("a cloud session that goes quiet falls back to perigee's slot by itself; a brief the cloud can't take comes back 69 for a Grunt", async () => {
   process.env.FAKE_MODE = 'quiet';
   io.quietMs = 1500;
@@ -327,10 +359,10 @@ test('a cloud run is remembered for the next pick\'s "WAY slower" check', async 
 });
 
 test('the chat line names how a step ended: ✗ and its exit code on a failure, its time limit on 124', async () => {
-  assert.equal(await helper(job('exit 3')), 1);
+  assert.equal(await helper(job('exit 3')), 3);
   assert.match(lines.at(-1)![0], /in a cloud session · ✗ failed \(exit 3\) after 0 min$/);
   lines.length = 0;
-  assert.equal(await helper(job('exit 124')), 1);
+  assert.equal(await helper(job('exit 124')), 124);
   assert.match(lines.at(-1)![0], /in a cloud session · stopped at its time limit, after 0 min$/);
 });
 
@@ -373,6 +405,8 @@ test('a long cloud step runs on its own once it has run past the hand-over time:
   const go = join(root, 'go-hand');
   const j = job(`echo long one; while [ ! -e ${go} ]; do sleep 0.1; done; echo made > out.txt`, { minutes: HAND_MINUTES + 10, files: ['out.txt'] });
   assert.equal(await helper(j), ON_ITS_OWN);
+  assert.equal(await collect(j.out), ON_ITS_OWN, 'woken early, collect leaves it running');
+  assert.match(cloudBranches(), /cloud\/src-t7-/, 'and its source branch stays');
   writeFileSync(go, '');
   const said1 = said.join('\n');
   assert.match(said1, new RegExp(`citadel-wait cmd 'citadel-cloud check ${j.out}'[\\s\\S]*citadel-cloud collect ${j.out}`));
@@ -404,6 +438,9 @@ test('check: a step on its own that goes quiet or passes its limit is due; colle
   assert.equal(due(out), null, 'a fresh beat: still running');
   assert.match(due(out, Date.now() + 5 * 60_000) ?? '', /^no progress for [45] min$/);
   assert.equal(due(out, Date.now() + 76 * 60_000), 'it passed its time limit');
+  assert.equal(await collect(out), ON_ITS_OWN, 'not due yet: collect stops nothing and runs nothing');
+  assert.deepEqual(heavyCalls(), []);
+  writeFileSync(join(out, '.hand.json'), JSON.stringify({ ...hand, began: Date.now() - 76 * 60_000 }));
   assert.equal(await collect(out), 0);
   assert.deepEqual(
     heavyCalls().map((c) => c.args.join(' ')),
@@ -417,4 +454,8 @@ test('check: a step on its own that goes quiet or passes its limit is due; colle
     ],
   );
   assert.equal(cloudBranches(), '', 'its beat branch deleted');
+  process.env.FAKE_HEAVY_CODE = '5';
+  assert.equal(due(out), 'it is already collected');
+  assert.equal(await collect(out), 0, 'a second collect repeats the first exit code');
+  assert.equal(heavyCalls().length, 1, 'and runs nothing again');
 });

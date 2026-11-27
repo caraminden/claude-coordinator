@@ -13,14 +13,15 @@
 //       A brief job (research, a review): the session reads <file> and works on its own up to --minutes, then pushes its
 //       reply and files. Nobody can answer a question there: one it asks comes back as text.
 //   citadel-cloud check <out>     exit 0 once a step running on its own needs collecting (for `citadel-wait cmd`)
-//   citadel-cloud collect <out>   bring it home: its reply, exit code and files, or a run here if it didn't deliver
+//   citadel-cloud collect <out>   bring it home: its reply, exit code and files, or a run here if it didn't deliver;
+//       76 again while it still runs, and a second collect only repeats the first's exit code
 //
-// Exit codes: the command's own (0 done, 1 failed or hit its limit in the cloud), 75 citadel-heavy handed it to the server,
+// Exit codes: the command's own wherever it ran (124 past its --minutes), 75 citadel-heavy handed it to the server,
 // 76 a cloud step over HAND_MINUTES runs on on its own (wait on check, then collect: it prints both), 69 a brief the cloud
 // couldn't take (run it as a Grunt), 2 a usage error, 143 stopped. Run it as a background command and
 // wait with `citadel-wait pid`; not under citadel-job, which leaves out your Claude login (no cloud there).
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { readResult, RESULT } from './cloud-turn.mjs';
@@ -271,9 +272,7 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
   stopping = null;
   if (handed) {
     on('runs on its own in the cloud; Citadel watches for its result', `Its session: ${url}`);
-    io.log(
-      `citadel-cloud: it runs on in the cloud on its own (${url}). Hand the wait to Citadel and end your turn:\n  citadel-wait cmd 'citadel-cloud check ${job.out}'\n(in the foreground; exit 75 means Citadel has it: end your turn). When it wakes you, run:\n  citadel-cloud collect ${job.out}\nas a background command and wait for it: it brings the result home, or runs the step here if the session didn't deliver.`,
-    );
+    io.log(`citadel-cloud: it runs on in the cloud on its own (${url}). ${waitFor(job.out)}`);
     return ON_ITS_OWN;
   }
   for (const b of [ref, beat, branch]) if (job.kind === 'run' || b === branch) spawnSync('git', ['-C', cwd, 'push', '-q', 'origin', '--delete', b], { stdio: 'ignore' });
@@ -283,9 +282,10 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
   if (!r || r.is_error) return home(`${(r?.result ?? 'the session ended with no result').slice(0, 1500)}${url ? `\nIts session: ${url}; ${cost}` : ''}`);
   if (job.kind === 'run' && code === null) return home(`the session's result has no exit code, so the command didn't run through Citadel's runner${url ? ` (${url})` : ''}`);
   io.log(reply);
-  io.log(`citadel-cloud: done after ${mins()} min, ${cost}. Files: ${job.out}`);
-  on(job.kind === 'run' ? ended(code, mins()) : `✔ done after ${mins()} min`, `${reply}\n\nIts session: ${url}; ${cost}.`);
-  return job.kind === 'brief' || code === 0 ? 0 : 1;
+  const end = job.kind === 'run' ? ended(code, mins()) : `✔ done after ${mins()} min`;
+  io.log(`citadel-cloud: ${end}, ${cost}. Files: ${job.out}`);
+  on(end, `${reply}\n\nIts session: ${url}; ${cost}.`);
+  return job.kind === 'brief' ? 0 : (code ?? 1);
 }
 
 /** A finished step's state on its chat line: plain words for success and its limit (124, as `timeout`), the exit code kept for a failure. */
@@ -384,7 +384,16 @@ function remember(cmd: string, seconds: number, code: number): void {
 async function heavy(place: Exclude<Place, 'cloud'>, job: Job, on: (state: string, detail?: string) => void): Promise<number> {
   const args = place === 'home' ? ['--here', 'bash', '-c', job.cmd] : ['bash', '-c', job.cmd];
   const env = { ...process.env, CITADEL_HEAVY_WHAT: whatOf(job.cmd), ...(place === 'github' ? { CITADEL_HEAVY_GITHUB: '1' } : {}) };
-  const child = spawn(io.heavy, args, { cwd: io.cwd(), stdio: ['inherit', 'pipe', 'pipe'], env });
+  // Its own process group, so a stop or the limit ends the command too, not only citadel-heavy: an orphan would hold
+  // the pipe open and the step past its limit.
+  const child = spawn(io.heavy, args, { cwd: io.cwd(), stdio: ['inherit', 'pipe', 'pipe'], env, detached: true });
+  const kill = () => {
+    try {
+      process.kill(-(child.pid ?? 0), 'SIGTERM');
+    } catch {
+      child.kill('SIGTERM');
+    }
+  };
   // The output still streams to the turn; its end is kept for the chat line.
   let out = '';
   const keep = (to: NodeJS.WriteStream) => (b: Buffer) => {
@@ -397,10 +406,10 @@ async function heavy(place: Exclude<Place, 'cloud'>, job: Job, on: (state: strin
   const began = Date.now();
   const mins = () => Math.round((Date.now() - began) / 60_000);
   const timer = setInterval(() => on(`${mins()} min${tail(1) ? `: ${tail(1).slice(0, 200)}` : ''}`, tail(30)), io.lineMs);
-  stopping = () => child.kill('SIGTERM');
+  stopping = kill;
   // --minutes holds here too, as in the cloud: past it the step stops with 124 (timeout's code).
   let late = false;
-  const limit = setTimeout(() => ((late = true), child.kill('SIGTERM')), job.minutes * io.minuteMs);
+  const limit = setTimeout(() => ((late = true), kill()), job.minutes * io.minuteMs);
   const code = await new Promise<number>((r) => {
     child.once('error', () => r(127));
     child.once('close', (c, sig) => r(late ? 124 : (c ?? (sig === 'SIGTERM' ? 143 : 1))));
@@ -431,10 +440,25 @@ interface Hand {
   /** Its chat line, rewritten once more by collect. */
   event: number | null;
 }
+/** A collected step's exit code, kept so a second check or collect neither waits nor runs it again. */
+const COLLECTED = '.collected.json';
+function collected(out: string, code: number): number {
+  writeFileSync(join(out, COLLECTED), JSON.stringify({ code }));
+  rmSync(join(out, '.hand.json'), { force: true });
+  return code;
+}
+
+const wasCollected = (out: string): number | null => (existsSync(join(out, '.hand.json')) || !existsSync(join(out, COLLECTED)) ? null : (JSON.parse(readFileSync(join(out, COLLECTED), 'utf8')) as { code: number }).code);
+
+/** How the minion hands the wait on a step running on its own to Citadel. */
+const waitFor = (out: string) =>
+  `Hand the wait to Citadel and end your turn:\n  citadel-wait cmd 'citadel-cloud check ${out}'\n(in the foreground; exit 75 means Citadel has it: end your turn). When it wakes you, run:\n  citadel-cloud collect ${out}\nas a background command and wait for it: it brings the result home, or runs the step here if the session didn't deliver.`;
+
 const readHand = (out: string): Hand => JSON.parse(readFileSync(join(out, '.hand.json'), 'utf8')) as Hand;
 
 /** Why a step on its own needs collecting now (its result, its silence, its limit), or null while it runs. */
 export function due(out: string, now = Date.now()): string | null {
+  if (wasCollected(out) !== null) return 'it is already collected';
   const h = readHand(out);
   const git = (...a: string[]) => spawnSync('git', ['-C', h.cwd, ...a], { encoding: 'utf8', timeout: 60_000 });
   if (git('ls-remote', '--exit-code', 'origin', `refs/heads/${h.branch}`).status === 0) return 'its result is pushed';
@@ -447,7 +471,14 @@ export function due(out: string, now = Date.now()): string | null {
 
 /** Bring a step that ran on its own home: its reply, exit code and files, or a run here when it didn't deliver. */
 export async function collect(out: string): Promise<number> {
+  const before = wasCollected(out);
+  if (before !== null) return (io.log(`citadel-cloud: already collected (exit ${before}); its files are in ${out}`), before);
   const h = readHand(out);
+  // Woken early (a person's message): the step runs on, so stopping it here would run it twice.
+  if (!due(out)) {
+    io.log(`citadel-cloud: it still runs in the cloud on its own (${h.url}).\n${waitFor(out)}`);
+    return ON_ITS_OWN;
+  }
   const git = (...a: string[]) => execFileSync('git', ['-C', h.cwd, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   const line = liveLine(h.job, h.event);
   line.at('cloud');
@@ -471,14 +502,14 @@ export async function collect(out: string): Promise<number> {
     line.at('home');
     const code = await heavy('home', h.job, line.set);
     await line.done();
-    return code;
+    return collected(out, code);
   }
   remember(h.job.cmd, mins * 60, result.code === 0 ? 0 : 1);
   io.log(result.reply);
-  io.log(`citadel-cloud: done after ${mins} min. Files: ${out}`);
+  io.log(`citadel-cloud: ${ended(result.code, mins)}. Files: ${out}`);
   line.set(ended(result.code, mins), `${result.reply}\n\nIts session: ${h.url}.`);
   await line.done();
-  return result.code === 0 ? 0 : 1;
+  return collected(out, result.code ?? 1);
 }
 
 const WHERE: Record<Place, string> = { machine: 'on a machine lending this scheme CI', github: "on GitHub's own runners", cloud: 'in a cloud session', home: "here, in perigee's heavy-job slot" };
@@ -563,7 +594,7 @@ function home(why: string): number {
 
 if (import.meta.main && ['check', 'collect'].includes(process.argv[2] ?? '')) {
   const [cmd, out] = process.argv.slice(2);
-  if (!out || !existsSync(join(out, '.hand.json'))) {
+  if (!out || !['.hand.json', COLLECTED].some((f) => existsSync(join(out, f)))) {
     console.error(`usage: citadel-cloud ${cmd} <the out folder citadel-cloud named>`);
     process.exit(2);
   }
@@ -586,8 +617,8 @@ if (import.meta.main && ['check', 'collect'].includes(process.argv[2] ?? '')) {
     console.error(job);
     process.exit(2);
   }
-  process.once('SIGTERM', stop);
-  process.once('SIGINT', stop);
+  // The job runs in its own process group: a hang-up of the minion's shell stops it too.
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.once(sig, stop);
   helper(job).then(
     (c) => process.exit(c),
     (err) => {

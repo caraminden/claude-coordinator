@@ -1,7 +1,8 @@
 // An Android APK built and published after each deploy (#837; TWIReader's ask, Cara 2026-11-16: "Work with citadel to make
 // this citadel wide"). Every land on main deploys its scheme's contraptions (#712), so once a Capacitor app's deploy goes
 // live, Citadel checks whether what goes into its APK (android/, capacitor.config.*, the Capacitor webDir) changed since the
-// published one. When it did, it builds a release APK on perigee in a checkout of its own beside the live one, numbers it by
+// published one. When it did, it builds a release APK from a checkout of its own beside the live one (its Gradle step on a
+// machine with the Builds role when one has room, src/apk-machine.ts, else on perigee), numbers it by
 // the commit count (versionCode only goes up while main isn't rewritten), signs it with the app's release key in
 // ~/.config/citadel-android (the citadel:android-app skill), and publishes it and latest.json into the app's DATA_DIR/android/,
 // where its open route serves them to the update banner. An app whose APKs a release workflow signs on CI (Mandate) keeps that

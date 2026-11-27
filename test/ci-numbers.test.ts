@@ -278,7 +278,7 @@ test("a suite time taken while the runners' Windows PC averaged over 80% CPU is 
   const p = store.createProject('Peek', 'https://github.com/caraminden/peek-auras', null);
   const now = Date.UTC(2026, 10, 25);
   const numbers = new CiNumbers(store, () => now);
-  const pc = store.createMachine('pc', 'hash', 'cara').id;
+  const pc = store.createMachine('pc', 'hash', 'cara', store.createUser({ name: 'Cara', login: 'cara', admin: true }).id).id;
   const sample = (agoSec: number, os: string, host: string, cpu: number, repo?: string) => store.addRunnerLoad(pc, now - agoSec * 1000, JSON.stringify({ os, host, cpu, hv: null, runners: repo ? [{ repo }] : [] }));
   // The PC with this repo's runners: busy for the last 100 s, quiet before. Another PC is always busy and doesn't count.
   sample(300, 'linux', 'desk', 10, 'CaraMinden/Peek-Auras');

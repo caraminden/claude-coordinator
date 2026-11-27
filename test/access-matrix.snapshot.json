@@ -1061,7 +1061,7 @@
  },
  "DELETE /api/machines/:m/job-kinds/nohash": {
   "anon": "401 Not logged in",
-  "person": "404 mx doesn't always allow that kind",
+  "person": "403 Only mx's owner can change what it always allows",
   "member": "403 Only mx's owner can change what it always allows",
   "outsider": "403 Only mx's owner can change what it always allows",
   "tmA": "403 Only people decide on a machine's jobs",
@@ -1071,7 +1071,7 @@
  },
  "PATCH /api/machines/:m/job-settings": {
   "anon": "401 Not logged in",
-  "person": "200",
+  "person": "403 Only mx's owner can change its job hours",
   "member": "403 Only mx's owner can change its job hours",
   "outsider": "403 Only mx's owner can change its job hours",
   "tmA": "403 Only people decide on a machine's jobs",
@@ -1161,7 +1161,7 @@
  },
  "POST /api/machines/:m/roles/tools/setup": {
   "anon": "401 Not logged in",
-  "person": "409 mx is offline: start it, then press it again",
+  "person": "403 Only mx's owner sets up and tests its roles",
   "member": "404 No such machine",
   "outsider": "404 No such machine",
   "tmA": "403 Only people manage machines",
@@ -1201,7 +1201,7 @@
  },
  "GET /api/machines/:m/token": {
   "anon": "401 Not logged in",
-  "person": "200",
+  "person": "403 Only its owner can show its token",
   "member": "404 No such machine",
   "outsider": "404 No such machine",
   "tmA": "403 Only people manage machines",

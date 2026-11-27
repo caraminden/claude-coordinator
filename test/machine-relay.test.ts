@@ -12,6 +12,9 @@ import { Store } from '../src/db.ts';
 import { cleanLend, MachineRelay } from '../src/machines.ts';
 import { tempRoot } from './helpers.ts';
 
+/** The store's one person, made when there is none: a machine needs an owner. */
+const owner = (store: Store): number => (store.listUsers()[0] ?? store.createUser({ name: 'Cara', login: 'cara', admin: true })).id;
+
 const scratch = tempRoot('machine-relay-');
 after(() => scratch.teardown());
 
@@ -46,7 +49,7 @@ function world() {
   const store = new Store(':memory:');
   const relay = new MachineRelay(store, () => {});
   relays.push({ relay, store });
-  const box = store.createMachine('box', 'x', 'Cara');
+  const box = store.createMachine('box', 'x', 'Cara', owner(store));
   return { store, relay, box };
 }
 
@@ -105,7 +108,7 @@ test('an agent that beats and then goes quiet (a laptop asleep) is dropped withi
   mock.timers.enable({ apis: ['setInterval', 'Date'] });
   try {
     const { relay, store, box } = world();
-    const old = store.createMachine('old', 'y', 'Cara');
+    const old = store.createMachine('old', 'y', 'Cara', owner(store));
     relay.connectAgent(box, stream(), { host: 'h', command: 'fake-mcp' });
     relay.connectAgent(old, stream(), { host: 'h', command: 'fake-mcp' });
     assert.equal(relay.beat(box), true);
@@ -239,7 +242,7 @@ test('a lend keeps gpu_off only when it is true', () => {
 test('a machine is testing a ship while one runs on its PC, its WSL distro included (Build 7 T4)', () => {
   const { store, relay } = world();
   const ids = ['pc', 'PC-Ubuntu-24', 'laptop'].map((host, i) => {
-    const m = store.createMachine(`m${i}`, `h${i}`, 'Cara');
+    const m = store.createMachine(`m${i}`, `h${i}`, 'Cara', owner(store));
     relay.connectAgent(m, stream(), { host, command: 'worker' });
     return m.id;
   });
@@ -252,8 +255,8 @@ test('a machine is testing a ship while one runs on its PC, its WSL distro inclu
 
 test('ships (#1268) go to every runner agent at each look, and to one that connects while a ship runs, never to a lent machine', () => {
   const { store, relay, box } = world();
-  const win = store.createMachine('win-runners', 'y', 'Cara');
-  const wsl = store.createMachine('wsl-runners', 'z', 'Cara');
+  const win = store.createMachine('win-runners', 'y', 'Cara', owner(store));
+  const wsl = store.createMachine('wsl-runners', 'z', 'Cara', owner(store));
   const lent = stream();
   const windows = stream();
   relay.connectAgent(box, lent, { host: 'h', command: 'fake-mcp' });
@@ -291,7 +294,7 @@ test('a ship squeezes only the PC it runs on (#1934): two agents on two PCs, eac
       run: async ({ args }: { args: string[] }) => ((quotas[host] ??= []).push(`${args[2]} ${args[3]}`), { code: 0, output: '' }),
     });
     const out = stream();
-    relay.connectAgent(store.createMachine(`${host}-runners`, host, 'Cara'), out, { host, command: 'citadel runner agent', runners: true, os: 'linux' });
+    relay.connectAgent(store.createMachine(`${host}-runners`, host, 'Cara', owner(store)), out, { host, command: 'citadel runner agent', runners: true, os: 'linux' });
     return { out, act: () => squeeze.update(cleanShips(out.sent.filter((m) => m.ships).at(-1)!.ships)) };
   };
   const desk = agent('DESK');
@@ -307,9 +310,9 @@ test('a ship squeezes only the PC it runs on (#1934): two agents on two PCs, eac
   assert.deepEqual(quotas.LAPTOP.sort(), ['citadel-runner-a.service CPUQuota=', 'citadel-runner-b.service CPUQuota='], "the second PC's runners keep full speed");
   // One that connects while the ship runs gets only its own PC's list too.
   const wsl = stream();
-  relay.connectAgent(store.createMachine('desk-wsl', 'w', 'Cara'), wsl, { host: 'Desk', command: 'citadel runner agent', runners: true, os: 'linux' });
+  relay.connectAgent(store.createMachine('desk-wsl', 'w', 'Cara', owner(store)), wsl, { host: 'Desk', command: 'citadel runner agent', runners: true, os: 'linux' });
   const third = stream();
-  relay.connectAgent(store.createMachine('third', 't', 'Cara'), third, { host: 'THIRD', command: 'citadel runner agent', runners: true, os: 'linux' });
+  relay.connectAgent(store.createMachine('third', 't', 'Cara', owner(store)), third, { host: 'THIRD', command: 'citadel runner agent', runners: true, os: 'linux' });
   assert.deepEqual(
     wsl.sent.filter((m) => m.ships),
     [{ ships: [ship] }],

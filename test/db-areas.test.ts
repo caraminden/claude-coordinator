@@ -78,5 +78,5 @@ test('every area file under src/db/ is attached to Store, and no method is defin
     }
   }
   const store = new Store(':memory:');
-  assert.equal(store.createMachine('m', 'h', 'cara').name, 'm', 'a moved method runs with `this` as the Store, and calls another');
+  assert.equal(store.createMachine('m', 'h', 'cara', store.createUser({ name: 'Cara', login: 'cara' }).id).name, 'm', 'a moved method runs with `this` as the Store, and calls another');
 });

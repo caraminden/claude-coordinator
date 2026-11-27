@@ -81,7 +81,7 @@ export const machineQueries = {
    * boot (Store's constructor, after machineRoleTables); says what it did, for the deploy's notes.
    */
   machineOwners(this: Store) {
-    const rows = this.db.prepare('SELECT id, name, created_by FROM machines WHERE owner_id IS NULL ORDER BY id').all() as { id: number; name: string; created_by: string }[];
+    const rows = this.db.prepare('SELECT id, name, created_by, scoped, last_check FROM machines WHERE owner_id IS NULL ORDER BY id').all() as { id: number; name: string; created_by: string; scoped: number; last_check: string | null }[];
     if (!rows.length) return;
     const users = this.listUsers();
     this.db.exec('BEGIN IMMEDIATE');
@@ -96,7 +96,10 @@ export const machineQueries = {
           continue;
         }
         this.db.prepare('UPDATE machines SET owner_id = ? WHERE id = ?').run(owner.id, m.id);
-        this.writeMachineRoles(m.id, (roles) => roles.map((r) => (r.role === 'turns' ? r : { ...r, caps: { ...r.caps, everyone: true } })));
+        // A CI runner host from before #438 never given a list served every scheme an admin owns (machines.scoped 0,
+        // which nothing reads any more): those go on its CI role's list.
+        const adminOwned = !m.scoped && runnerHost(m.last_check) ? this.listProjects().flatMap((p) => (this.getUser(p.owner_id ?? -1)?.admin ? [p.id] : [])) : null;
+        this.writeMachineRoles(m.id, (roles) => roles.map((r) => (r.role === 'turns' ? r : { ...r, caps: { ...r.caps, everyone: true }, ...(adminOwned && r.role === 'ci' ? { projects: adminOwned } : {}) })));
         const name = users.find((u) => u.id === owner.id)!.name;
         console.log(`Machine owners (H1): ${m.name} (row ${m.id}) is now ${name}'s, from ${owner.why}; its roles but Minion turns stay lent to every turn in their schemes.`);
       }

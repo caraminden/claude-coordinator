@@ -39,9 +39,13 @@ const M1 = thread(A.id, 'ticket', 'One');
 const M2 = thread(A.id, 'ticket', 'Two');
 const schedule = () => store.schedules.create({ project_id: A.id, name: 'S', cron: '0 9 * * 1', brief: 'b', type: 'chore', created_by: 'Cara' });
 const S = schedule();
-const machine = (name: string) => store.createMachine(name, 'x', 'Cara');
+// Every machine has an owner (Build 10 H1): Mo, in scheme A, who lent its tools to every turn there.
+const MO = store.createUser({ name: 'Mo', login: 'mo' });
+store.addMember(A.id, MO.id);
+const machine = (name: string) => store.createMachine(name, 'x', 'Mo', MO.id);
 const MX = machine('mx');
 store.setMachineProjects(MX.id, [A.id]); // lent to scheme A only (#438): its minions may open it, B's may not
+store.setMachineRole(MX.id, 'tools', { caps: { everyone: true } });
 // A pinned artifact stays listed (as missing) whatever the startup scan finds.
 store.syncArtifacts(M1, [{ path: 'report.md', size: 1, mtime: 1 }]);
 const ART = store.listArtifacts(A.id)[0];

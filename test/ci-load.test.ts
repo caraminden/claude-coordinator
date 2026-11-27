@@ -57,6 +57,9 @@ const running = (runner: string) => job({ status: 'in_progress', runner, created
 const queued = (msAgo: number) => job({ status: 'queued', runner: '', created: NOW - msAgo, started: NaN, ended: NaN });
 const full = () => names.map(running);
 
+/** The store's one person, made when there is none: a machine needs an owner. */
+const owner = (store: Store): number => (store.listUsers()[0] ?? store.createUser({ name: 'Cara', login: 'cara', admin: true })).id;
+
 test("a pool is a repo's runners with the same labels: its runners, who is busy, what waits, and the day's waits", () => {
   const jobs = [
     ...full(),
@@ -230,7 +233,7 @@ test('a verdict that holds for 30 minutes is one quiet Mandate item per admin, c
   store.setContraptionUser(mandate.id, cara.id, true, cara.id);
   // An admin without Mandate gets nothing.
   store.createUser({ name: 'Rachel', login: 'rachel', admin: true });
-  const machine = store.createMachine('desk-runners', '', 'Cara');
+  const machine = store.createMachine('desk-runners', '', 'Cara', owner(store));
   let ghJobs: Job[] = [];
   const sent: [string, string | null][] = [];
   let down = false;
@@ -289,8 +292,8 @@ test('a verdict that holds for 30 minutes is one quiet Mandate item per admin, c
 test('views keep up with samples as they come in, and drop a deleted machine and samples over a day old (#613)', () => {
   const store = new Store(join(root, 'recent.db'));
   const load = new CiLoad(store, { jobs: () => [], hosts: () => [], mandate: async () => true });
-  const desk = store.createMachine('desk', '', 'Cara');
-  const lab = store.createMachine('lab', '', 'Cara');
+  const desk = store.createMachine('desk', '', 'Cara', owner(store));
+  const lab = store.createMachine('lab', '', 'Cara', owner(store));
   const DAY = 24 * 60 * MIN;
   load.add(desk.id, sample(0, { host: 'DESK' }), NOW - DAY + MIN);
   assert.deepEqual(
@@ -323,8 +326,8 @@ test('samples wait in memory and are written together, with nothing lost to a re
   const store = new Store(join(root, 'buffer.db'));
   const quiet = { jobs: () => [], hosts: () => [], mandate: async () => true };
   const load = new CiLoad(store, quiet);
-  const desk = store.createMachine('desk', '', 'Cara');
-  const lab = store.createMachine('lab', '', 'Cara');
+  const desk = store.createMachine('desk', '', 'Cara', owner(store));
+  const lab = store.createMachine('lab', '', 'Cara', owner(store));
   const saved = () => store.runnerLoadSince(0).map((r) => [r.machine_id, r.at]);
   const changes = () => Number((store.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n);
   const before = changes();
@@ -374,8 +377,8 @@ test('samples wait in memory and are written together, with nothing lost to a re
 test("each PC's own runners come from its agents' newest samples; a PC connected with none yet is there, and a stale sample isn't (#1934)", () => {
   const store = new Store(join(root, 'pcs.db'));
   const load = new CiLoad(store, { jobs: () => [], hosts: () => ['LAPTOP', 'Desk'], mandate: async () => true });
-  const win = store.createMachine('win', '', 'Cara');
-  const wsl = store.createMachine('wsl', '', 'Cara');
+  const win = store.createMachine('win', '', 'Cara', owner(store));
+  const wsl = store.createMachine('wsl', '', 'Cara', owner(store));
   const use = (name: string, repo: string) => ({ name, repo, dir: '', cpu: 0, mem: 0 });
   load.add(win.id, sample(0, { host: 'DESK', runners: [use('DESK', 'c/Peek'), use('who', '')] }), NOW);
   load.add(wsl.id, sample(0, { host: 'desk', os: 'linux', runners: [use('DESK-linux', 'c/citadel')] }), NOW);

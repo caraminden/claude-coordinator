@@ -378,8 +378,9 @@ test("a wake from no person runs on the minion's own person, not on another pers
 });
 
 test("a machine goes to exactly the schemes on its list, even a non-admin's, and a new one to none (#303, #438)", () => {
-  const { store, citadel, games } = world();
-  const vault = store.createMachine('vault', '', 'Cara');
+  const { store, cara, citadel, games } = world();
+  const vault = store.createMachine('vault', '', 'Cara', cara.id);
+  store.setMachineRole(vault.id, 'tools', { caps: { everyone: true } });
   assert.ok(!lendsRole(store, vault, 'tools', citadel) && !lendsRole(store, vault, 'tools', games), "a new machine is lent to no scheme, an admin's included");
   store.setMachineProjects(vault.id, [games.id]);
   assert.ok(lendsRole(store, vault, 'tools', games) && !lendsRole(store, vault, 'tools', citadel));

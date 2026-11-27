@@ -46,6 +46,9 @@ const LIVE = [
   { name: 'gpu-off-box', owner: 'mike', scoped: 1, lend: { server: null, workspaces: [], before_ticks: true, gpu_off: true }, runners: false, list: [13] },
 ] as const;
 
+/** Who added each shared (ownerless) live row: Cara, but perigee-godot, which #28's minion added. */
+const BY: Record<string, string> = { 'perigee-godot': 'Claude (#28)' };
+
 /** A store with the live rows as an older release left them: no role rows, schema 120. */
 function oldStore(file: string) {
   const s = new Store(join(dir, file));
@@ -59,8 +62,8 @@ function oldStore(file: string) {
   s.updateUser(gone.id, { disabled_at: Date.now() });
   const who = { josh: josh.id, mike: mike.id } as const;
   for (const r of LIVE) {
-    const m = s.createMachine(r.name, '', 'test', r.owner === null ? null : who[r.owner]);
-    s.db.prepare('UPDATE machines SET scoped = ?, lend = ?, last_check = ? WHERE id = ?').run(r.scoped, r.lend ? JSON.stringify(r.lend) : null, r.runners ? JSON.stringify({ at: 1, results: [], runners: true }) : null, m.id);
+    const m = s.createMachine(r.name, '', r.owner === null ? (BY[r.name] ?? 'Cara') : r.owner, r.owner === null ? cara.id : who[r.owner]);
+    s.db.prepare('UPDATE machines SET owner_id = ?, scoped = ?, lend = ?, last_check = ? WHERE id = ?').run(r.owner === null ? null : who[r.owner], r.scoped, r.lend ? JSON.stringify(r.lend) : null, r.runners ? JSON.stringify({ at: 1, results: [], runners: true }) : null, m.id);
     for (const n of r.list) s.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)').run(m.id, projects[n - 1].id);
   }
   s.db.exec('DELETE FROM machine_roles; DELETE FROM machine_role_projects');
@@ -68,7 +71,7 @@ function oldStore(file: string) {
   return { s, people: [cara.id, josh.id, mike.id, gone.id], projects };
 }
 
-test('the migration grants every turn, tool and runner token exactly as before, on the live rows', () => {
+test('the migrations grant every turn, tool and runner token exactly as before, on the live rows', () => {
   const { s: before, people, projects } = oldStore('grants.db');
   // Every grant the old rules give, for every machine, scheme and asker.
   const askers = [[], ...people.map((p) => [p])];
@@ -86,7 +89,23 @@ test('the migration grants every turn, tool and runner token exactly as before, 
   const lends = before.listMachines().map((m) => parseLegacyLend(m.lend));
   before.db.close();
   const s = new Store(join(dir, 'grants.db'));
-  assert.deepEqual(grants(s, 'new'), was);
+  // Every machine has an owner (Build 10 H1): a shared row its created_by's person, still lent to every turn in its
+  // schemes. perigee-godot names no person, so it has none and lends nothing (H5 makes it a server tool before this
+  // ships). Cara's two PCs that were shared and host no runners now fetch a runner token as any PC of hers does: for
+  // every scheme she's in (an admin: all), not only the schemes a role was lent to.
+  const byName = (name: string) => s.listMachines().find((m) => m.name === name)!;
+  assert.equal(byName('citadel-test-box').owner_id, people[0]);
+  assert.equal(byName('caras-laptop').owner_id, people[0]);
+  assert.equal(byName('cara-desktop-ci-runners').owner_id, people[0]);
+  assert.equal(byName('perigee-godot').owner_id, null);
+  assert.deepEqual(
+    grants(s, 'new'),
+    was.map((g) => {
+      if (/^perigee-godot .* (tools|runner token)/.test(g)) return g.replace(/: true$/, ': false');
+      if (/^(caras-laptop|citadel-test-box) .* runner token: /.test(g)) return g.replace(/: false$/, ': true');
+      return g;
+    }),
+  );
   assert.ok(was.filter((g) => g.endsWith('true')).length > 40, 'the comparison covers real grants, not only refusals');
   for (const [i, m] of s.listMachines().entries()) assert.ok(sameLend(s.machineLend(m.id), lends[i]), `${m.name}: lends what it did`);
   // The roles as the spec maps them.
@@ -124,7 +143,7 @@ test('every write keeps the old columns as a rollback reads them, and an older r
   third.db.close();
   const fourth = new Store(join(dir, 'rollback.db'));
   // A machine the older release added has roles before anything writes them.
-  const added = fourth.createMachine('added-later', '', 'test');
+  const added = fourth.createMachine('added-later', '', 'Cara', fourth.listUsers()[0].id);
   assert.equal(fourth.machineRoles(added.id).find((r) => r.role === 'tools')?.on, true);
   fourth.db.close();
 });
@@ -166,7 +185,7 @@ test('the one list saves only its change: one more scheme for Tools leaves CI an
   const s = new Store(join(dir, 'one-list-change.db'));
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
   const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((n) => s.createProject(n, null, cara.id));
-  const m = s.createMachine('pc', '', 'Cara');
+  const m = s.createMachine('pc', '', 'Cara', cara.id);
   s.setMachineRole(m.id, 'tools', { on: true, projects: [a.id] });
   s.setMachineRole(m.id, 'gpu', { on: true, projects: [a.id, b.id] });
   s.setMachineRole(m.id, 'ci', { on: true, projects: [a.id, b.id, c.id] });
@@ -227,6 +246,15 @@ test('PATCH roles: owner and admins only; on with no list is every scheme its ow
     { role: 'ci', on: true, caps: { runners: 2 }, setup: null, projects: [shared.id], name: 'CI runners' },
   );
   await assert.rejects(patchRoles(app, as(cara), m, { role: 'ci', caps: { runners: 4 } }), /Only its owner can set its caps/);
+  // For my schemes (Build 10 H1): only its owner lends a role to every turn there, never Minion turns, and takes it back.
+  await assert.rejects(patchRoles(app, as(josh), m, { role: 'tools', everyone: 'yes' }), /everyone must be true or false/);
+  await assert.rejects(patchRoles(app, as(josh), m, { role: 'turns', everyone: true }), /can't be lent to everyone/);
+  await assert.rejects(patchRoles(app, as(cara), m, { role: 'tools', everyone: true }), /Only its owner can lend it to everyone/);
+  const lent = await patchRoles(app, as(josh), m, { role: 'tools', everyone: true });
+  assert.equal(lent.roles.find((r) => r.role === 'tools')?.caps.everyone, true);
+  assert.equal(lent.roles.find((r) => r.role === 'gpu')?.caps.everyone, undefined, 'one role at a time');
+  const taken = await patchRoles(app, as(josh), m, { role: 'tools', everyone: false });
+  assert.equal(taken.roles.find((r) => r.role === 'tools')?.caps.everyone, undefined);
   // Off and on again: its list stays.
   await patchRoles(app, as(cara), m, { role: 'ci', on: false });
   const back = await patchRoles(app, as(josh), m, { role: 'ci', on: true });
@@ -255,7 +283,7 @@ test('each role decides alone: Tools for sessions, GPU jobs for machine jobs, CI
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
   const a = s.createProject('a', null, cara.id);
   const b = s.createProject('b', null, cara.id);
-  const box = s.createMachine('box', '', 'Cara');
+  const box = s.createMachine('box', '', 'Cara', cara.id);
   s.setMachineProjects(box.id, [a.id, b.id]);
   let ended: (id: number) => boolean = () => false;
   let dropped: (j: { state: string; project_id: number }) => boolean = () => false;
@@ -276,10 +304,13 @@ test('each role decides alone: Tools for sessions, GPU jobs for machine jobs, CI
   // GPU jobs taken off b: its queued machine jobs leave the line.
   await patchRoles(app, { uid: cara.id, admin: true } as Parameters<typeof patchRoles>[1], box, { role: 'gpu', projects: [a.id] });
   assert.equal(dropped({ state: 'queued', project_id: b.id }), true);
-  // CI: an unscoped runner host from before #438 fetches for admin-owned schemes only while CI is on.
-  const ci = s.createMachine('ci-box', '', 'Cara');
+  // CI: a runner host fetches for the schemes on its CI list only while CI is on (machines.scoped is read no more,
+  // Build 10 H1: the owner backfill lists an unscoped one's schemes).
+  const ci = s.createMachine('ci-box', '', 'Cara', cara.id);
   s.updateMachine(ci.id, { last_check: JSON.stringify({ at: 1, results: [], runners: true }) });
   s.db.prepare('UPDATE machines SET scoped = 0 WHERE id = ?').run(ci.id);
+  assert.equal(mayFetch(s, s.getMachine(ci.id)!, a), false, 'not on its CI list');
+  s.setMachineRole(ci.id, 'ci', { projects: [a.id] });
   assert.equal(mayFetch(s, s.getMachine(ci.id)!, a), true);
   s.setMachineRole(ci.id, 'ci', { on: false });
   assert.equal(mayFetch(s, s.getMachine(ci.id)!, a), false, 'CI switched off');

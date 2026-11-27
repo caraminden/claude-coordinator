@@ -263,8 +263,6 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     assert.equal((await patch({ worker: true })).status, 200);
     assert.equal((await patch({ projects: [scheme] })).status, 200);
     assert.equal((await srv.call(`/api/machines/${machine.id}/self-test`, {})).status, 409, 'nor with no worker there');
-    const shared = ok(await srv.call('/api/machines', { name: 'shared-pc' })).machine;
-    assert.equal((await fetch(`${srv.base}/api/machines/${shared.id}`, { method: 'PATCH', headers: { cookie: srv.cookie, 'Content-Type': 'application/json' }, body: '{"worker":true}' })).status, 403, 'a shared machine has no owner to switch it on');
 
     // Its tick list saved afterwards, as the page saves it, keeps the switch.
     assert.equal((await patch({ lend: { server: null, workspaces: [], gpu_off: true } })).status, 200);

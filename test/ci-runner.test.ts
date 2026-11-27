@@ -57,7 +57,7 @@ function world(live = true) {
   const tokens = new RunnerTokens(store, link, live, gh.fetch);
   const notes: string[] = [];
   tokens.onFetched = (p, words) => notes.push(`${p.name}: ${words}`);
-  const machine = (name: string, owner: number | null) => store.createMachine(name, 'x', 'Cara', owner);
+  const machine = (name: string, owner: number) => store.createMachine(name, 'x', 'Cara', owner);
   return { store, creds, cara, josh, olive, scheme, bare, gh, tokens, notes, machine };
 }
 
@@ -86,21 +86,21 @@ test("a member's machine gets the token, made with the owner's login, and the Ta
   assert.doesNotMatch(JSON.stringify(got), /gho_|caraminden"/, "the answer never carries the owner's token or login field");
 });
 
-test('only machines whose person is in the scheme, or lent to it, may fetch', async () => {
+test('only machines whose person is in the scheme may fetch, and one with no owner never', async () => {
   const w = world();
   // Olive isn't in Peek Auras: her machine is told there's no such scheme, and GitHub is never asked.
   await assert.rejects(w.tokens.issue(w.machine('olive-pc', w.olive.id), 'Peek Auras'), { status: 404 });
   // An admin's own machine reaches every scheme, whatever its list of schemes says.
   assert.equal((await w.tokens.issue(w.machine('cara-pc', w.cara.id), w.scheme.id)).token, 'AREGTOKEN');
-  // An ownerless machine reaches only the schemes on its list.
-  const vault = w.machine('vault', null);
-  await assert.rejects(w.tokens.issue(vault, 'Peek Auras'), { status: 404 });
+  // A row with no owner (one the owner backfill could name no one for, Build 10 H1) reaches nothing, listed or not.
+  const vault = w.machine('vault', w.cara.id);
+  w.store.db.prepare('UPDATE machines SET owner_id = NULL WHERE id = ?').run(vault.id);
   w.store.setMachineProjects(vault.id, [w.scheme.id]);
-  assert.equal((await w.tokens.issue(vault, 'Peek Auras')).token, 'AREGTOKEN');
+  await assert.rejects(w.tokens.issue(w.store.getMachine(vault.id)!, 'Peek Auras'), { status: 404 });
   // A disabled person's machine reaches nothing.
   w.store.updateUser(w.josh.id, { disabled_at: Date.now() });
   await assert.rejects(w.tokens.issue(w.machine('josh-pc', w.josh.id), 'Peek Auras'), { status: 404 });
-  assert.equal(w.gh.calls.length, 2);
+  assert.equal(w.gh.calls.length, 1);
 });
 
 test('clear errors: no repo, no owner login, no admin, a missing scope, a dead link, GitHub down', async () => {

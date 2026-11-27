@@ -70,7 +70,7 @@ async function open(name: string) {
 
 test('adding a machine asks its name and nothing about MCP servers or folders, then gives one install line', { skip }, async () => {
   await openMachines();
-  assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll(".machine-add:not(.runners) [name]")].map((i) => i.name)'), ['name', 'always_on', 'mine']);
+  assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll(".machine-add:not(.runners) [name]")].map((i) => i.name)'), ['name', 'always_on'], "no Mine tick: every machine is its adder's (Build 10 H1)");
   await add('pick-box');
   // Headless Chromium here says Linux: that line shows, the other a click away, and nothing else.
   assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll("#machine-setup .chip")].map((b) => b.textContent)'), ['Windows', 'macOS or Linux', 'GPU jobs (WSL)']);

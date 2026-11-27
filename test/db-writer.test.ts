@@ -207,7 +207,7 @@ test("a card's cached row is dropped again when its change lands, not only when 
 
 test("a machine's or a job's write is read back at once even on a stalled disk: the code acts on it next (main red, Nov 21)", () => {
   const { store, w } = open(200);
-  const id = store.createMachine('box', 'x', 'cara', null).id;
+  const id = store.createMachine('box', 'x', 'cara', store.createUser({ name: 'Cara', login: 'cara' }).id).id;
   w.drain();
   // A queued write would leave these stale past READ_WAIT_MS: setLend then told the agent the lend from before.
   store.updateMachine(id, { lend: JSON.stringify({ server: 'own', workspaces: [] }) });

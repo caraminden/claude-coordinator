@@ -395,7 +395,7 @@ const manyRecords: { what: string; refuse: [on: string, when?: string]; ready: (
     refuse: ['INSERT ON machine_projects', 'NEW.project_id = 3'],
     ready: (s) => {
       for (const name of ['a', 'b', 'c']) s.createProject(name, null);
-      s.createMachine('box', 'hash', 'cara');
+      s.createMachine('box', 'hash', 'cara', s.createUser({ name: 'Cara', login: 'cara' }).id);
       s.setMachineProjects(1, [1]);
     },
     act: (s) => s.setMachineProjects(1, [2, 3]),

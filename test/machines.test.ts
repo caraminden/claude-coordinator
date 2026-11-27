@@ -115,7 +115,7 @@ test("a shared machine's token shows again to admins, a relink shows the new one
   // The server's own writes go through its write worker: let them land before this test writes the file itself (#1437).
   await srv.settled();
   const store = new Store(join(root, 'data', 'coordinator.db'));
-  const old = store.createMachine('linked-before', hashToken(newToken(999)), 'Cara');
+  const old = store.createMachine('linked-before', hashToken(newToken(999)), 'Cara', store.findUser('name', 'Cara')!.id);
   assert.equal((await call('/api/machines')).find((m: Machine) => m.id === old.id).token_showable, false);
   assert.equal((await fetch(`${base}/api/machines/${old.id}/token`, { headers: { Cookie: cookie } })).status, 409);
   store.updateMachine(old.id, { token_sealed: store.getMachine(machine.id)!.token_sealed });
@@ -274,8 +274,9 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
     Object.keys((await turnNow('made up')).results).filter((n) => n.startsWith('ticks')),
     [],
   );
+  // Nor by hand: a turn that started without it can't open it (its owner's own, Build 10 H1).
   const opened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${(await turnNow('by hand')).token}` } });
-  assert.equal(opened.status, 503);
+  assert.equal(opened.status, 403);
 
   // The agent that starts these dies with the test and leaves them running. Their command line names root, so teardown ends them and leak-guard sees any that escape (#515).
   const stuckMarker = join(root, 'stuck-stand-in');
@@ -436,6 +437,8 @@ test('a machine reaches only the minions of the schemes on its list, and taking 
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: "Josh's vault." } });
   const scoped = await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [a.id] } });
   assert.deepEqual(scoped.projects, [a.id]);
+  // Cara's, lent to every turn in its schemes, not only hers (Build 10 H1: a machine always has an owner).
+  await call(`/api/machines/${machine.id}/roles`, { method: 'PATCH', body: { role: 'tools', everyone: true } });
 
   const turnIn = async (project: { id: number }, message: string) => {
     const before = turns().length;
@@ -587,10 +590,11 @@ test("a person's own machine goes only to turns they ask for, in schemes they're
   assert.equal((await turnIn(josh.as, shared, 'josh, off the list')).results['josh-box'], undefined);
 
   // An admin's own: only Cara's turns, in the schemes on its list.
-  const mineMade = await call('/api/machines', { method: 'POST', body: { name: 'cara-own', mine: true } });
+  const mineMade = await call('/api/machines', { method: 'POST', body: { name: 'cara-own' } });
   assert.equal(mineMade.machine.owner_id, (await call('/api/me')).id, "an admin's own machine is owned by Cara");
   await lend(mineMade.machine.id, notTheirs, shared);
-  assert.equal((await call('/api/machines', { method: 'POST', body: { name: 'shared-box' } })).machine.owner_id, null);
+  // Every machine has an owner (Build 10 H1): an admin's add is theirs too, whatever the body says.
+  assert.equal((await call('/api/machines', { method: 'POST', body: { name: 'shared-box', mine: false } })).machine.owner_id, mineMade.machine.owner_id);
   startAgent(mineMade.token);
   await until('cara-own to come online', async () => (await call('/api/machines')).find((m: Machine) => m.name === 'cara-own' && m.online));
   assert.deepEqual((await turnIn(asCara, notTheirs, 'cara again')).results['cara-own'].tools, ['whoami']);
@@ -600,7 +604,7 @@ test("a person's own machine goes only to turns they ask for, in schemes they're
   await call(`/api/machines/${mineMade.machine.id}`, { method: 'DELETE' });
 });
 
-test("a contraption turn gets its person's own machines, and no one else's or a shared one (#306)", async () => {
+test("a contraption turn gets its person's own machines, and no one else's, even one lent to everyone (#306)", async () => {
   const made = await call('/api/contraptions', { method: 'POST', body: { name: 'tally', title: 'Tally', port: 9102 } });
   const key = readFileSync(join(made.keys_dir, 'contraption.key'), 'utf8');
   const me = await call('/api/me');
@@ -610,10 +614,14 @@ test("a contraption turn gets its person's own machines, and no one else's or a 
   store.updateUser(olive.person.id, { server_login: 1 });
   for (const id of [me.id, olive.person.id]) await call(`/api/contraptions/tally/people/${id}`, { method: 'PUT', body: { enabled: true } });
 
-  const own = await call('/api/machines', { method: 'POST', body: { name: 'cara-app-box', mine: true } });
+  const own = await call('/api/machines', { method: 'POST', body: { name: 'cara-app-box' } });
   await call(`/api/machines/${own.machine.id}`, { method: 'PATCH', body: { notes: 'The tally sheet lives here.' } });
   startAgent(own.token);
+  // Pat's, lent to every turn in its schemes (Build 10 H1's shared rows): still no contraption turn's but Pat's.
   const sharedBox = await call('/api/machines', { method: 'POST', body: { name: 'shared-app-box' } });
+  const pat = await call('/api/people', { method: 'POST', body: { name: 'Pat' } });
+  store.db.prepare('UPDATE machines SET owner_id = ? WHERE id = ?').run(pat.person.id, sharedBox.machine.id);
+  store.setMachineRole(sharedBox.machine.id, 'tools', { caps: { everyone: true } });
   startAgent(sharedBox.token);
   await until('both to come online', async () => (await call('/api/machines')).filter((m: Machine) => ['cara-app-box', 'shared-app-box'].includes(m.name) && m.online).length === 2);
 
@@ -629,7 +637,8 @@ test("a contraption turn gets its person's own machines, and no one else's or a 
     return (await until('a contraption turn', () => turns().length > before && turns())).at(-1);
   };
   const caras = await turnFor(me.id);
-  assert.deepEqual(Object.keys(caras.results), ['cara-app-box'], 'her own machine, not the shared one');
+  // Her own (cara-app-box, and the machines earlier tests added: every add is its adder's), never Pat's.
+  assert.ok(Object.keys(caras.results).includes('cara-app-box') && !Object.keys(caras.results).includes('shared-app-box'), "her own machine, not Pat's");
   assert.deepEqual(caras.results['cara-app-box'].tools, ['whoami']);
   assert.match(caras.results['cara-app-box'].text, /^pid \d+$/, 'the call reached the machine');
   assert.ok(caras.allow.includes('mcp__cara-app-box'));
@@ -653,19 +662,23 @@ test("a Taskmaster lists the machines its scheme can see and checks one through 
   const cara = store.findUser('name', 'Cara')!;
   const schemes = await call('/api/projects');
   const [shared, caras] = ['Shared', 'Caras'].map((n) => schemes.find((p: { name: string }) => p.name === n));
-  const machine = (name: string, owner: number | null) => {
+  // A machine its owner lent to every turn in its schemes (Build 10 H1: the old shared rows), or only to their own.
+  const machine = (name: string, owner: number, everyone = false) => {
     const m = store.createMachine(name, '', 'Cara', owner);
     store.setMachineProjects(m.id, [shared.id]);
+    if (everyone) store.setMachineRole(m.id, 'tools', { caps: { everyone: true } });
     const token = newToken(m.id);
     store.updateMachine(m.id, { token_hash: hashToken(token) });
     return token;
   };
   // sleepy (added above, never connected) is lent here too; unlent, a non-admin's ask wouldn't list it.
-  store.setMachineProjects(store.listMachines().find((m) => m.name === 'sleepy')!.id, [shared.id]);
+  const sleepy = store.listMachines().find((m) => m.name === 'sleepy')!.id;
+  store.setMachineProjects(sleepy, [shared.id]);
+  store.setMachineRole(sleepy, 'tools', { caps: { everyone: true } });
   startAgent(machine('tm-josh', josh.id));
-  startAgent(machine('tm-box', null));
+  startAgent(machine('tm-box', cara.id, true));
   // An agent whose MCP server dies at once: online, but the check fails.
-  startAgent(machine('tm-broken', null), ['--', process.execPath, '-e', 'process.exit(1)']);
+  startAgent(machine('tm-broken', cara.id, true), ['--', process.execPath, '-e', 'process.exit(1)']);
   await until('the machines to come online', async () => (await call('/api/machines')).filter((m: Machine) => m.name.startsWith('tm-') && m.online).length === 3);
   // Citadel checks each one as it connects, unasked (#437), and keeps the result.
   await until('their connect checks', async () => (await call('/api/machines')).filter((m: Machine) => m.name.startsWith('tm-') && m.checked && !m.checking).length === 3);
@@ -688,7 +701,7 @@ test("a Taskmaster lists the machines its scheme can see and checks one through 
   assert.match(list, /^tm-josh: READY: Ready · 1 tool · checked [^\n]+\n  ONLINE, connected since \d{4}-\d\d-\d\d \d\d:\d\d UTC \((just now|1 min ago)\), host /m);
   assert.match(list, /Josh's own: goes to the turns they ask for, in Shared; this scheme's minions get it/);
   assert.match(list, /^tm-box: READY[^\n]*\n  ONLINE/m);
-  assert.match(list, /lent to Shared; this scheme's minions get it/);
+  assert.match(list, /Cara's, lent to every turn in Shared; this scheme's minions get it/);
   assert.doesNotMatch(list, /Machine tools for this scheme/);
   assert.match(list, /^sleepy: ASLEEP: Not connected yet · added [^\n]+\n  OFFLINE, last seen never/m);
   assert.match(list, /^tm-broken: NEEDS A FIX: Its tools didn't start: the session ended[^\n]*\n  ONLINE[^]*?last check .*:\n  - MCP server: FAIL/m);

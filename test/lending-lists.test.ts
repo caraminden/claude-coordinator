@@ -30,9 +30,10 @@ function before33(name: string) {
   store.addMember(both.id, josh.id);
   store.addMember(off.id, josh.id);
   for (const p of [off, joshOff]) store.db.prepare('UPDATE projects SET machine_tools = 0 WHERE id = ?').run(p.id);
+  // Shared machines had no owner then (Build 10 H1 gives them one: their created_by's person).
   const machine = (n: string, owner: number | null, scoped: number, rows: number[], check: string | null = null) => {
-    const m = store.createMachine(n, '', 'Cara', owner);
-    store.db.prepare('UPDATE machines SET scoped = ?, last_check = ? WHERE id = ?').run(scoped, check, m.id);
+    const m = store.createMachine(n, '', 'Cara', owner ?? cara.id);
+    store.db.prepare('UPDATE machines SET owner_id = ?, scoped = ?, last_check = ? WHERE id = ?').run(owner, scoped, check, m.id);
     for (const id of rows) store.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)').run(m.id, id);
   };
   machine('everywhere', null, 0, []);
@@ -69,7 +70,8 @@ test('opening an older database gives every machine a list that lends it exactly
   for (const was of old.machines) {
     const m = store.getMachine(was.id)!;
     const ci = !!was.last_check?.includes('"runners":true');
-    // A CI runner host is left alone: its token rule still reads scoped and its rows.
+    // A CI runner host is left alone: scoped reads the same to an older release, and its rows are kept if they were
+    // read; one never given a list gets every scheme an admin owns, which it served (Build 10 H1: nothing reads scoped).
     assert.equal(m.scoped, ci ? was.scoped : 1, `${m.name} reads the same to an older release`);
     if (ci)
       assert.deepEqual(
@@ -79,9 +81,11 @@ test('opening an older database gives every machine a list that lends it exactly
               .filter((r) => r.machine_id === m.id)
               .map((r) => r.project_id)
               .sort((a, b) => a - b)
-          : [],
+          : old.schemes.filter(admin).map((p) => p.id),
         `${m.name}'s rows: kept if they were read`,
       );
+    // Every machine has an owner now (Build 10 H1): a shared one its created_by's person.
+    assert.equal(m.owner_id, was.owner_id ?? cara.id, `${m.name}'s owner`);
     for (const p of old.schemes) {
       const project = store.getProject(p.id)!;
       for (const askers of [[], [cara.id], [josh.id], [cara.id, josh.id]]) {
@@ -111,8 +115,8 @@ test('the move runs once: a later change to a list stays, and a machine an older
   const id = (name: string) => store.listMachines().find((m) => m.name === name)!.id;
   store.setMachineProjects(id('everywhere'), []);
   store.setMachineProjects(id('joshs'), []);
-  // A rollback: the older release's "Every scheme an admin owns" radio unscopes a machine.
-  store.db.prepare('UPDATE machines SET scoped = 0 WHERE id = ?').run(id('chosen'));
+  // A rollback: the older release's "Every scheme an admin owns" radio unscopes a shared machine (one with no owner).
+  store.db.prepare('UPDATE machines SET scoped = 0, owner_id = NULL WHERE id = ?').run(id('chosen'));
   // A list machine that connects as a runner agent keeps its list for tokens, and widens nothing.
   store.setMachineProjects(id('chosen-none'), [1]);
   store.updateMachine(id('chosen-none'), { last_check: JSON.stringify({ at: 2, results: [], runners: true }) });
@@ -126,6 +130,7 @@ test('the move runs once: a later change to a list stays, and a machine an older
     'as the older release lent it',
   );
   assert.equal(store.getMachine(id('chosen'))!.scoped, 1);
+  assert.equal(store.getMachine(id('chosen'))!.owner_id, store.listUsers().find((u) => u.name === 'Cara')!.id, 'and owned again, every boot (Build 10 H1)');
   const turned = store.getMachine(id('chosen-none'))!;
   assert.deepEqual(
     store
@@ -141,7 +146,7 @@ test('the move runs once: a later change to a list stays, and a machine an older
 
 test('a new database has nothing to move, and a new machine starts lent to no scheme', () => {
   const store = new Store(join(dir, 'c.db'));
-  const m = store.createMachine('new', '', 'Cara');
+  const m = store.createMachine('new', '', 'Cara', store.createUser({ name: 'Cara', login: 'cara', admin: true }).id);
   assert.deepEqual([m.scoped, store.machineProjects(m.id)], [1, []]);
   store.db.close();
 });

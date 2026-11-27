@@ -97,14 +97,14 @@ test('Tools: nothing ticked fails with what to do', async () => {
   assert.match(run.why!, /Tick an MCP server or a folder/);
 });
 
-test("only the owner presses it, a shared machine's an admin; one run at a time", async () => {
+test('only the owner presses it, an admin too only on their own; one run at a time', async () => {
   const t = world({ check: () => new Promise(() => {}) });
   assert.throws(() => t.setups.start(t.machine(), 'tools', 'test', t.mike), /Only josh-pc's owner/);
   assert.throws(() => t.setups.start(t.machine(), 'tools', 'test', t.cara), /Only josh-pc's owner/);
   t.setups.start(t.machine(), 'tools', 'test', t.josh);
   assert.throws(() => t.setups.start(t.machine(), 'gpu', 'test', t.josh), /still running.*one at a time/);
   t.store.updateMachine(t.machine().id, {});
-  const shared = t.store.createMachine('shared', 'h-shared', 'Cara', null);
+  const shared = t.store.createMachine('shared', 'h-shared', 'Cara', t.cara.id);
   t.store.updateMachine(shared.id, { report: report('linux') });
   assert.throws(() => t.setups.start(t.store.getMachine(shared.id)!, 'gpu', 'test', t.josh), /owner/);
   assert.equal(t.setups.start(t.store.getMachine(shared.id)!, 'gpu', 'test', t.cara).role, 'gpu');

@@ -68,7 +68,7 @@ const system = args.includes('--append-system-prompt-file') ? readFileSync(args[
 const message = system === null ? null : JSON.parse(readFileSync(require('node:path').join(require('node:path').dirname(args[args.indexOf('--append-system-prompt-file') + 1]), 'prompt.jsonl'), 'utf8').split('\\n')[0]).message.content.map((b) => b.text ?? '').join('\\n');
 const mcp = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
 // The tools a Bash call would reach (seven spawns), probed only on a turn that asks with the probe file: one test reads them.
-let heavy, wait, devCopy, ciFailures, cargo, replay, where;
+let heavy, wait, devCopy, ciFailures, cargo, replay, where, cloudHelper, cloudVm;
 if (require('node:fs').existsSync(${JSON.stringify(join(root, 'probe'))})) {
 // What a Bash call would run for \`citadel-heavy\`, read while the turn's folder still exists.
 heavy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-heavy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
@@ -81,10 +81,13 @@ cargo = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v car
 replay = require('node:child_process').spawnSync('citadel-replay', [], { encoding: 'utf8' });
 // citadel-where (#1122) runs from the pin, show-parts.ts beside it.
 where = require('node:child_process').spawnSync('citadel-where', ['--scheme', '3', 'fast', 'mode'], { encoding: 'utf8' });
+// citadel-cloud (#2200) runs from the pin, cloud-helper.ts and the cloud-run-vm.mjs it sends beside it: with no arguments, its usage.
+cloudHelper = require('node:child_process').spawnSync('citadel-cloud', [], { encoding: 'utf8' });
+cloudVm = require('node:child_process').spawnSync('sh', ['-c', 'test -f "$(dirname "$(command -v citadel-cloud)")/../cloud-run-vm.mjs"']).status === 0;
 }
 // The kit's skills as this turn sees them, read while its folder still exists (#1062).
 const kitSkills = args.includes('--plugin-dir') ? require('node:fs').readdirSync(require('node:path').join(args[args.indexOf('--plugin-dir') + 1], 'skills')) : null;
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, cargo, kitSkills, replay: replay && { status: replay.status, stderr: replay.stderr }, where: where && { status: where.status, stdout: where.stdout } }));
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, cargo, kitSkills, replay: replay && { status: replay.status, stderr: replay.stderr }, where: where && { status: where.status, stdout: where.stdout }, cloudHelper: cloudHelper && { status: cloudHelper.status, stderr: cloudHelper.stderr }, cloudVm }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 const initErrors = require('node:fs').existsSync(${JSON.stringify(join(root, 'init-errors'))}) ? JSON.parse(readFileSync(${JSON.stringify(join(root, 'init-errors'))}, 'utf8')) : {};
@@ -361,6 +364,7 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.equal(t.ciFailures, readFileSync(join(import.meta.dirname, '..', 'tools', 'ci-failures'), 'utf8'), 'ci-failures (#644) too');
   assert.deepEqual([t.replay.status, t.replay.stderr.split(' run ')[0]], [2, 'usage: citadel-replay'], 'citadel-replay (#836) runs from the pin');
   assert.deepEqual([t.where.status, t.where.stdout.split('  ')[0]], [0, '[Fast mode](#/p/3/approvals?show=fast-mode)'], 'citadel-where (#1122) runs from the pin');
+  assert.deepEqual([t.cloudHelper.status, t.cloudHelper.stderr.split(' run ')[0], t.cloudVm], [2, 'usage: citadel-cloud', true], 'citadel-cloud (#2200) runs from the pin, its runner beside it');
   // What citadel-heavy runs from its own folder is pinned beside it (mem-room was not, so a minion's job never waited for memory: #1863).
   const beside = [...new Set([...t.heavy.matchAll(/\$\(dirname "\$0"\)\/([\w.-]+)/g)].map((m) => m[1]))].sort();
   assert.deepEqual(beside, ['heavy-builds.ts', 'heavy-ci.ts', 'mem-room']);

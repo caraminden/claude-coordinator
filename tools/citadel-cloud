@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# citadel-cloud (#2200): one step of a minion's turn in a Claude Code cloud session (src/cloud-helper.ts, its usage).
+# On a turn's PATH it sits in the pin's bin/ with cloud-helper.ts one folder up; in the repo, in tools/ beside src/.
+here=$(dirname "$(readlink -f "$0")")
+script=$here/../cloud-helper.ts
+[ -f "$script" ] || script=$here/../src/cloud-helper.ts
+exec node "$script" "$@"

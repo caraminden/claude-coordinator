@@ -169,6 +169,7 @@ export function pinTurnFiles(dataDir: string): TurnPins {
     'heavy-builds.ts',
     'mem-room',
     'citadel-callgrind',
+    'citadel-cloud',
   ]) {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
@@ -198,6 +199,9 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   pinnedCopy('cloud-turn.mjs');
   const WHERE_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-where');
   if (existsSync(WHERE_BIN)) cpSync(WHERE_BIN, join(MCP_DIR, 'bin', 'citadel-where'));
+  // citadel-cloud (#2200): a step in a cloud session; its shim (in the tool list below) runs the pinned cloud-helper.ts, which runs cloud-turn.mjs and sends cloud-run-vm.mjs.
+  pinnedCopy('cloud-helper.ts');
+  pinnedCopy('cloud-run-vm.mjs');
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');

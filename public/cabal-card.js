@@ -1,9 +1,9 @@
 // A cabal as one card in the minions list (#2092; Josh, 2026-11-25, picked "B · One crew card"): the Overseer's tag and
 // title, a meter with a segment a member, the counts, and the open asks in red. A click shows its members under it with
 // no request: the cards come with the scheme (src/cabal-cards.ts) and the rows are the page's own.
-import { h } from './base.js';
+import { h, me } from './base.js';
 import { money } from './cabal.js';
-import { cardFor } from './threadstate.js';
+import { cardFor, cardsYours } from './threadstate.js';
 /** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types/list.js' */
 
 /** The cards open on this page, by lead id: they stay open across redraws. A card starts shut (Cara, 2026-11-26). */
@@ -13,13 +13,16 @@ let opening = /** @type {number | null} */ (null);
 
 /**
  * The Overseer's row on a shut card: it carries its members' cards waiting on people as its own (Cara, 2026-11-26: "by
- * default it would just show the overseer"), so the chip says one waits and a click opens the oldest, the lead's first.
+ * default it would just show the overseer"), so the chip says one waits and a click opens the oldest of them all.
  * @param {Row} lead @param {Row[]} mine
  * @returns {Row}
  */
-function overseerRow(lead, mine) {
-  const theirs = mine.filter((t) => t.id !== lead.id).flatMap((t) => (t.open_cards ?? []).map((c) => ({ ...c, to: cardFor(c, t) || undefined })));
-  return theirs.length ? { ...lead, open_cards: [...(lead.open_cards ?? []), ...theirs] } : lead;
+export function overseerRow(lead, mine) {
+  // A card open to anyone stays yours to answer, not the lead's assignee's.
+  const theirs = mine.filter((t) => t.id !== lead.id).flatMap((t) => (t.open_cards ?? []).map((c) => ({ ...c, to: cardFor(c, t) || me || undefined })));
+  // Event ids grow with time, so ordering by the one in each link keeps the chip's "open the oldest" true across rows.
+  const age = (/** @type {{ href: string }} */ c) => Number(/[?&]e=(\d+)/.exec(c.href)?.[1] ?? 0);
+  return theirs.length ? { ...lead, open_cards: [...(lead.open_cards ?? []), ...theirs].sort((a, b) => age(a) - age(b)) } : lead;
 }
 
 /** A member's state now: its row's own news moves it between building and open before the cards are read again. */
@@ -44,6 +47,7 @@ function liveMember(m, t) {
 export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw }) {
   const open = openCabals.has(c.lead);
   const waiting = mine.filter((t) => t.open_cards?.length).length;
+  const yours = mine.filter((t) => cardsYours(t).length).length;
   const fresh = open && opening === c.lead;
   if (fresh) opening = null;
   const lead = rows.find((t) => t.id === c.lead);
@@ -79,7 +83,8 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
         ...counts,
         // Only what waits on people, in words: members' questions to the Overseer stay on its board (Cara, 2026-11-26: "Im not
         // sure I care if the minions are asking the overseer questions?").
-        waiting ? h('b', { class: 'cabal-asks', title: 'Minions of this cabal with a card waiting on people' }, `${waiting} waiting on you`) : '',
+        yours ? h('b', { class: 'cabal-asks', title: 'Minions of this cabal with a card waiting on you' }, `${yours} waiting on you`) : '',
+        waiting > yours ? h('span', { title: 'Minions of this cabal with a card waiting on someone else' }, `${waiting - yours} waiting on others`) : '',
         h('span', {}, money(c.spend)),
       ),
     ),
@@ -91,8 +96,9 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
           rows.map(row),
           unstarted.map((m) => h('p', { class: 'cabal-planned' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
         )
-      : lead
-        ? h('div', { class: 'cabal-members' }, row(overseerRow(lead, mine)))
+      : // A filter that hides the Overseer but matches a member shows that member, not an empty card.
+        rows.length
+        ? h('div', { class: 'cabal-members' }, lead ? row(overseerRow(lead, mine)) : rows.map(row))
         : '',
   );
 }

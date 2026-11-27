@@ -42,6 +42,14 @@ export function sharedFlip(roles, can) {
 }
 
 /**
+ * What switching a role sends (Build 10, ask 1): a shared role its owner switches lends it to every turn in its schemes,
+ * and switching it off takes that back. Anyone else (an admin) sends on alone; Minion turns stay their owner's.
+ * @param {MachineRoleKey} role @param {boolean} on @param {boolean} mine whether the person switching owns the PC
+ * @returns {{ on: boolean, everyone?: boolean }}
+ */
+export const roleFields = (role, on, mine) => (mine && SHARED_ROLES.includes(role) ? { on, everyone: on } : { on });
+
+/**
  * The thread split bar's parts, in threads, from live numbers only (Josh, 2026-11-26, "progress bars match reality"; spec
  * section 4: a part with no live number is left out, never guessed). `busy` is the PC's whole CPU now: free is what it
  * leaves idle, and what's busy beyond the measured schemes and me parts is "other" (the PC's own programs, or a part
@@ -180,7 +188,7 @@ function usTile(m, redraw) {
     for (const k of plan.roles) {
       const r = /** @type {MachineRole} */ (roleOf(m, /** @type {MachineRoleKey} */ (k)));
       const shown = plan.on && !r.projects.length && m.owner_id === account?.id ? { on: true, projects: (view?.projects ?? []).map((p) => p.id) } : { on: plan.on };
-      changeRole(m, r.role, { on: plan.on }, `switch ${r.name} ${plan.on ? 'on' : 'off'} on ${m.name}`, redraw, shown);
+      changeRole(m, r.role, roleFields(r.role, plan.on, m.owner_id === account?.id), `switch ${r.name} ${plan.on ? 'on' : 'off'} on ${m.name}`, redraw, shown);
     }
   };
   const schemes = new Set(on.flatMap((r) => r.projects));
@@ -216,7 +224,7 @@ function chooseRows(m, redraw, tools) {
       tick.onchange = () => {
         const on = !roleOf(m, r.role)?.on;
         const shown = on && !r.projects.length && m.owner_id === account?.id ? { on, projects: (view?.projects ?? []).map((p) => p.id) } : { on };
-        changeRole(m, r.role, { on }, `switch ${r.name} ${on ? 'on' : 'off'} on ${m.name}`, redraw, shown);
+        changeRole(m, r.role, roleFields(r.role, on, m.owner_id === account?.id), `switch ${r.name} ${on ? 'on' : 'off'} on ${m.name}`, redraw, shown);
       };
       const isOpen = o.role === r.role;
       const n = r.projects.length;

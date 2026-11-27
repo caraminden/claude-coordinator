@@ -4,9 +4,9 @@
 // hostname, which can be changed here. An agent from before reports nothing: its row's Update opens the same panel
 // for that row.
 /** @import { MachineJoin, MachineJoinLook, MachineReport, MachineRole, MachineRow } from './types.js' */
-import { api, h, view } from './base.js';
+import { account, api, h, view } from './base.js';
 import { toneChip } from './look.js';
-import { SHARED_ROLES } from './machine-card.js';
+import { roleFields, SHARED_ROLES } from './machine-card.js';
 import { cannot, changeRole, standing } from './machine-role-cards.js';
 import { machineJoinPosix, machineJoinWindows } from './machine-setup.js';
 import { adminFor, press, setupPart } from './role-setup-card.js';
@@ -267,7 +267,7 @@ export function openConnectWizard({ redraw = () => {} } = {}) {
       // Each role goes on (lent to every scheme you're in), then joins the Set up queue once its switch is saved (a
       // Retry from its toast included); one that fails stays off, with its toast, and the rest go on without it.
       for (const r of picks)
-        (r.on ? Promise.resolve() : changeRole(m, r.role, { on: true }, `switch ${r.name} on on ${m.name}`, () => (redraw(), draw()))).then(
+        (r.on ? Promise.resolve() : changeRole(m, r.role, roleFields(r.role, true, m.owner_id === account?.id), `switch ${r.name} on on ${m.name}`, () => (redraw(), draw()), { on: true })).then(
           () => {
             if (!SETUP_ROLES.includes(r.role)) return;
             st.queue.push(r);

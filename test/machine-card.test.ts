@@ -71,3 +71,11 @@ test('Connect, what it is for: Both, Just me and My schemes pick their roles, le
   assert.deepEqual(names('me'), ['turns']);
   assert.deepEqual(names('us'), ['ci', 'builds', 'screen', 'tools']);
 });
+
+test("a shared role its owner switches lends it to every turn in its schemes, and off takes that back; an admin's switch and Minion turns never do (Build 10, ask 1)", async () => {
+  const { roleFields } = await import('../public/machine-card.js');
+  assert.deepEqual(roleFields('screen', true, true), { on: true, everyone: true });
+  assert.deepEqual(roleFields('tools', false, true), { on: false, everyone: false });
+  assert.deepEqual(roleFields('screen', true, false), { on: true });
+  assert.deepEqual(roleFields('turns', true, true), { on: true });
+});

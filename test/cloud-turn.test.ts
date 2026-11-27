@@ -61,7 +61,9 @@ function push(text, reply) {
   execFileSync('git', ['clone', '-q', ${JSON.stringify(origin)}, d]);
   mkdirSync(join(d, '.citadel/out'), { recursive: true });
   writeFileSync(join(d, '.citadel/out/report.md'), '# Report ' + reply);
-  writeFileSync(join(d, '.citadel/result.json'), JSON.stringify({ job: branch, reply, card: reply === 'first' ? { questions: [{ question: 'Which?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } : null, files: ['.citadel/out/report.md', '../../etc/passwd'] }));
+  // beat: a helper's runner, which pushes a progress commit to <branch>-beat before its result, and the command's exit code in it.
+  if (mode === 'beat') { g('commit', '-q', '--allow-empty', '-m', '[skip ci] 3 min: tests 40/120'); g('push', '-q', 'origin', 'HEAD:refs/heads/' + branch + '-beat'); }
+  writeFileSync(join(d, '.citadel/result.json'), JSON.stringify({ job: branch, reply, ...(mode === 'beat' ? { code: 3 } : {}), card: reply === 'first' ? { questions: [{ question: 'Which?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } : null, files: ['.citadel/out/report.md', '../../etc/passwd'] }));
   // stray: as session_01CCievTuZm4rpBfvJoJd4WY did on 2026-11-26, the result goes only to the session's own working branch.
   g('add', '-A'); g('commit', '-q', '-m', reply); g('push', '-q', 'origin', 'HEAD:refs/heads/' + (mode === 'stray' ? 'claude/work-' + branch.split('/')[1] : branch));
 }
@@ -335,4 +337,27 @@ test('a result naming another job is not read off its own result branch either',
   git(d, 'push', '-q', 'origin', 'HEAD:refs/heads/cloud/t7-own');
   const evs = await drive({ branch: 'cloud/t7-own', session: 'session_01FAKEabc123', text: 'cloud/t7-own', limitMs: 300 }, { FAKE_MODE: 'silent' });
   assert.equal(texts(evs).at(-1), 'from teleport');
+});
+
+test("a helper's progress commits show as live lines, the exit code comes back, a card comes back as text, and the beat branch goes", async () => {
+  const branch = 'cloud/t7-beat';
+  const before = posted.length;
+  const evs = await drive({ branch, beat: `${branch}-beat`, quietMs: 60_000, cards: false, text: `Push to ${branch}.` }, { FAKE_MODE: 'beat' });
+  const at = evs.findIndex((e) => e.subtype === 'cloud_progress');
+  assert.equal(evs[at]?.text, '3 min: tests 40/120');
+  assert.ok(at >= 0 && at < evs.findLastIndex((e) => e.type === 'assistant'), 'progress shows before the result');
+  assert.deepEqual(
+    evs.filter((e) => e.subtype === 'cloud_result'),
+    [{ type: 'system', subtype: 'cloud_result', code: 3 }],
+  );
+  assert.equal(posted.length, before, 'no card is posted for a helper');
+  assert.match(texts(evs).at(-1)!, /It asked .*\n- \{"question":"Which\?"/s);
+  assert.equal(git(origin, 'branch', '--list', `${branch}-beat`), '', 'beat branch deleted');
+});
+
+test("a helper's session with no progress for quietMs is read back once and then ends as not delivered, long before its limit", async () => {
+  const evs = await drive({ branch: 'cloud/t7-hush', session: 'session_01FAKEabc123', beat: 'cloud/t7-hush-beat', quietMs: 1500, text: 'cloud/t7-hush', limitMs: 600_000, teleportMs: 1000 }, { FAKE_MODE: 'stuck' });
+  assert.ok(evs.some((e) => e.subtype === 'cloud' && e.quiet === true));
+  assert.match((evs.at(-1) as { result: string }).result, /No progress from the cloud session session_01FAKEabc123 for \d+ minutes/);
+  assert.equal((evs.at(-1) as { is_error: boolean }).is_error, true);
 });

@@ -32,9 +32,14 @@ let cost = 0;
 /** How long a start whose id never showed has its branch watched: it may have started, and a stuck screen shouldn't hold its turn for the full limit. */
 const NO_ID_WATCH_MS = 30 * 60_000;
 
-/** @typedef {{ claude: string, cwd: string, branch: string, last?: string | null, session: string | null, sha: string | null, text: string, files: string | null, model?: string | null, effort?: string | null, cost?: number, limitMs: number, idleMs?: number, teleportMs?: number, pollMs: number, startMs: number }} CloudJob */
+/**
+ * `beat`, `quietMs` and `cards` are a cloud helper's (#2200, src/cloud-helper.ts): the branch its runner pushes a progress commit to,
+ * read as `cloud_progress` lines; how long with no progress before the job counts as not delivered; and false to give a result's
+ * card back as text, since a helper's session has nobody to ask.
+ * @typedef {{ claude: string, cwd: string, branch: string, last?: string | null, session: string | null, sha: string | null, text: string, files: string | null, model?: string | null, effort?: string | null, cost?: number, limitMs: number, idleMs?: number, teleportMs?: number, pollMs: number, startMs: number, beat?: string | null, quietMs?: number | null, cards?: boolean }} CloudJob
+ */
 /** @typedef {{ questions: unknown[] }} Card */
-/** @typedef {{ reply: string, card: Card | null, files: string[], missing?: { files: string[], branch: string } }} CloudResult */
+/** @typedef {{ reply: string, card: Card | null, files: string[], code?: number, missing?: { files: string[], branch: string } }} CloudResult */
 
 /** @param {object} ev */
 const emit = (ev) => process.stdout.write(`${JSON.stringify(ev)}\n`);
@@ -77,7 +82,8 @@ export function readResult(text, job = '', strict = false) {
   if (typeof r.reply !== 'string') throw new Error('the result has no reply');
   const card = r.card && typeof r.card === 'object' && Array.isArray(/** @type {Record<string, unknown>} */ (r.card).questions) ? { questions: /** @type {unknown[]} */ (/** @type {Record<string, unknown>} */ (r.card).questions) } : null;
   const files = Array.isArray(r.files) ? r.files.filter((f) => typeof f === 'string' && /^\.citadel\/out\/[^\0]+$/.test(f) && !f.split('/').includes('..')).slice(0, MAX_FILES) : [];
-  return { reply: r.reply, card, files };
+  // A command job's exit code (the helper's runner writes it); a brief's result has none.
+  return { reply: r.reply, card, files, ...(Number.isInteger(r.code) ? { code: /** @type {number} */ (r.code) } : {}) };
 }
 
 /**
@@ -222,7 +228,7 @@ export const WORKING = 'refs/heads/claude/*';
  * @param {CloudJob} job @returns {Promise<Map<string, string>>}
  */
 async function heads(job) {
-  const out = await run('git', ['-C', job.cwd, 'ls-remote', 'origin', `refs/heads/${job.branch}`, WORKING]);
+  const out = await run('git', ['-C', job.cwd, 'ls-remote', 'origin', `refs/heads/${job.branch}`, WORKING, ...(job.beat ? [`refs/heads/${job.beat}`] : [])]);
   return new Map(
     out
       .split('\n')
@@ -230,6 +236,20 @@ async function heads(job) {
       .filter(([sha, ref]) => sha && ref?.startsWith('refs/heads/'))
       .map(([sha, ref]) => [ref.slice('refs/heads/'.length), sha]),
   );
+}
+
+/** A progress commit's message (the runner's line: minutes so far and its last output), its first 600 characters. @param {CloudJob} job @param {string} sha */
+async function progress(job, sha) {
+  const ref = `refs/citadel-cloud/${job.beat}`;
+  await run('git', ['-C', job.cwd, 'fetch', '-q', 'origin', `+refs/heads/${job.beat}:${ref}`]);
+  try {
+    return (await run('git', ['-C', job.cwd, 'log', '-1', '--format=%B', sha]))
+      .replace(/\[skip ci\]\s*/g, '')
+      .trim()
+      .slice(0, 600);
+  } finally {
+    await run('git', ['-C', job.cwd, 'update-ref', '-d', ref]).catch(() => {});
+  }
 }
 
 /**
@@ -282,7 +302,8 @@ async function lateResult(job) {
 /** The reply as the chat shows it: the card posted, its files linked. @param {CloudJob} job @param {CloudResult} result */
 async function shown(job, result) {
   let reply = result.reply;
-  if (result.card) {
+  if (result.card && job.cards === false) reply += `\n\nIt asked (nobody answered: a helper's session asks no one):\n${result.card.questions.map((q) => `- ${JSON.stringify(q)}`).join('\n')}`;
+  else if (result.card) {
     const href = await postCard(result.card).catch((err) => err);
     if (href instanceof Error) reply += `\n\nIts card couldn't be posted (${href.message}). It asked:\n${result.card.questions.map((q) => `- ${JSON.stringify(q)}`).join('\n')}`;
   }
@@ -340,6 +361,7 @@ function end(text, error = false) {
  */
 async function askedHome(job, session, card) {
   emit({ type: 'system', subtype: 'cloud', session, branch: job.branch });
+  if (job.cards === false) return end(`The cloud session ${session} stopped on a question nobody can answer there:\n${card.questions.map((q) => `- ${/** @type {{ question: string }} */ (q).question}`).join('\n')}`, true);
   const href = await postCard(card).catch((err) => err);
   const asked = card.questions.map((q) => `- ${/** @type {{ question: string }} */ (q).question}`).join('\n');
   const reply = `The cloud session ${session} was waiting on a question in its own session, where nobody can answer it. ${href instanceof Error ? `It couldn't be posted as a card (${href.message}), so here it is; send the answer as a message.` : 'It is posted as a card here; your answer goes back into the session.'}\n\n${asked}`;
@@ -392,7 +414,9 @@ export async function cloudTurn(job) {
   let quietSaid = false;
   /** Each branch's sha already looked at, so a commit that holds no result of this job's is fetched once: the session's working
    * branches as they stood before this job went, and anything read since. */
-  const seen = new Map(before);
+  const looked = new Map(before);
+  /** When the runner's progress was last seen moving (a helper's command job): the quiet limit counts from here. */
+  let beatAt = Date.now();
   /** @param {unknown} err */
   const note = (err) => {
     failed = err instanceof Error ? err.message : String(err);
@@ -406,9 +430,16 @@ export async function cloudTurn(job) {
     if (fails >= MAX_GIT_FAILS) return end(`This turn lost its way to the repo on GitHub: ${MAX_GIT_FAILS} looks for \`${job.branch}\` failed in a row. The cloud session${session ? ` ${session}` : ''} may still push it; the next message reads it.\n\nThe last error: ${failed}`, true);
     // Its own result branch first, then any working branch that moved since the job went (2026-11-26: a session pushed its
     // answer only to its own claude/ branch, and the turn waited on a branch that never came).
-    const moved = [...(now ?? [])].filter(([b, sha]) => sha !== job.sha && seen.get(b) !== sha).sort(([a], [b]) => Number(b === job.branch) - Number(a === job.branch));
+    const beat = job.beat ? now?.get(job.beat) : undefined;
+    if (job.beat && beat && looked.get(job.beat) !== beat) {
+      looked.set(job.beat, beat);
+      beatAt = Date.now();
+      const line = await progress(job, beat).catch(note);
+      if (line) emit({ type: 'system', subtype: 'cloud_progress', text: line });
+    }
+    const moved = [...(now ?? [])].filter(([b, sha]) => b !== job.beat && sha !== job.sha && looked.get(b) !== sha).sort(([a], [b]) => Number(b === job.branch) - Number(a === job.branch));
     for (const [branch, sha] of moved) {
-      seen.set(branch, sha);
+      looked.set(branch, sha);
       try {
         result = await fetchResult(job, sha, branch);
       } catch (err) {
@@ -421,6 +452,17 @@ export async function cloudTurn(job) {
       break;
     }
     if (result) break;
+    // A helper's runner pushes progress every couple of minutes: none for quietMs means it isn't running (a session that ended its
+    // turn, a VM gone). One read-back for a result it printed, then the helper runs the step at home rather than wait out the limit.
+    if (job.quietMs && Date.now() - beatAt >= job.quietMs) {
+      const back = session ? await teleport(job, session).catch(note) : null;
+      if (back?.result) {
+        result = back.result;
+        break;
+      }
+      emit({ type: 'system', subtype: 'cloud', session, quiet: true });
+      return end(`No progress from the cloud session ${session ?? '(its id never showed)'} for ${Math.round(job.quietMs / 60_000)} minutes, and no result through teleport: it isn't running the job.${failed ? `\n\nThe last error: ${failed}` : ''}`, true);
+    }
     // shortcut: a start with no id keeps no branch for a later look, so a push after this turn ends is lost; save the branch alone if that bites.
     // Quiet for idleMs with no push: read the session back. It may have a question open that only claude.ai shows (#2191).
     if (session && job.idleMs && Date.now() - began >= job.idleMs * (looks + 1) && Date.now() - began < job.limitMs) {
@@ -446,6 +488,8 @@ export async function cloudTurn(job) {
     await sleep(job.pollMs);
   }
   const reply = await shown(job, result);
+  if (result.code !== undefined) emit({ type: 'system', subtype: 'cloud_result', code: result.code });
+  if (job.beat) await run('git', ['-C', job.cwd, 'push', '-q', 'origin', '--delete', job.beat]).catch(() => {});
   say(reply);
   end(reply);
 }

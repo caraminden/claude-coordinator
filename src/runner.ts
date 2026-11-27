@@ -38,6 +38,7 @@ import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
 import { KillWaves } from './kill-wave.ts';
 import { killedSpend, turnOf } from './turn-row.ts';
+import { publicAddress } from './http.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
@@ -3282,7 +3283,7 @@ export class Runner {
               branch: buildBranch(project.repo_dir, ticket.build),
               owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
               // Only this server's own scheme has build previews (src/previews.ts).
-              preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
+              preview: deploys ? `${publicAddress(this.noTurns) ?? ''}/${buildPreviewPath(ticket.build)}` : null,
             }
           : null;
       // Its cabal (#2095): the board it leads or is on, named as people read it, with its Overseer's #N.

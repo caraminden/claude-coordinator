@@ -105,13 +105,13 @@ before(async () => {
     body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
   });
   cookie = res.headers.get('set-cookie')!.split(';')[0];
-  // What a page load through Caddy would record as the app's address.
-  await fetch(`${base}/api/me`, { headers: { Cookie: cookie, 'X-Forwarded-Host': 'app.example', 'X-Forwarded-Proto': 'https' } });
   // A running turn's record, as live has for a turn in its own systemd unit. Written after boot: seeded before it,
   // the server's recovery deleted it and resumed a turn on this minion 3 s in, which under load still ran when
   // the dismissal test came and got its 409 (#1457).
   const db = new DatabaseSync(join(data, 'coordinator.db'), { timeout: 10_000 });
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(`turn:${ticket.id}`, JSON.stringify({ resumes: 0, unit: 'citadel-turn-x.service' }));
+  // A host a page was once loaded from, as older servers saved it: no link follows it (#2155).
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('public_origin', JSON.stringify('https://app.example'));
   db.close();
 });
 
@@ -125,7 +125,7 @@ test('start_preview boots the worktree and returns the full link; the view offer
   const res = await startPreview(ticket.id);
   const body = await json<{ error: string; url: string }>(res);
   assert.equal(res.status, 200, body.error);
-  assert.equal(body.url, `https://app.example/preview/${ticket.id}/`);
+  assert.equal(body.url, `https://citadel.zip/preview/${ticket.id}/`);
   const view = await json<{ ticket: { preview: boolean } }>(await fetch(`${base}/api/tickets/${ticket.id}`, { headers: { Cookie: cookie } }));
   assert.equal(view.ticket.preview, true);
 });

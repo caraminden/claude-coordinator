@@ -44,7 +44,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, overLimit, type BatchRow, 
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
-import { afterAllWrites, buildNumber, HttpError, isRecord, json, type JsonBody, oneOf, ownWrites, readJson, replyList, slowJson, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, isRecord, json, type JsonBody, oneOf, ownWrites, publicOrigin, readJson, replyList, slowJson, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { deciding, postPlan } from '../plan-cards.ts';
@@ -1759,8 +1759,7 @@ export const ticketRoutes: Route[] = [
       // start_preview: (re)start this minion's preview from its worktree as it is now.
       if (!app.previews) throw new HttpError(403, 'A preview has no previews of its own');
       await app.previews.start(ticket);
-      const origin = store.getSetting<string>('public_origin');
-      return json(res, 200, { url: `${origin ?? ''}/${previewPath(id)}` });
+      return json(res, 200, { url: `${publicOrigin(ctx.req, app.preview)}/${previewPath(id)}` });
     },
   },
   {

@@ -187,12 +187,7 @@ export const appRoutes: Route[] = [
     method: 'GET',
     path: '/api/me',
     who: ['person', 'taskmaster', 'minion'],
-    handler({ req, res, app, session, caller }) {
-      const { store } = app;
-      // The app's public address, as Caddy forwards it, so start_preview can hand out a full link.
-      const host = req.headers['x-forwarded-host'];
-      const origin = typeof host === 'string' && !caller ? `${isSecure(req) ? 'https' : 'http'}://${host}` : null;
-      if (origin && store.getSetting('public_origin') !== origin) store.setSetting('public_origin', origin);
+    handler({ res, app, session, caller }) {
       return json(res, 200, caller ? { name: session.name } : meView(app, session));
     },
   },

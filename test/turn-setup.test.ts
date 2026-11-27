@@ -7,7 +7,7 @@ import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { APPROVAL_TIMEOUT_MS } from '../src/approvals.ts';
-import { Store } from '../src/db.ts';
+import { buildOwnerKey, Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { tempRoot, testPins } from './helpers.ts';
 
@@ -103,7 +103,7 @@ const runner = new Runner(
 );
 runner.onTurnError = (_id, text) => errors.push(text);
 
-async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number } = {}, repoDir?: string, projectId?: number, props: Record<string, string> = {}) {
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number } = {}, repoDir?: string, projectId?: number, props: Record<string, string> = {}, prep?: (id: number, projectId: number) => void) {
   writeFileSync(join(root, 'mcp-status'), mcpStatus);
   // A scheme has one Taskmaster, so each turn gets a scheme of its own unless it names one.
   const project = projectId ? store.getProject(projectId)! : store.createProject(`P${Math.random()}`, null);
@@ -114,6 +114,7 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
   store.setTicketDir(t.id, cwd, null);
   if (Object.keys(set).length) store.updateTicket(t.id, set as any);
   if (Object.keys(props).length) store.props.set('minion', t.id, project.id, props, 'Cara');
+  prep?.(t.id, project.id);
   errors.length = 0;
   runner.send(t.id, 'Cara', 'go');
   while (runner.isRunning(t.id)) await wait(20);
@@ -495,6 +496,33 @@ test('only the scheme whose code this server runs hears about deploys, pending-d
     // A Taskmaster's MCP server never offers set_thread_status or start_preview, so it needs no flag.
     assert.equal((await turn('coordinator', 'connected', {}, repo)).env.COORDINATOR_DEPLOYS, undefined);
   } finally {
+    runner.liveHead = () => null;
+  }
+});
+
+test("a build's preview link is Citadel's public address, not the host a page was last loaded from (#2155)", async () => {
+  const repo = join(root, 'build-repo');
+  mkdirSync(join(repo, 'tools'), { recursive: true });
+  writeFileSync(join(repo, 'tools', 'land.sh'), '#!/bin/sh\n# --into\n');
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x');
+  const owns = (id: number, projectId: number) => {
+    store.updateTicket(id, { build: 7 });
+    store.setSetting(buildOwnerKey(projectId, 7), id);
+  };
+  const old = process.env.CITADEL_PUBLIC_URL;
+  runner.liveHead = () => git('rev-parse', 'HEAD');
+  store.setSetting('public_origin', 'https://other.example');
+  try {
+    delete process.env.CITADEL_PUBLIC_URL;
+    assert.match((await turn('ticket', 'connected', {}, repo, undefined, {}, owns)).message, /is at https:\/\/citadel\.zip\/preview\/build\/7\//);
+    process.env.CITADEL_PUBLIC_URL = 'https://example.test/';
+    assert.match((await turn('ticket', 'connected', {}, repo, undefined, {}, owns)).message, /is at https:\/\/example\.test\/preview\/build\/7\//);
+  } finally {
+    if (old === undefined) delete process.env.CITADEL_PUBLIC_URL;
+    else process.env.CITADEL_PUBLIC_URL = old;
+    store.deleteSetting('public_origin');
     runner.liveHead = () => null;
   }
 });

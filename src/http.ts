@@ -256,15 +256,20 @@ export function connection(req: IncomingMessage): { remote?: string; localAddres
 }
 
 /**
- * Citadel's public address, for a link that goes out to someone else (invites, resets, a machine's setup line, the desktop feed).
- * CITADEL_PUBLIC_URL overrides it; a dev copy or preview (`preview`) answers with the host it was reached at; else https://citadel.zip,
- * whichever address the person making the link opened. Links that only work on the page already open stay on location.origin.
+ * Citadel's public address where there is no request (a prompt's links): CITADEL_PUBLIC_URL, else https://citadel.zip.
+ * Null in a dev copy or preview (`preview`) without that setting, which answers on its own host.
+ */
+export function publicAddress(preview = false): string | null {
+  return process.env.CITADEL_PUBLIC_URL?.trim().replace(/\/+$/, '') || (preview ? null : 'https://citadel.zip');
+}
+
+/**
+ * Citadel's public address, for a link that goes out to someone else (invites, resets, a machine's setup line, the desktop feed,
+ * previews), whichever address the person making it opened: publicAddress, else the host a dev copy or preview was reached at.
+ * Links that only work on the page already open stay on location.origin.
  */
 export function publicOrigin(req: IncomingMessage, preview = false): string {
-  const set = process.env.CITADEL_PUBLIC_URL?.trim().replace(/\/+$/, '');
-  if (set) return set;
-  if (preview) return `${isSecure(req) ? 'https' : 'http'}://${req.headers.host ?? 'localhost'}`;
-  return 'https://citadel.zip';
+  return publicAddress(preview) ?? `${isSecure(req) ? 'https' : 'http'}://${req.headers.host ?? 'localhost'}`;
 }
 
 export function isSecure(req: IncomingMessage): boolean {

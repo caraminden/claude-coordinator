@@ -1,20 +1,20 @@
 # shellcheck shell=bash
-# The rebase and the rewrites after it: regenerated files, ADR numbers, the prompt baseline, the undo guard (sourced by land.sh).
+# The rebase and the rewrites after it: regenerated files, ADR numbers, the prompt baseline, the undo guard.
 # Sourced by tools/land.sh up front: definitions only (#2099).
 
 # Regenerated files (#1827). A ship whose diff is a command's output says so with trailers on its own commits:
 #   Regenerate: <a command, run with bash from the repo's top>
 #   Regenerate-files: <the files it writes, as .gitattributes patterns, space-separated>
-# numbers_git's merges take main's side of them (the citadel-regen driver), the early checks too; after the rebase each
-# command runs again and its output is committed (regen_run). Another file's conflict stops as before. It holds the
+# numbers_git's merges take main's side of them (the citadel-regen driver), early checks too; after the rebase each
+# command runs again, its output committed (regen_run). Another file's conflict stops as before. It holds the
 # line (QUEUE_HOLD). Land and --into only; the prompt baseline is built in. shortcut: a modify/delete conflict
-# in a declared file, or a .gitattributes merge= on one, still stops; a hand edit to one is lost when main changed it.
+# in a declared file, or a merge= attribute on one, still stops; a hand edit to one is lost if main changed it.
 regen_setup() {
   regen_cmds=() regen_pats=() regen_attrs=''
   if [[ $mode = land || $mode = into ]]; then
     regen_from=main
     [ "$mode" = land ] || regen_from=refs/heads/$build
-    # From the branch as it was before the rebase on a re-run: a declared commit whose files main already has drops out of it.
+    # On a re-run, from the branch as it was before the rebase: a declared commit whose files main has drops out.
     mapfile -t regen_cmds < <(git log --reverse --format='%(trailers:key=Regenerate,valueonly,unfold)' "$regen_from..${LAND_PRE:-HEAD}" |
       awk 'NF && !seen[$0]++')
     read -ra regen_pats <<<"$(git log --format='%(trailers:key=Regenerate-files,valueonly,unfold)' "$regen_from..${LAND_PRE:-HEAD}" | tr '\n' ' ')" || true
@@ -23,9 +23,9 @@ regen_setup() {
     for p in "${regen_pats[@]}"; do
       case $p in '!'* | '#'* | *=*) refuse "Regenerate-files: takes plain .gitattributes patterns, not \"$p\". Nothing landed" ;; esac
     done
-    if [ "$mode" = into ] && [ -n "${CLAIMS_REGENERATE-}" ]; then # CLAIMS_GENERATED (#2234): Citadel sets none
+    if [ "$mode" = into ] && [ -n "${CLAIMS_REGENERATE-}" ] && [ -n "${CLAIMS_GENERATED-}" ]; then # #2234; Citadel: none
       regen_cmds+=("$CLAIMS_REGENERATE")
-      for p in ${CLAIMS_GENERATED-}; do regen_pats+=("/$p"); done # /: from the top
+      for p in $CLAIMS_GENERATED; do regen_pats+=("/$p"); done # from the top
     fi
     if [ ${#regen_cmds[@]} -gt 0 ]; then
       regen_attrs=$(git rev-parse --absolute-git-dir)/land-regen.attributes
@@ -33,7 +33,7 @@ regen_setup() {
       mv -f "$regen_attrs.$$" "$regen_attrs"
     fi
   fi
-  # What to do about a conflict, the same for a rebase or merge that stopped and for the early check below.
+  # What to do about a conflict: a stopped rebase or merge, and the early check below.
   regen_hint=" If every conflicted file is a command's output (a reformat, a baseline, generated files), declare it instead: a commit with the trailers Regenerate: <command> and Regenerate-files: <those files>, and the ship makes them again on main"
   return 0
 }
@@ -50,8 +50,8 @@ land_rebase() {
       [ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
       [ -n "$quiet" ] || queue_phase "rebasing onto main"
       [ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-      # The same rebase, made by the early next train (early_next), so CI may have run it already. --keep refuses to
-      # overwrite an edit or an untracked file: then the rebase runs and says why.
+      # The same rebase, made by the early next train (early_next), so CI may have run it already. --keep won't
+      # overwrite an edit or untracked file: then the rebase runs and says why.
       if [ -z "$under" ] && c=$(stacked_of "$(git rev-parse main)" "$(git rev-parse HEAD)") && git reset -q --keep "$c" 2>/dev/null; then :
       elif numbers_git ours "${rr[@]}" rebase -q ${under:+--onto} main ${under:+"$under"}; then :
       elif rerere_on . numbers_git ours; then say "the fix recorded ahead of time (git rerere, conflict prep) resolved the rebase's conflicts"; retro_log "train prep replayed · $label onto main ($(git rev-parse --short main))"
@@ -71,7 +71,7 @@ land_rebase() {
       # The same commit under a build sits below its merges of main and can't be left behind, so it is reverted by hand.
       while read -r t b; do
         git merge-base --is-ancestor "$t" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$t" main 2>/dev/null || continue
-        # Not `git log | grep -q` (#646): grep stops at its match, git log dies of SIGPIPE, and pipefail reads that as "not there".
+        # Not `git log | grep -q` (#646): grep's early exit kills git log by SIGPIPE, which pipefail reads as "not there".
         said=$(git log --format=%B main..HEAD)
         ! grep -qF "This reverts commit $t" <<<"$said" || continue
         refuse "$build carries $(git log -1 --format='%h "%s"' "$t"), which came off main when its deploy was rolled back, so landing it would put that back live. Nothing landed: on your branch, revert what it brought (git revert --no-edit main..$(git rev-parse --short "$t")), run tools/land.sh --into $build --full, then this again"

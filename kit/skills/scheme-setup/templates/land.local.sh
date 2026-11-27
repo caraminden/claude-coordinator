@@ -109,7 +109,7 @@
 # A major build's generated files (#2234): files every feeder refreshes (a test map), which build-claims.md can't give
 # to one feeder or mark shared: (the refresh rewrites whole lines). claims_check skips them, and each --into takes the
 # build's side of them on a conflict and runs CLAIMS_REGENERATE (bash, from the repo's top) after its rebase,
-# committing what changed, so the build tip always holds a fresh copy. Set both or neither: one alone refuses --into.
+# committing what changed, so the build tip always holds a fresh copy. Set both: CLAIMS_GENERATED alone refuses.
 # CLAIMS_GENERATED='tools/affected-map.txt'
 # CLAIMS_REGENERATE='node tools/affected-map.ts --write'
 

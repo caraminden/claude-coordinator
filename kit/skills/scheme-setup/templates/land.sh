@@ -213,7 +213,7 @@ MERGES=''
 # Generated files in a major build (#2234): CLAIMS_GENERATED names files (paths from the repo's top, split by spaces or
 # newlines) that every feeder may refresh (Peek's tools/affected-map.txt), and CLAIMS_REGENERATE the command, run with
 # bash from the repo's top, that writes them. claims_check skips them, and each --into takes the build's side of them
-# on a conflict and runs the command after its rebase, as a Regenerate ship's (below). Set both or neither; '' none.
+# on a conflict and runs the command after its rebase, as a Regenerate ship's (below). Both or neither; '' none.
 CLAIMS_GENERATED=''
 CLAIMS_REGENERATE=''
 # The land lock and the line's folder: '' is <.git>/land.lock and <.git>/land-queue in the main checkout. Set them to
@@ -1092,6 +1092,7 @@ undo_guard() {
 claims_check() {
   local trunk=$1 claims me boss mb merged f who m a b why gen=${CLAIMS_GENERATED-}
   claims=$(git show "refs/heads/$build:build-claims.md" 2>/dev/null) || return 0
+  [ -z "$gen" ] || [ -n "${CLAIMS_REGENERATE-}" ] || refuse "CLAIMS_GENERATED is set but CLAIMS_REGENERATE, the command making its files, is not, so nothing merged"
   me=$(sed -nE 's#^ticket/([0-9]+)(-.*)?$#\1#p' <<<"$branch")
   boss=$(sed -nE 's/^build:[[:space:]]*#?([0-9]+).*/\1/p' <<<"$claims" | head -n 1)
   [ -n "$boss" ] || { say "warning: $build's build-claims.md has no line build: #<n> naming its build minion, so its claims aren't checked"; return 0; }
@@ -1381,8 +1382,7 @@ if [[ $mode = land || $mode = into ]] && [ -z "$verify" ]; then
     case $p in '!'* | '#'* | *=*) refuse "Regenerate-files: takes plain .gitattributes patterns, not \"$p\". Nothing landed" ;; esac
   done
   # A build's generated files (CLAIMS_GENERATED, #2234): every --into declares them, as if by trailers.
-  if [ "$mode" = into ] && [ -n "$CLAIMS_GENERATED$CLAIMS_REGENERATE" ]; then
-    { [ -n "$CLAIMS_GENERATED" ] && [ -n "$CLAIMS_REGENERATE" ]; } || refuse "CLAIMS_GENERATED and CLAIMS_REGENERATE go together (the generated files and the command that writes them), and $LOCAL sets only one, so nothing merged: set both or neither"
+  if [ "$mode" = into ] && [ -n "$CLAIMS_GENERATED" ] && [ -n "$CLAIMS_REGENERATE" ]; then # one alone: claims_check refuses
     for claims_c in "${regen_cmds[@]}" ''; do [ "$claims_c" != "$CLAIMS_REGENERATE" ] || break; done
     [ -n "$claims_c" ] || regen_cmds+=("$CLAIMS_REGENERATE")
     read -ra claims_gen <<<"${CLAIMS_GENERATED//$'\n'/ }" || true

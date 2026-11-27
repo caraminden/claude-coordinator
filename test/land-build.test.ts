@@ -488,10 +488,16 @@ test('claims (#2234): a feeder that touches only a CLAIMS_GENERATED file beside 
   const res = into(r, [OK], MAP);
   assert.equal(res.status, 0, res.stderr);
   assert.equal(git(r.source, 'show', 'build/3:map.txt'), 'b.txt\nc.txt', 'the map was made again on the build tip: both feeders in it');
-  assert.equal(git(r.source, 'log', '-1', '--format=%s', 'build/3'), '#1: regenerated at ship time: ls [bc].txt | sort >map.txt');
+  assert.match(git(r.source, 'log', '-1', '--format=%s', 'build/3'), /^#1: regenerated at ship time/, "made in a commit of the feeder's");
+  // A feeder whose map is already right adds no commit.
+  writeFileSync(join(r.wt, 'b.txt'), 'more\n');
+  git(r.wt, 'commit', '-qam', '#1: more b.txt');
+  const again = into(r, [OK], MAP);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(git(r.source, 'log', '-1', '--format=%s', 'build/3'), '#1: more b.txt');
 });
 
-test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as today', () => {
+test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as today, and set alone too', () => {
   const r = setup();
   const two = generated(r);
   assert.equal(into(r, [OK], {}, two).status, 0);
@@ -501,6 +507,10 @@ test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as
   assert.equal(res.status, 1);
   assert.match(res.stderr, /map\.txt is unclaimed, but #2 merged it in first, so it is #2's/);
   assert.equal(tipOf(r, 'build/3'), before);
+  // CLAIMS_GENERATED alone would skip the claims with nothing making the file again: refused.
+  const alone = into(r, [OK], { CLAIMS_GENERATED: MAP.CLAIMS_GENERATED });
+  assert.equal(alone.status, 1);
+  assert.match(alone.stderr, /CLAIMS_GENERATED is set but CLAIMS_REGENERATE, the command making its files, is not, so nothing merged/);
 });
 
 test("claims: a shared file takes added lines, not changes to lines another feeder merged in; the build minion isn't checked", () => {

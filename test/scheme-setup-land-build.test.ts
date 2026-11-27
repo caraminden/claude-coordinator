@@ -350,10 +350,11 @@ function generated(config: Record<string, string>) {
   writeFileSync(join(b.wts[1], 'map.txt'), 'f2.txt\n');
   b.commit(b.wts[1], 'f2.txt', 'two\n');
   const two = b.run(2, '--into', 'build/1', 'f2.txt');
-  assert.equal(two.status, 0, two.stderr);
+  if (!config.CLAIMS_GENERATED || config.CLAIMS_REGENERATE) assert.equal(two.status, 0, two.stderr);
+  else return { ...b, two };
   writeFileSync(join(b.wts[0], 'map.txt'), 'f1.txt\n');
   b.commit(b.wts[0], 'f1.txt', 'one\n');
-  return b;
+  return { ...b, two };
 }
 const MAP = { CLAIMS_GENERATED: 'map.txt', CLAIMS_REGENERATE: 'ls f*.txt | sort >map.txt' };
 
@@ -364,7 +365,7 @@ test('claims (#2234): a feeder that touches only a CLAIMS_GENERATED file beside 
   const res = b.run(1, '--into', 'build/1', 'f1.txt');
   assert.equal(res.status, 0, res.stderr);
   assert.equal(git(b.main, 'show', 'build/1:map.txt'), 'f1.txt\nf2.txt', 'the map was made again on the build tip: both feeders in it');
-  assert.equal(git(b.main, 'log', '-1', '--format=%s', 'build/1'), '#1: regenerated at ship time: ls f*.txt | sort >map.txt');
+  assert.match(git(b.main, 'log', '-1', '--format=%s', 'build/1'), /^#1: regenerated at ship time/, "made in a commit of the feeder's");
   // A feeder whose map is already right adds no commit.
   b.commit(b.wts[0], 'f1.txt', 'one more\n');
   const again = b.run(1, '--into', 'build/1', 'f1.txt');
@@ -372,20 +373,20 @@ test('claims (#2234): a feeder that touches only a CLAIMS_GENERATED file beside 
   assert.equal(git(b.main, 'log', '-1', '--format=%s', 'build/1'), 'f1.txt: one more');
 });
 
-test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as today; set without CLAIMS_REGENERATE, --into refuses', () => {
+test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as today; CLAIMS_GENERATED alone refuses, CLAIMS_REGENERATE alone does nothing', () => {
   let b = generated({});
   const build = b.at('build/1');
   const res = b.run(1, '--into', 'build/1', 'f1.txt');
   assert.equal(res.status, 1);
   assert.match(res.stderr, /map\.txt is unclaimed, but #2 merged it in first, so it is #2's/);
   assert.equal(b.at('build/1'), build);
-  const halves: Record<string, string>[] = [{ CLAIMS_GENERATED: MAP.CLAIMS_GENERATED }, { CLAIMS_REGENERATE: MAP.CLAIMS_REGENERATE }];
-  for (const half of halves) {
-    b = buildSetup(half);
-    const one = b.run(2, '--into', 'build/1', 'f2.txt');
-    assert.equal(one.status, 1, one.stderr);
-    assert.match(one.stderr, /CLAIMS_GENERATED and CLAIMS_REGENERATE go together/);
-  }
+  // CLAIMS_GENERATED alone would skip the claims with nothing making the file again: refused. CLAIMS_REGENERATE alone
+  // does nothing: the claims refuse as today.
+  const alone = generated({ CLAIMS_GENERATED: MAP.CLAIMS_GENERATED });
+  assert.equal(alone.two.status, 1, alone.two.stderr);
+  assert.match(alone.two.stderr, /CLAIMS_GENERATED is set but CLAIMS_REGENERATE, the command making its files, is not, so nothing merged/);
+  b = generated({ CLAIMS_REGENERATE: MAP.CLAIMS_REGENERATE });
+  assert.match(b.run(1, '--into', 'build/1', 'f1.txt').stderr, /map\.txt is unclaimed, but #2 merged it in first/);
 });
 
 test("land_rebased runs in a feeder's --into, and its commit goes into the build; --into --full and --build never call it", () => {

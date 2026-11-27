@@ -10,6 +10,7 @@
 claims_check() {
   local trunk=$1 claims me boss mb merged f who m a b why gen=${CLAIMS_GENERATED-}
   claims=$(git show "refs/heads/$build:build-claims.md" 2>/dev/null) || return 0
+  [ -z "$gen" ] || [ -n "${CLAIMS_REGENERATE-}" ] || refuse "CLAIMS_GENERATED is set but CLAIMS_REGENERATE, the command making its files, is not, so nothing merged"
   me=$(sed -nE 's#^ticket/([0-9]+)(-.*)?$#\1#p' <<<"$branch")
   boss=$(sed -nE 's/^build:[[:space:]]*#?([0-9]+).*/\1/p' <<<"$claims" | head -n 1)
   [ -n "$boss" ] || { say "warning: $build's build-claims.md has no line build: #<n> naming its build minion, so its claims aren't checked"; return 0; }
@@ -105,8 +106,8 @@ claims_inflight() {
   return 1
 }
 
-# claims_check, unless a claims merge is in flight: the claims are about to change, so a hand-off (--check) goes ahead
-# and the run waits for it, then checks the new plan. Under the build's lock claims_check runs again anyway.
+# claims_check, unless a claims merge is in flight: a hand-off (--check) goes ahead and the run waits for it, then
+# checks the new plan. Under the build's lock claims_check runs again anyway.
 claims_gate() {
   local pid t=$SECONDS
   if pid=$(claims_inflight); then
@@ -123,11 +124,11 @@ claims_gate() {
 
 build_tip() {
   if [ "$mode" = build ]; then
-    # The rebased copy is past the merge of main, so HEAD is no longer at the build's tip: the copy that merged names it.
+    # The rebased copy is past the merge of main, off the build's tip: the copy that merged names it.
     if [ -n "$resumed" ]; then build=${LAND_BUILD:-}; else build=$(git for-each-ref --points-at HEAD --format='%(refname:lstrip=2)' 'refs/heads/build/'); fi
     if ! [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]]; then
-      # One merge ahead of a build: a --build that stopped after merging main, or a merge by hand; with the commit
-      # that renumbered its ADRs (below) on top of it, if it made one.
+      # One merge ahead of a build: a --build that stopped after merging main, or a merge by hand, maybe with its
+      # ADR renumbering commit (below) on top.
       ahead= tip=HEAD
       ! grep -qF 'Numbered at ship time by tools/land.sh' <<<"$(git log -1 --format=%b HEAD)" || tip=HEAD^ # not a pipe: #646
       [ -n "$build" ] || ! git rev-parse -q --verify "$tip^2" >/dev/null || ahead=$(git for-each-ref --points-at "$tip^1" --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)

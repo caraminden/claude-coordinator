@@ -3,13 +3,13 @@
 // its sender's own login, so it frees a perigee worker and its ~250 MB (#2147's trial, reports/cloud-batch-poc-2026-11-26.md).
 //
 // Which jobs, and where they stand in the line:
-//   - every research and ideation minion create_ticket starts (Cara, 2026-11-26, on #2153's card: "Every research and ideation
-//     minion"), but one it keeps home (`cloud: false`, or a brief staysHome keeps: it needs the shared folder, which a session
-//     can't read, or builds Android), and a
-//     self-contained test sweep marked for the cloud (CLOUD_KINDS). A schedule's, a trigger's or a card's start stays home:
-//     its brief reads the shared folder or Citadel's tools;
-//   - the cloud first while it has room, perigee or a machine as usual when it is full (Cara, same answer: "Anything that can
-//     go to the cloud with no loss of value should prioritize running there"; src/turn-line.ts);
+//   - every research and ideation minion create_ticket or a card's pick starts (Cara, 2026-11-26, on #2153's card: "Every
+//     research and ideation minion"; Josh, same day, on card starts: "Same rules as the rest"), but one it keeps home
+//     (`cloud: false`, or a brief staysHome keeps: it needs the shared folder, Citadel's tools or its database, which a
+//     session lacks, or builds Android; a card's handoff goes as its text, handoffBrief), and a self-contained test sweep
+//     marked for the cloud (CLOUD_KINDS). A schedule's start stays home: its run files itself away with Citadel's tools;
+//   - the cloud first, though perigee has room (Cara, same answer: "Anything that can go to the cloud with no loss of value
+//     should prioritize running there"; src/turn-line.ts); a first turn whose message carries pictures or files stays home;
 //   - a job whose longest single step runs over CLOUD.stepMinutes is refused: a cloud session stops one background command at
 //     30 minutes, not the session (Cara, 2026-11-26: "I feel like even medium jobs could be moved right? 30m isn't THAT short");
 //   - no cap of ours on sessions at once, a day or by weekly plan use (Josh, 2026-11-26: "we shouldnt be adding any limits,
@@ -46,14 +46,17 @@ export const CLOUD_TYPES: readonly string[] = ['research', 'ideation'];
 
 /** A brief that builds Android stays home: a session's default Limited network blocks dl.google.com, the SDK and Google's Maven
  * (#2154; Josh, 2026-11-26: "No, record it as a no"). */
-const ANDROID_BRIEF = /\b(gradlew?|apks?|android sdk|assemble(debug|release)|cap (build|sync|run) android|android (build|emulator|instrumented)|emulator)\b/i;
+const ANDROID_BRIEF = /\b(gradlew?|apks?|android sdk|assemble(debug|release)|cap (build|sync|run) android|android (app|build|emulator|instrumented|tests?)|(build|run|test)(s|ing)? (the |an? |its )?android|emulator)\b/i;
+
+/** A brief that names Citadel's own tools or database stays home: a session has neither. */
+const CITADEL_BRIEF = /\b(list_tickets|read_minion|read_ticket|search_minions|search_decisions|search_memory|message_coordinator|message_minion|message_taskmaster|create_ticket|hand_off_land|close_self|set_thread_status|propose_plan|review_set|list_schedules|host_check|sqlite3|coordinator\.db)\b/i;
 
 /** Whether create_ticket keeps a brief home: it needs the shared folder (by its path, or by name), which a session can't read, or builds Android. */
 export function staysHome(brief: string, sharedDir: string): boolean {
   // A card start's pointer to its handoff is no need when the handoff's text comes with it: only that text is judged.
   const at = brief.indexOf(HANDOFF_TEXT);
   const own = at < 0 ? brief : brief.slice(at + HANDOFF_TEXT.length);
-  return own.includes(sharedDir) || /\bshared\/project\b|\bshared (folder|dir(ectory)?|project( folder)?)\b/i.test(own) || ANDROID_BRIEF.test(own);
+  return own.includes(sharedDir) || /\bshared\/project\b|\bshared (folder|dir(ectory)?|project( folder)?)\b/i.test(own) || ANDROID_BRIEF.test(own) || CITADEL_BRIEF.test(own);
 }
 
 const HANDOFF_TEXT = "\n\nThe handoff as it reads now, for a cloud session, which can't open the shared folder:\n\n";
@@ -228,11 +231,13 @@ export class CloudPool {
   }
 
   /** A cloud turn's job for src/cloud-turn.mjs: a new session from the minion's messages, or a follow-up to the one it has. */
-  job(t: { id: number; number: number | null; cwd: string }, batch: { author: string; text: string }[], claude: string, files: string | null, now: number, run: { model?: string | null; effort?: string | null } = {}) {
+  job(t: { id: number; number: number | null; cwd: string }, batch: { author: string; text: string; images?: unknown[]; files?: unknown[] }[], claude: string, files: string | null, now: number, run: { model?: string | null; effort?: string | null } = {}) {
     const s = this.session(t.id);
     const branch = cloudBranch(t.id, now);
-    // shortcut: pictures and attached files aren't sent to the session, only the words; send them as links if a cloud job needs them.
-    const messages = batch.map((m) => `[${m.author}]: ${m.text}`).join('\n\n');
+    // shortcut: pictures and attached files aren't sent to a session, only the words (a first turn carrying them stays home, the
+    // runner's cloudAsk); a follow-up says so, so the session can ask. Send them as links if a cloud job comes to need them.
+    const left = (m: (typeof batch)[number]) => (m.images?.length ?? 0) + (m.files?.length ?? 0);
+    const messages = batch.map((m) => `[${m.author}]: ${m.text}${left(m) ? `\n(${left(m)} picture(s) or file(s) came with this in Citadel's chat; you can't see them, so say so if the job needs them.)` : ''}`).join('\n\n');
     const text = cloudPrompt({ ticket: t.number ?? t.id, branch, minutes: this.mark(t.id)?.minutes ?? null, first: !s, messages });
     const cost = s ? CLOUD.costUsd.followUp : CLOUD.costUsd.start;
     return { claude, cwd: t.cwd, branch, last: s?.branch ?? null, session: s?.session ?? null, sha: s?.sha ?? null, text, files, model: run.model ?? null, effort: run.effort ?? null, cost, limitMs: CLOUD.turnMinutes * 60_000, pollMs: CLOUD.pollMs, startMs: CLOUD.startMs };

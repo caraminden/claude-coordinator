@@ -56,6 +56,8 @@ if (args[0] === '--cloud') {
   push(args[1], 'from the cloud');
   process.stdout.write('Created https://claude.ai/code/session_01RUNNERabc\\n');
   setInterval(() => {}, 1000);
+} else if (args.includes('session_01GONEabc')) {
+  console.log(JSON.stringify({ ok: false, error: 'no such session' }));
 } else if (args.includes('--cloud')) {
   push(args[1], 'the follow-up');
   console.log('{}');
@@ -146,4 +148,48 @@ test("a research minion's first turn goes to the cloud though perigee is free; i
   assert.match(said(research), /cloud session is on Cara's login/);
   writeFileSync(join(root, `end-${research}`), '');
   await idle(research);
+});
+
+const kept = (id: number, session: string, person: number) => runner.cloud.setSession(id, { session, url: null, branch: 'cloud/t0-x', person, account: null, sha: null, at: Date.now() });
+
+test("another person's turn on a cloud minion waits for perigee like any other, never over its size", async () => {
+  const busy = minion('feature');
+  say(busy, 'hold perigee');
+  await until('perigee taken', () => ofMinion(busy).length > 0);
+  const bound = minion('research');
+  kept(bound, 'session_01WAITabc', cara.id);
+  say(bound, 'and B?', 'Josh');
+  await until("Josh's turn placed or waiting", () => runner.turnLine.wait(bound) != null || ofMinion(bound).length > 0);
+  assert.equal(ofMinion(bound).length, 0, 'perigee is full: it waits its turn');
+  writeFileSync(join(root, `end-${busy}`), '');
+  await until("Josh's turn at perigee", () => ofMinion(bound).length > 0);
+  assert.equal(ofMinion(bound)[0].includes('--cloud'), false);
+  assert.match(said(bound), /cloud session is on Cara's login/);
+  writeFileSync(join(root, `end-${bound}`), '');
+  await idle(bound);
+  await idle(busy);
+});
+
+test('a session the cloud refuses is let go: the next turn runs at perigee', async () => {
+  const gone = minion('research');
+  kept(gone, 'session_01GONEabc', cara.id);
+  say(gone, 'carry on');
+  await until('the refused follow-up', () => ofMinion(gone).length === 1);
+  await idle(gone);
+  assert.equal(runner.cloud.session(gone), null, 'forgotten');
+  say(gone, 'try again');
+  await until('the next turn', () => ofMinion(gone).length === 2);
+  assert.equal(ofMinion(gone)[1].includes('--cloud'), false, 'at perigee, not a new session');
+  writeFileSync(join(root, `end-${gone}`), '');
+  await idle(gone);
+});
+
+test("a first turn with a picture stays home: a cloud session can't see it", async () => {
+  const pic = minion('research');
+  runner.cloud.made(pic, { go: true }, 'Cara');
+  runner.send(pic, 'Cara', 'compare these', [{ name: 'a.png', path: join(root, 'a.png'), mediaType: 'image/png' }], { typed: true });
+  await until('its turn', () => ofMinion(pic).length > 0);
+  assert.equal(ofMinion(pic)[0].includes('--cloud'), false);
+  writeFileSync(join(root, `end-${pic}`), '');
+  await idle(pic);
 });

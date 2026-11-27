@@ -106,7 +106,9 @@ test('a brief stays home when it needs the shared folder, by path or by name, or
   assert.equal(staysHome('Put it in the shared folder', dir), true);
   assert.equal(staysHome('Build the APK with ./gradlew assembleRelease', dir), true);
   for (const b of ['Build the app: npx cap build android', 'Run the Android instrumented tests on the emulator', 'run assembleDebug', 'Read the files in the shared dir', 'Read the reports in the shared project folder']) assert.equal(staysHome(b, dir), true, b);
+  for (const b of ['Build the Android app.', 'Run the Android tests', 'Use list_tickets to see what ran', 'Count rows in coordinator.db with sqlite3', 'Then close_self']) assert.equal(staysHome(b, dir), true, b);
   assert.equal(staysHome('Compare Android push libraries and their prices', dir), false);
+  assert.equal(staysHome('Compare X and Y on the web', dir), false);
 });
 
 test("a card's research start carries its handoff's text and goes to the cloud; one whose handoff needs the shared folder stays home", () => {

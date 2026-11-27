@@ -180,6 +180,15 @@ test('a result that cannot be read stays on its branch, and its sha is said so i
   );
 });
 
+test('a listed file that never came home is named, not linked, and its branch is kept to fetch it from', async () => {
+  const sha = pushed('cloud/t7-gap', JSON.stringify({ reply: 'see the report', card: null, files: ['.citadel/out/gone.md'] }));
+  const evs = await drive({ branch: 'cloud/t7-gap', session: 'session_01FAKEabc123', text: 'x' }, { FAKE_MODE: 'silent' });
+  const reply = texts(evs).at(-1)!;
+  assert.doesNotMatch(reply, /\[gone\.md\]/, 'no link to a file that was never written');
+  assert.match(reply, /Not brought home .*`\.citadel\/out\/gone\.md`.*`cloud\/t7-gap`/);
+  assert.equal(git(origin, 'rev-parse', 'refs/heads/cloud/t7-gap'), sha, 'kept on origin');
+});
+
 test('a session that never pushes is read back through teleport in a throwaway clone', async () => {
   const head = git(work, 'rev-parse', 'HEAD');
   const evs = await drive({ branch: 'cloud/t7-c', session: 'session_01FAKEabc123', text: 'cloud/t7-c', limitMs: 300 }, { FAKE_MODE: 'silent' });

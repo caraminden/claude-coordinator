@@ -29,12 +29,12 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_GIT_FAILS = 3;
 /** What this turn is counted as costing (CLOUD.costUsd: an estimate, the session runs on its sender's plan), once it sent something. */
 let cost = 0;
-/** How long a start whose id never showed has its branch watched: it may have started, but a stuck screen holds a cloud slot meanwhile. */
+/** How long a start whose id never showed has its branch watched: it may have started, and a stuck screen shouldn't hold its turn for the full limit. */
 const NO_ID_WATCH_MS = 30 * 60_000;
 
 /** @typedef {{ claude: string, cwd: string, branch: string, last?: string | null, session: string | null, sha: string | null, text: string, files: string | null, model?: string | null, effort?: string | null, cost?: number, limitMs: number, pollMs: number, startMs: number }} CloudJob */
 /** @typedef {{ questions: unknown[] }} Card */
-/** @typedef {{ reply: string, card: Card | null, files: string[] }} CloudResult */
+/** @typedef {{ reply: string, card: Card | null, files: string[], missing?: { files: string[], branch: string } }} CloudResult */
 
 /** @param {object} ev */
 const emit = (ev) => process.stdout.write(`${JSON.stringify(ev)}\n`);
@@ -197,15 +197,19 @@ async function fetchResult(job, sha, branch = job.branch) {
   let read = false;
   try {
     const result = readResult(await run('git', ['-C', job.cwd, 'show', `${sha}:${RESULT}`]));
+    /** @type {string[]} */
+    const missing = [];
     if (job.files && result.files.length) {
       mkdirSync(job.files, { recursive: true });
       for (const f of result.files) {
         const body = await runBytes('git', ['-C', job.cwd, 'cat-file', 'blob', `${sha}:${f}`]).catch(() => null);
         if (body && body.length <= MAX_BYTES) writeFileSync(join(job.files, basename(f)), body);
+        else missing.push(f);
       }
     }
-    read = true;
-    return result;
+    // A file it listed but that couldn't come home keeps its branch, so it is still there to fetch.
+    read = !missing.length;
+    return { ...result, files: result.files.filter((f) => !missing.includes(f)), missing: missing.length ? { files: missing, branch } : undefined };
   } finally {
     await run('git', ['-C', job.cwd, 'update-ref', '-d', ref]).catch(() => {});
     // A result read: its branch goes. One that couldn't be read stays on origin for a look.
@@ -233,6 +237,7 @@ async function shown(job, result) {
     if (href instanceof Error) reply += `\n\nIts card couldn't be posted (${href.message}). It asked:\n${result.card.questions.map((q) => `- ${JSON.stringify(q)}`).join('\n')}`;
   }
   if (result.files.length && job.files) reply += `\n\nFiles: ${result.files.map((f) => `[${basename(f)}](${join(job.files, basename(f))})`).join(', ')}`;
+  if (result.missing) reply += `\n\nNot brought home (over 5 MB, or not committed): ${result.missing.files.map((f) => `\`${f}\``).join(', ')}. They stay on the branch \`${result.missing.branch}\` on GitHub.`;
   return reply;
 }
 

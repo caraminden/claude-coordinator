@@ -473,7 +473,7 @@ export class Runner {
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
   /** The connected machines as places for turns (Build 7 T4), set by server.ts; none yet: a turn marked for one waits. */
   pools: MachinePools | null = null;
-  /** The cloud's pool (#2153, src/cloud-pool.ts): marks, sessions and runs a day. */
+  /** The cloud's pool (#2153, src/cloud-pool.ts): marks and sessions. */
   readonly cloud: CloudPool;
   /** Where each minion's turns may run, when a person said (Build 7 T4). */
   readonly runsOn: RunsOn;
@@ -2669,14 +2669,24 @@ export class Runner {
     const ticket = this.store.getTicket(id);
     const project = ticket && this.store.getProject(ticket.project_id);
     if (!ticket || !project || ticket.kind !== 'ticket' || !ticket.cwd) return 'not a minion with a checkout';
-    const person = this.turnPerson(ticket, project, this.waiting(id), !!via);
+    const waiting = this.waiting(id);
+    const person = this.turnPerson(ticket, project, waiting, !!via);
     if (person === null) return 'no one to run it for';
+    if (waiting.msgs.some((m) => m.images?.length || m.files?.length)) return "its message carries pictures or files, which a cloud session can't see";
     return this.turnAtHome(ticket, project, person)?.why ?? { ticket, project, person, type: typeof type === 'string' ? type : null };
+  }
+
+  /** Its cloud session is the one its next turn follows up: on the login of the person that turn is for (sender pays). */
+  private cloudBound(id: number, via?: RetryKind): boolean {
+    const s = this.cloud.session(id);
+    const ticket = s && this.store.getTicket(id);
+    const project = ticket && this.store.getProject(ticket.project_id);
+    return !!project && this.turnPerson(ticket, project, this.waiting(id), !!via) === s.person;
   }
 
   /** What the line asks of the cloud (#2153): only a research, ideation or marked minion's first turn starts a session, on the login and account its turn would use. */
   private readonly cloudHost: CloudHost = {
-    bound: (id) => !!this.cloud.session(id),
+    bound: (id, via) => this.cloudBound(id, via),
     takes: (id, via) => {
       const ask = this.cloudAsk(id, via);
       if (typeof ask === 'string') return ask;
@@ -2701,13 +2711,12 @@ export class Runner {
   private startPlace(ticket: Ticket, person: number | null, via?: RetryKind): { id: number; name: string } | 'wait' | null {
     const need = this.machineHost.mark(ticket.id);
     const at = this.turnLine.placeOf(ticket.id);
+    // Its session is on one login: another person's turn can't follow it up there (sender pays), so that one runs away from it, fresh.
+    const s = this.cloud.session(ticket.id);
+    if (s && s.person !== person) this.emit(ticket.id, 'note', { text: `This turn runs at perigee: this minion's cloud session is on ${this.store.getUser(s.person)?.name ?? 'another person'}'s login, and a turn runs on its sender's own.` });
     if (at === CLOUD_PLACE) {
-      // Its session is on one login: another person's turn can't follow it up there (sender pays), so that one runs here, fresh.
-      const s = this.cloud.session(ticket.id);
-      if (s && s.person !== person) {
-        this.emit(ticket.id, 'note', { text: `This turn runs at perigee: this minion's cloud session is on ${this.store.getUser(s.person)?.name ?? 'another person'}'s login, and a turn runs on its sender's own.` });
-        this.turnLine.comeHome(ticket.id);
-      }
+      // The line placed it before its person changed (cloudBound asks the same): it runs here.
+      if (s && s.person !== person) this.turnLine.comeHome(ticket.id);
       return null;
     }
     if (!need && !at) return null;

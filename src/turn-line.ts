@@ -194,8 +194,8 @@ export interface LineHost {
 
 /** What the line needs of the cloud pool (src/cloud-pool.ts, the runner's side of it). */
 export interface CloudHost {
-  /** Its conversation is a cloud session: its turns run there and nowhere else. */
-  bound(ticketId: number): boolean;
+  /** Its conversation is a cloud session on the login of the person its next turn is for: that turn runs there and nowhere else. */
+  bound(ticketId: number, via?: RetryKind): boolean;
   /** Why its turn can't start as a new cloud session, or null: it may. */
   takes(ticketId: number, via?: RetryKind): string | null;
 }
@@ -339,7 +339,7 @@ export class TurnLine {
   }
 
   private machineWait(entry: LineEntry): Pick<WorkerWait, 'machine'> {
-    if (this.bound(entry.ticket)) {
+    if (this.bound(entry.ticket, entry.via)) {
       return { machine: { name: 'its cloud session', why: 'next there' } };
     }
     const need = this.need(entry.ticket);
@@ -641,7 +641,7 @@ export class TurnLine {
 
   /** Where a turn can start at this moment, or null: it waits. */
   private placeFor(me: LineEntry, via?: RetryKind): number | null {
-    if (this.bound(me.ticket)) return null;
+    if (this.bound(me.ticket, me.via)) return null;
     const mark = this.host.pools?.mark(me.ticket) ?? null;
     const full = this.full(this.host.asks(me.ticket, via).person);
     if (!mark && !full && this.forcedFor(me.ticket) !== null) return 0;
@@ -682,11 +682,11 @@ export class TurnLine {
     const cloud = this.host.cloud;
     if (!cloud) return [];
     // A minion marked for a machine keeps to it.
-    return entries.filter((e) => !this.host.busy(e.ticket) && (cloud.bound(e.ticket) || (this.host.pools?.mark(e.ticket) == null && cloud.takes(e.ticket, e.via) === null)));
+    return entries.filter((e) => !this.host.busy(e.ticket) && (cloud.bound(e.ticket, e.via) || (this.host.pools?.mark(e.ticket) == null && cloud.takes(e.ticket, e.via) === null)));
   }
 
-  private bound(ticketId: number): boolean {
-    return !!this.host.cloud?.bound(ticketId);
+  private bound(ticketId: number, via?: RetryKind): boolean {
+    return !!this.host.cloud?.bound(ticketId, via);
   }
 
   /** It can't start at perigee: marked for a machine, or its session is in the cloud. */
@@ -697,7 +697,7 @@ export class TurnLine {
   /** The machines a turn may start on now, best first (src/machine-balancer.ts rank): its owner's order, then where it last ran, then the most room. */
   private ranked(me: LineEntry, via = me.via): MachinePlace[] {
     const pools = this.host.pools;
-    if (!pools || this.bound(me.ticket)) return [];
+    if (!pools || this.bound(me.ticket, me.via)) return [];
     const open = this.machines().filter((m) => !pools.takes(m.id, me.ticket, via));
     return rank(
       open.map((m) => ({ ...m, free: this.sizeOf(m) - this.used(m.id) })),
@@ -864,7 +864,7 @@ export class TurnLine {
     const over = this.used() >= this.size() || this.needed(this.ready());
     return idle.filter((e) => {
       const mark = this.host.pools!.mark(e.ticket);
-      return (mark === m.id || (mark === null && over && !this.bound(e.ticket))) && !this.host.pools!.takes(m.id, e.ticket, e.via);
+      return (mark === m.id || (mark === null && over && !this.bound(e.ticket, e.via))) && !this.host.pools!.takes(m.id, e.ticket, e.via);
     });
   }
 

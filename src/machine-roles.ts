@@ -22,6 +22,44 @@ export type RoleRow = { role: Role; on: boolean; caps: Caps; setup: Record<strin
 /** machines.lend as the releases before roles wrote and read it (machines.ts Lend). */
 export type LegacyLend = { server: string | null; workspaces: string[]; gpu_off?: true; before_ticks?: true; worker?: true };
 
+/** What a PC's agent says it is, as far as which roles it can do goes (src/machine-join.ts MachineReport). */
+type Capable = { os: 'windows' | 'linux' | 'macos'; os_name?: string; gpu: string | null };
+
+/**
+ * Why a PC can't do a role, from what its agent reported (One kind of machine: "Capabilities decide which roles it
+ * offers"), or null when it can or nobody knows yet (no report). The page greys the role with this reason and the
+ * roles PATCH refuses to switch it on. Only what the PC is decides it: who may switch a role is the route's.
+ * `gpuFound` is other proof of a GPU (its jobs block's), which outranks a report that found none.
+ */
+export function roleCannot(report: Capable | null, role: Role, gpuFound = false): string | null {
+  if (!report) return null;
+  const mac = report.os === 'macos';
+  const runs = report.os_name || report.os;
+  switch (role) {
+    case 'screen':
+      return report.os === 'windows' ? null : `Windows only, and this PC runs ${runs}.`;
+    case 'ci':
+      return mac ? 'CI runners need Windows or Linux.' : null;
+    case 'turns':
+      return mac ? 'Minion turns need Linux, or Windows with WSL.' : null;
+    case 'builds':
+      return mac ? 'Builds need Linux, or Windows with WSL.' : null;
+    case 'gpu':
+      if (mac) return 'GPU jobs need Linux, or Windows with WSL, and an NVIDIA GPU.';
+      return report.gpu || gpuFound ? null : 'No GPU found on this PC.';
+    default:
+      return null;
+  }
+}
+
+/** Each role a PC can't do, with why (roleCannot); the roles it can do are left out. */
+export function rolesCannot(report: Capable | null, gpuFound = false): Partial<Record<Role, string>> {
+  return Object.fromEntries(ROLES.flatMap((r) => {
+    const why = roleCannot(report, r, gpuFound);
+    return why ? [[r, why]] : [];
+  }));
+}
+
 export const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as readonly string[]).includes(v);
 
 /** machines.lend as stored, or null when it is empty or not one (an older release only ever wrote machines.ts cleanLend's shape). */

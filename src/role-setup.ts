@@ -35,7 +35,7 @@ export const MAX_SHOT = 20 * 1024 * 1024;
 export type SetupRole = 'tools' | 'screen' | 'turns' | 'gpu' | 'ci' | 'builds';
 export type StepState = 'waiting' | 'running' | 'ok' | 'fail';
 export type Step = { text: string; state: StepState };
-export type Admin = { needs: string[]; pm: string | null };
+export type Admin = { needs: string[]; pm: string | null; script?: true };
 /** One Set up or Test, as the card shows it. */
 export type Run = {
   id: string;
@@ -184,6 +184,8 @@ export class RoleSetups {
       if (report?.os === 'macos') throw new HttpError(409, 'CI runners need Windows or Linux');
       if (this.d.ci.agents(machine.id).length) phase = 'test';
       else if (kind === 'test') throw new HttpError(409, `No runner agent is connected to ${machine.name}: press Set up`);
+      // Its own agent writes the one administrator script (H2), then Citadel waits for the runner agent.
+      else if (fresh && online) phase = 'agent';
       else {
         phase = 'runner';
         workerInstall = true;
@@ -195,7 +197,8 @@ export class RoleSetups {
         this.canTest(machine);
         phase = 'test';
       } else if (kind === 'test') throw new HttpError(409, `${machine.name}'s worker isn't running: press Set up`);
-      else if (report?.os === 'windows' && fresh && online) phase = 'agent';
+      // Windows: the agent runs the worker's installer. Linux: it writes the elevate script that does (H2).
+      else if (report?.os !== 'macos' && fresh && online) phase = 'agent';
       else {
         phase = 'worker';
         workerInstall = true;
@@ -222,11 +225,29 @@ export class RoleSetups {
       // Minion turns' caps go to the worker's install; Builds' threads cap to its self-test.
       const caps = this.d.store.machineRoles(machine.id).find((r) => r.role === role)?.caps ?? {};
       const { ticks: _, ...own } = caps;
-      if (!this.d.send(machine.id, { setup: { id: run.id, role, kind, ...(role === 'turns' || role === 'builds' ? { caps: own } : {}), ...(images ? { builds: images } : {}) } })) this.finish(a, false, `${machine.name} went offline`);
+      const also = this.waitingOnAdmin(machine.id, role);
+      if (!this.d.send(machine.id, { setup: { id: run.id, role, kind, ...(role === 'turns' || role === 'builds' ? { caps: own } : {}), ...(images ? { builds: images } : {}), ...(also.length ? { also } : {}) } })) this.finish(a, false, `${machine.name} went offline`);
     } else if (phase === 'test' && role === 'ci') void this.ciTest(a, machine);
     else if (phase === 'test') this.startTest(a, machine);
     else if (role === 'tools') void this.tools(a);
     return { ...run };
+  }
+
+  /**
+   * The other roles that are on there and still wait on what an administrator installs (H2): CI with no runner agent
+   * connected, Minion turns with no worker, Builds not yet set up. Their needs go in the same elevate script, so turning
+   * on several roles is one administrator paste.
+   */
+  private waitingOnAdmin(machineId: number, role: Role): Role[] {
+    return this.d.store
+      .machineRoles(machineId)
+      .filter((r) => r.on && r.role !== role)
+      .flatMap((r) => {
+        if (r.role === 'ci') return this.d.ci && !this.d.ci.agents(machineId).length ? ['ci' as const] : [];
+        if (r.role === 'turns') return this.d.workers && !this.d.workers.here(machineId) ? ['turns' as const] : [];
+        if (r.role === 'builds') return storedRun(this.d.store, machineId, 'builds')?.ok ? [] : ['builds' as const];
+        return [];
+      });
   }
 
   /** T5's own refusals (routes/machines.ts self-test), so Set up and the old button agree. */
@@ -343,7 +364,8 @@ export class RoleSetups {
       else if (a.phase === 'worker') {
         if (this.d.workers?.here(a.machineId)) {
           const at = a.run.steps.findIndex((s) => s.text.startsWith('The worker connects'));
-          this.step(a, 0, { ...a.run.steps[0], state: 'ok' }, false);
+          // Every step before it is done now: the install command (one to paste, or the agent's own) worked.
+          a.run.steps = a.run.steps.map((s) => (s.state === 'running' ? { ...s, state: 'ok' } : s));
           if (at >= 0) this.step(a, at, { text: 'The worker connected to Citadel', state: 'ok' }, false);
           a.run.worker_install = false;
           try {
@@ -356,8 +378,7 @@ export class RoleSetups {
         } else if (now - a.heard > WORKER_WAIT_MS) this.finish(a, false, `No worker came up on ${machine.name} in ${WORKER_WAIT_MS / 60_000} minutes: run the install command there, then press Set up again`);
       } else if (a.phase === 'runner') {
         if (this.d.ci?.agents(a.machineId).length) {
-          a.run.steps = a.run.steps.map((s) => ({ ...s, state: 'ok' }));
-          a.run.steps[1] = { text: 'The runner agent connected to Citadel', state: 'ok' };
+          a.run.steps = a.run.steps.map((s) => (s.text.startsWith('The runner agent connects') ? { text: 'The runner agent connected to Citadel', state: 'ok' } : { ...s, state: s.state === 'fail' ? 'fail' : 'ok' }));
           a.run.worker_install = false;
           void this.ciTest(a, machine);
         } else if (now - a.heard > WORKER_WAIT_MS) this.finish(a, false, `No runner agent connected to ${machine.name} in ${WORKER_WAIT_MS / 60_000} minutes: run the install command there as administrator, then press Set up again`);
@@ -384,6 +405,10 @@ export class RoleSetups {
       if (ok && a.run.role === 'turns') {
         a.phase = 'worker';
         a.run.steps.push({ text: "The worker connects to Citadel (it's waited for up to 30 minutes)", state: 'running' });
+      } else if (ok && a.run.role === 'ci') {
+        // The agent wrote the administrator script (H2): Citadel waits for the runner agent it installs, then tests it.
+        a.phase = 'runner';
+        a.run.steps.push({ text: "The runner agent connects to Citadel (it's waited for up to 30 minutes)", state: 'running' });
       } else {
         a.run.report = ok ? clean(done.report, 200) || null : null;
         this.finish(a, ok, ok ? null : clean(done.why, 400) || 'A step failed: its line says why.');

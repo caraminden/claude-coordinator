@@ -12,11 +12,24 @@ export const SETUP_ROLES = ['tools', 'screen', 'turns', 'gpu', 'ci', 'builds'];
 /** @type {Record<string, { what: string, os: 'windows' | 'linux' }>} */
 export const ADMIN_NEEDS = {
   wsl: { what: 'WSL 2', os: 'windows' },
+  runner: { what: 'the CI runner agent', os: 'windows' },
+  'runner-linux': { what: 'the CI runner agent', os: 'linux' },
+  worker: { what: 'the minion worker', os: 'linux' },
   podman: { what: 'podman', os: 'linux' },
   'nvidia-toolkit': { what: "NVIDIA's container toolkit", os: 'linux' },
   cdi: { what: 'the GPU device list containers read (CDI)', os: 'linux' },
 };
 export const PACKAGE_MANAGERS = ['apt', 'dnf'];
+
+/**
+ * The needs the agent puts in its elevate script (One kind of machine H2; Cara, 2026-11-26, "One agent, helpers hidden"):
+ * the helpers that run as administrator or root, and WSL. The agent writes that script on its own PC, from these keys,
+ * its own address and its own token, at a fixed place beside itself (ELEVATE), so the command the card shows is always
+ * the same words: nothing from the agent's report goes in it.
+ */
+export const SCRIPT_NEEDS = ['wsl', 'runner', 'runner-linux', 'worker'];
+/** Where the agent writes its elevate script: the folder Connect a computer installs it in (machine-setup.js). */
+export const ELEVATE = { windows: '$env:USERPROFILE\\coordinator-agent\\elevate.ps1', linux: '~/coordinator-agent/elevate.sh' };
 
 /** @type {Record<string, Record<string, string>>} */
 const LINUX = {
@@ -41,14 +54,17 @@ const LINUX = {
  */
 export function cleanAdmin(v) {
   if (!v || typeof v !== 'object') return null;
-  const given = /** @type {{ needs?: unknown, pm?: unknown }} */ (v);
+  const given = /** @type {{ needs?: unknown, pm?: unknown, script?: unknown }} */ (v);
+  const script = given.script === true;
+  // A helper's install has no page-made command: only the agent's script runs it.
   /** @type {string[]} */
-  const needs = Array.isArray(given.needs) ? [...new Set(given.needs.filter((/** @type {unknown} */ n) => typeof n === 'string' && Object.hasOwn(ADMIN_NEEDS, n)))] : [];
+  const needs = Array.isArray(given.needs) ? [...new Set(given.needs.filter((/** @type {unknown} */ n) => typeof n === 'string' && Object.hasOwn(ADMIN_NEEDS, n) && (script || n === 'wsl' || !SCRIPT_NEEDS.includes(n))))] : [];
   if (!needs.length || new Set(needs.map((n) => ADMIN_NEEDS[n].os)).size > 1) return null;
   const pm = typeof given.pm === 'string' && PACKAGE_MANAGERS.includes(given.pm) ? given.pm : null;
   // The toolkit comes before the list it makes, and podman before both.
   const order = Object.keys(ADMIN_NEEDS);
-  return { needs: needs.sort((a, b) => order.indexOf(a) - order.indexOf(b)), pm };
+  // `script`: the agent wrote its elevate script with every need of SCRIPT_NEEDS listed here (an agent from before writes none).
+  return { needs: needs.sort((a, b) => order.indexOf(a) - order.indexOf(b)), pm, ...(script && needs.some((n) => SCRIPT_NEEDS.includes(n)) ? { script: true } : {}) };
 }
 
 /**
@@ -62,6 +78,16 @@ export function adminCommand(admin) {
   if (!a) return null;
   const names = a.needs.map((n) => ADMIN_NEEDS[n].what);
   const what = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+  const windows = ADMIN_NEEDS[a.needs[0]].os === 'windows';
+  // One paste for every role (H2): the agent's script, which holds each need that has one, the restart after WSL said in it.
+  if (a.script && windows) return { tag: 'powershell-admin', command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${ELEVATE.windows}"`, what, after: a.needs.includes('wsl') ? 'Then restart the PC and press Set up again.' : 'Citadel waits for it to connect, then tests it.' };
+  if (a.script) {
+    // Packages without a script of their own (podman, the GPU toolkit) go first, as page-made words, in the same paste.
+    const rest = a.needs.filter((n) => !SCRIPT_NEEDS.includes(n));
+    if (rest.length && !a.pm) return { tag: null, command: null, what, after: `This PC has neither apt nor dnf: install ${rest.map((n) => ADMIN_NEEDS[n].what).join(' and ')} its own way, then run sudo bash ${ELEVATE.linux} and press Set up again.` };
+    const pm = a.pm ?? 'apt';
+    return { tag: 'bash', command: [...rest.map((n) => LINUX[n][pm]), `sudo bash ${ELEVATE.linux}`].join(' && \\\n'), what, after: 'Citadel waits for it to connect, then tests it.' };
+  }
   if (a.needs[0] === 'wsl') return { tag: 'powershell-admin', command: 'wsl --install --no-distribution', what, after: 'Then restart the PC and press Set up again.' };
   if (!a.pm) return { tag: null, command: null, what, after: `This PC has neither apt nor dnf: install ${what} its own way, then press Set up again.` };
   const pm = a.pm;

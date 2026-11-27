@@ -31,7 +31,7 @@ import { HostStarts, cleanPrograms, type HostProgram } from './host-reach.ts';
 import { cleanReport, type MachineReport, storedReport } from './machine-join.ts';
 import { mergeOf, merges } from './machine-merge.ts';
 import { pausedRoles, setPaused } from './machine-pause.ts';
-import { legacyFromRoles, ROLE_NAMES } from './machine-roles.ts';
+import { legacyFromRoles, ROLE_NAMES, rolesCannot } from './machine-roles.ts';
 import { POOLED_WINDOWS, WindowsPool } from './machine-pick.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
@@ -539,7 +539,14 @@ export class MachineRelay {
       roles: this.store.machineRoles(machine.id).map(({ caps: { ticks: _, ...caps }, ...r }) => ({ ...r, name: ROLE_NAMES[r.role], caps })),
       /** The roles Pause all switched off, to come back on one click; null when it isn't paused. */
       paused: pausedRoles(this.store, machine.id),
+      /** Each role its PC can't do, with why (One kind of machine H2): the page greys it and PATCH roles won't switch it on. */
+      cannot: rolesCannot(storedReport(machine), this.gpuFound(machine)),
     };
+  }
+
+  /** Proof of a GPU beside the agent's report: its jobs block lends one. */
+  gpuFound(machine: Machine): boolean {
+    return !!storedOffer(machine)?.gpu;
   }
 
   /** Send a job message (#857) to a machine's agent, if one with a jobs block is connected. */

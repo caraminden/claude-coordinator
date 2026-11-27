@@ -2294,7 +2294,7 @@ async function installService(name, argv) {
 // ---------- connect with a join code (Build 7 M2) ----------
 
 /** This agent's version, in its report. A row whose agent reports nothing is from before and offers Update. */
-export const AGENT_VERSION = 4;
+export const AGENT_VERSION = 5;
 
 /** A program's output, or null when it isn't there, fails or takes too long. Windows' wsl.exe writes UTF-16. */
 function probe(command, args, timeout = 8000) {
@@ -2333,7 +2333,7 @@ export async function machineReport({ platform = process.platform, env = process
     const fs = nodeFs.statfsSync(home);
     disk = Math.round(((fs.bavail * fs.bsize) / 1024 ** 3) * 10) / 10;
   } catch {}
-  const [osName, wsl, gpu, screen, admin] = await Promise.all([
+  const [osName, wsl, gpu, screen, admin, hyperv] = await Promise.all([
     // Windows 11 is still 10.0 to the kernel; its builds start at 22000.
     os === 'windows' ? `Windows ${Number(release().split('.')[2]) >= 22000 ? '11' : '10'}` : os === 'macos' ? run('sw_vers', ['-productVersion']).then((v) => `macOS ${v ?? release()}`) : (/PRETTY_NAME="?([^"\n]+)/.exec(tryRead('/etc/os-release'))?.[1] ?? `Linux ${release()}`),
     os === 'windows'
@@ -2368,6 +2368,7 @@ export async function machineReport({ platform = process.platform, env = process
           ? false
           : !!(env.DISPLAY || env.WAYLAND_DISPLAY || exists('/tmp/.X11-unix/X0') || (env.XDG_RUNTIME_DIR && exists(join(env.XDG_RUNTIME_DIR, 'wayland-0')))),
     os === 'windows' ? run('whoami.exe', ['/groups']).then((v) => (v === null ? null : /S-1-5-32-544/.test(v))) : process.getuid?.() === 0 ? true : run('id', ['-Gn']).then((v) => (v === null ? null : /\b(sudo|wheel|admin)\b/.test(v))),
+    os === 'windows' ? run('powershell.exe', ['-NoProfile', '-Command', HYPERV_PS], 20_000).then(hypervFrom) : null,
   ]);
   return {
     host: hostname(),
@@ -2381,8 +2382,27 @@ export async function machineReport({ platform = process.platform, env = process
     gpu,
     screen,
     admin,
+    // Hyper-V and its VMs (One kind of machine: "a VM is a capability"): null off Windows or when it can't tell.
+    hyperv,
     agent: AGENT_VERSION,
   };
+}
+
+/**
+ * Whether Hyper-V runs here and its VMs' names. Get-VM needs Hyper-V Administrators (or admin), so without it the VMs are
+ * unknown (null) though Hyper-V is there. Prints `none`, `?`, or `vm` then a name a line.
+ */
+const HYPERV_PS = "if (-not (Get-Service vmms -ErrorAction SilentlyContinue)) { 'none' } else { try { $v = @(Get-VM -ErrorAction Stop); 'vm'; $v | ForEach-Object { $_.Name } } catch { '?' } }";
+/** @returns {{ present: boolean, vms: string[] | null } | null} */
+export function hypervFrom(out) {
+  const lines = (out ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines[0] === 'none') return { present: false, vms: [] };
+  if (lines[0] === '?') return { present: true, vms: null };
+  if (lines[0] === 'vm') return { present: true, vms: lines.slice(1, 51).map((n) => n.slice(0, 100)) };
+  return null;
 }
 
 /**
@@ -2647,6 +2667,9 @@ async function main() {
       start: (command) => spawn(command, [], { detached: true, stdio: 'ignore' }).unref(),
       screenBusy: () => !!(host?.screenLock && screenHolder(host.screenLock)),
       tmp: nodeOs.tmpdir(),
+      home: homedir(),
+      // On Linux as root (a container, say), the elevate script's installs run straight away (role-setup-agent.mjs elevate).
+      root: process.getuid?.() === 0,
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       post: (body) => send('/api/machines/role-setup', JSON.stringify(body), 'application/json'),
       upload: (bytes) => send(`/api/machines/role-setup/shot?id=${encodeURIComponent(ask.id)}`, bytes, 'image/png'),

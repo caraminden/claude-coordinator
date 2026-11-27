@@ -17,7 +17,7 @@ import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from 
 import { POOLED_WINDOWS } from '../machine-pick.ts';
 import type { Machine, Project, Ticket } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
-import { cleanCaps, isRole, ROLE_NAMES, ROLES, type Role, type RoleRow } from '../machine-roles.ts';
+import { cleanCaps, isRole, ROLE_NAMES, ROLES, type Role, type RoleRow, roleCannot } from '../machine-roles.ts';
 import { pausedRoles, setPaused, unpause } from '../machine-pause.ts';
 import { HttpError, json, publicOrigin, ownWrites, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { uploadsDir } from './files.ts';
@@ -30,7 +30,7 @@ import { readsDisk, stateCall, syncScript, type StateDeps } from '../machine-syn
 import { askCheckpoint, AWAY_MS, endAway, heardAt, liveOn, machineLink, owned, placedNow, sendFolder, syncTurns } from '../machine-turn.ts';
 import { UNINSTALL } from '../machine-away.ts';
 import { BLOB_BYTES } from '../worker-join.ts';
-import { joinState, makeJoin, redeemJoin } from '../machine-join.ts';
+import { joinState, makeJoin, redeemJoin, storedReport } from '../machine-join.ts';
 import { roleSetupAgentRoutes } from './role-setup.ts';
 import { heavyRoutes } from './heavy.ts';
 
@@ -151,6 +151,9 @@ export async function patchRoles(app: Ctx['app'], session: Ctx['session'], machi
   if (role === 'turns' && body.on === true && !was.on && machine.owner_id !== session.uid) {
     throw new HttpError(403, machine.owner_id === null ? `${machine.name} is a shared machine, and a machine runs only its owner's minions: add that computer again as your own` : 'Only its owner can switch Minion turns on');
   }
+  // What the PC is decides what it can do (H2): a role its agent's report rules out isn't switched on.
+  const cannot = body.on === true && !was.on ? roleCannot(storedReport(machine), role, app.machines.gpuFound(machine)) : null;
+  if (cannot) throw new HttpError(409, `${ROLE_NAMES[role]} can't go on for ${machine.name}: ${cannot}`);
   if (role === 'turns' && body.on === true && !was.on && app.machineCopies?.removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it takes no new turns`);
   // Caps on a person's own machine are set by its owner's own sign-in only (spec section 7, Josh: "On the page").
   if (body.caps !== undefined && machine.owner_id !== null && machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can set its caps');

@@ -131,6 +131,8 @@ export interface MachineReport {
   gpu: string | null;
   screen: boolean | null;
   admin: boolean | null;
+  /** Windows: Hyper-V there and its VMs (null: it can't list them); null off Windows or from an older agent. */
+  hyperv?: { present: boolean; vms: string[] | null } | null;
   agent: number;
 }
 
@@ -156,6 +158,8 @@ export interface MachineRow {
   priority: number | null;
   worker: MachineWorker | null;
   report: MachineReport | null;
+  /** Each role its PC can't do, with why (src/machine-roles.ts rolesCannot); absent from a server before it. */
+  cannot?: Partial<Record<MachineRoleKey, string>>;
   lend: { server: string | null; workspaces: string[] } | null;
   /** What its agent's jobs block lets jobs use, or null: no jobs there. */
   jobs: { gpu?: unknown } | null;
@@ -226,6 +230,8 @@ export interface SetupStep {
 export interface SetupAdmin {
   needs: string[];
   pm: string | null;
+  /** The agent wrote its elevate script with these needs (public/role-setup.js SCRIPT_NEEDS): the card shows the one line that runs it. */
+  script?: true;
 }
 
 /** A role's Set up or Test run, in the role's setup.run (src/role-setup.ts Run). */

@@ -3,7 +3,8 @@
 // back as it runs; what needs an administrator goes back as fixed words (public/role-setup.js ADMIN_NEEDS), never as a
 // command. Node only, no other file: it runs on the owner's PC beside machine-agent.mjs.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 /**
@@ -70,6 +71,7 @@ export async function runSetup(ctx) {
     if (ask.role === 'gpu') return await gpu(ctx, say, end);
     if (ask.role === 'turns') return await turns(ctx, say, end);
     if (ask.role === 'builds') return await builds(ctx, say, end);
+    if (ask.role === 'ci') return await ci(ctx, say, end);
     return await end(false, { why: `This agent can't set up "${ask.role}"` });
   } catch (err) {
     return end(false, { why: `The agent's step failed: ${err.message}` });
@@ -247,7 +249,7 @@ async function builds(ctx, say, end) {
     // As the worker's installer asks: WSL 2 answers --version; the old inbox stub doesn't.
     if ((await ctx.exec('wsl.exe', ['--version'], { timeout: 30_000 })).code !== 0) {
       await say(n, "WSL 2 isn't installed on this PC", 'fail');
-      await ctx.post({ id: ctx.ask.id, admin: { needs: ['wsl'] } });
+      if (!(await elevate(ctx, say, n + 1, ['wsl']))) return;
       return end(false, { why: 'Run the administrator command on the card, restart the PC, then press Set up again.' });
     }
     const wsl = await ctx.exec('wsl.exe', ['-l', '-q'], { timeout: 30_000 });
@@ -323,7 +325,9 @@ async function builds(ctx, say, end) {
 // ---------- Minion turns on Windows: the worker's own installer, in the owner's normal PowerShell ----------
 
 async function turns(ctx, say, end) {
-  if (ctx.platform !== 'win32') return end(false, { why: "On Linux the card shows the worker's install command to run as root." });
+  if (ctx.platform === 'darwin') return end(false, { why: 'Minion turns need Linux, or Windows with WSL.' });
+  // Linux: the worker's installer runs as root, so it goes in the elevate script; Citadel then waits for the worker.
+  if (ctx.platform !== 'win32') return (await elevate(ctx, say, 0, ['worker'])) && end(true);
   await say(0, 'Downloading the worker installer', 'running');
   const res = await fetch(new URL('/worker-setup/install-worker.ps1', ctx.appUrl)).catch((err) => ({ ok: false, status: err.message }));
   if (!res.ok) {
@@ -350,7 +354,7 @@ async function turns(ctx, say, end) {
   });
   if (/WSL 2 isn't installed/.test(r.out)) {
     await say(1, "WSL 2 isn't installed on this PC", 'fail');
-    await ctx.post({ id: ctx.ask.id, admin: { needs: ['wsl'] } });
+    if (!(await elevate(ctx, say, 2, ['wsl']))) return;
     return end(false, { why: 'Run the administrator command on the card, restart the PC, then press Set up again.' });
   }
   if (r.code !== 0) {
@@ -359,4 +363,142 @@ async function turns(ctx, say, end) {
   }
   await say(1, 'Installed the worker', 'ok');
   return end(true);
+}
+
+// ---------- CI runners: the runner agent, installed by the elevate script (One kind of machine H2) ----------
+
+/** The runner agent runs as SYSTEM (Windows) or root (Linux), so its install is the elevate script's; Citadel then waits for it to connect. */
+async function ci(ctx, say, end) {
+  if (ctx.platform === 'darwin') return end(false, { why: 'CI runners need Windows or Linux.' });
+  return (await elevate(ctx, say, 0, [ctx.platform === 'win32' ? 'runner' : 'runner-linux'])) && end(true);
+}
+
+// ---------- the elevate script: one administrator paste for every role (Cara, 2026-11-26, "One agent, helpers hidden") ----------
+
+const TOKEN = /^ccm_\d+_[\w-]{43}$/;
+const ORIGIN = /^https?:\/\/[A-Za-z0-9.:-]+$/;
+/** The worker's caps as install-worker.sh takes them. */
+const CAP_FLAGS = { workers: '--workers', threads: '--threads', memory_gb: '--memory', disk_gb: '--disk' };
+
+/**
+ * What the elevate script holds on this PC: this role's own needs, and those of the other roles that are on and still
+ * wait on an administrator (the ask's `also`, from the server), so turning on several roles is still one paste.
+ * WSL only when it is missing. @param {{ ask: Record<string, any>, platform: string, exec: typeof exec }} ctx @param {string[]} own
+ */
+export async function scriptNeeds(ctx, own) {
+  const also = Array.isArray(ctx.ask.also) ? ctx.ask.also.filter((r) => typeof r === 'string') : [];
+  const needs = new Set(own);
+  if (ctx.platform === 'win32') {
+    if (also.includes('ci')) needs.add('runner');
+    if (!needs.has('wsl') && (also.includes('turns') || also.includes('builds')) && (await ctx.exec('wsl.exe', ['--version'], { timeout: 30_000 })).code !== 0) needs.add('wsl');
+  } else {
+    if (also.includes('ci')) needs.add('runner-linux');
+    if (also.includes('turns')) needs.add('worker');
+  }
+  // The runner agent first, WSL last: its install asks for a restart.
+  const order = ['runner', 'runner-linux', 'worker', 'wsl'];
+  return [...needs].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+}
+
+/**
+ * The elevate script's text: fixed steps for each need, filled in only with this agent's own address and token and the
+ * worker's whole-number caps, so nothing a report or an ask says becomes a command. Throws on an address or token
+ * that isn't one. @param {{ platform: string, appUrl: string, token: string, needs: string[], caps?: Record<string, unknown>, at?: Date }} o
+ */
+export function elevateScript({ platform, appUrl, token, needs, caps = {}, at = new Date() }) {
+  const u = new URL(appUrl).origin;
+  if (!ORIGIN.test(u)) throw new Error(`the app's address ${u} isn't one the script can hold`);
+  if (!TOKEN.test(token ?? '')) throw new Error("this agent's token isn't a machine token");
+  const flags = Object.entries(CAP_FLAGS).flatMap(([k, f]) => (Number.isInteger(caps[k]) && caps[k] > 0 ? [f, String(caps[k])] : []));
+  const head = `Written by Citadel's machine agent on this PC, ${at.toISOString()}, for: ${needs.join(', ')}. It holds this PC's machine token: keep it to yourself.`;
+  if (platform === 'win32') {
+    const lines = [
+      `# ${head}`,
+      '# Run it in PowerShell opened with Run as administrator; running it again updates what it installed.',
+      "$ErrorActionPreference = 'Stop'",
+      "if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'elevate: open PowerShell with Run as administrator and run this again.' -ForegroundColor Red; exit 1 }",
+      `$u = '${u}'`,
+    ];
+    if (needs.includes('runner'))
+      lines.push(
+        "Write-Host 'elevate: installing the CI runner agent'",
+        "$f = Join-Path $env:TEMP 'citadel-install-runner-agent.ps1'",
+        'Invoke-WebRequest "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile $f',
+        `& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f -CitadelUrl $u -MachineToken '${token}'`,
+        "if ($LASTEXITCODE) { Write-Host 'elevate: the CI runner agent did not install: the lines above say why.' -ForegroundColor Red; exit 1 }",
+      );
+    if (needs.includes('wsl'))
+      lines.push(
+        "Write-Host 'elevate: installing WSL 2'",
+        '& wsl.exe --install --no-distribution',
+        "if ($LASTEXITCODE) { Write-Host 'elevate: WSL did not install: the lines above say why.' -ForegroundColor Red; exit 1 }",
+        "Write-Host 'elevate: restart this PC, then press Set up again on the Machines page.'",
+      );
+    lines.push("Write-Host 'elevate: done.'");
+    return `${lines.join('\r\n')}\r\n`;
+  }
+  const lines = [
+    '#!/usr/bin/env bash',
+    `# ${head}`,
+    '# Run it with sudo; running it again updates what it installed.',
+    'set -euo pipefail',
+    `[[ $(id -u) == 0 ]] || { echo 'elevate: run it with sudo' >&2; exit 1; }`,
+    `u='${u}'`,
+    `export CC_MACHINE_TOKEN='${token}'`,
+    'f=$(mktemp)',
+    "trap 'rm -f \"$f\"' EXIT",
+  ];
+  if (needs.includes('worker')) lines.push("echo 'elevate: installing the minion worker'", `curl -fsSL "$u/worker-setup/install-worker.sh" -o "$f"`, `bash "$f" "$u"${flags.length ? ` ${flags.join(' ')}` : ''}`);
+  if (needs.includes('runner-linux')) lines.push("echo 'elevate: installing the CI runner agent'", `curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f"`, 'bash "$f" "$u"');
+  lines.push("echo 'elevate: done.'");
+  return `${lines.join('\n')}\n`;
+}
+
+/** Where the script goes: the folder Connect a computer puts the agent in (public/role-setup.js ELEVATE says it to the card). */
+export const elevateFile = (platform, home = homedir()) => join(home, 'coordinator-agent', platform === 'win32' ? 'elevate.ps1' : 'elevate.sh');
+
+/**
+ * Writes the elevate script for `own` and whatever else is waiting, and tells the card (admin, with `script`): it shows the
+ * one fixed line that runs it. An agent already running as root on Linux (a container, say) runs it itself instead.
+ * True when it is written (or ran), false once it has posted the run's failed end.
+ */
+async function elevate(ctx, say, n, own) {
+  const needs = await scriptNeeds(ctx, own);
+  const file = elevateFile(ctx.platform, ctx.home);
+  let text;
+  try {
+    text = elevateScript({ platform: ctx.platform, appUrl: ctx.appUrl, token: ctx.token, needs, caps: ctx.ask.role === 'turns' && ctx.ask.caps && typeof ctx.ask.caps === 'object' ? ctx.ask.caps : {} });
+    mkdirSync(dirname(file), { recursive: true });
+    // It holds the token.
+    writeFileSync(file, text, { mode: 0o600 });
+    if (ctx.platform !== 'win32') chmodSync(file, 0o600);
+  } catch (err) {
+    const why = `Could not write the administrator script: ${err.message}`;
+    await say(n, why, 'fail');
+    await ctx.post({ id: ctx.ask.id, done: { ok: false, why } });
+    return false;
+  }
+  if (ctx.platform !== 'win32' && ctx.root) {
+    await say(n, 'Running the install as root (this agent runs as root)', 'running');
+    let last = 0;
+    const r = await ctx.exec('bash', [file], {
+      timeout: 45 * 60_000,
+      onLine: (line) => {
+        if (Date.now() - last < 1000) return;
+        last = Date.now();
+        say(n, `Installing: ${line}`, 'running');
+      },
+    });
+    if (r.code !== 0) {
+      const why = `The install stopped: ${tail(r.out) || `status ${r.code}`}`;
+      await say(n, why, 'fail');
+      await ctx.post({ id: ctx.ask.id, done: { ok: false, why } });
+      return false;
+    }
+    await say(n, 'Installed', 'ok');
+    return true;
+  }
+  await ctx.post({ id: ctx.ask.id, admin: { needs, script: true } });
+  await say(n, `Run the administrator command below on this PC (it installs ${needs.length > 1 ? 'everything listed' : 'it'} in one go)`, 'running');
+  return true;
 }

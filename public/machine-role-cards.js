@@ -82,6 +82,9 @@ function changeRole(m, role, fields, label, redraw, shown = fields) {
 function cannot(m, r) {
   if (r.on) return null;
   if (removing(m)) return 'It is being removed: nothing new starts there.';
+  // What the PC is (its agent's report), as the server judges it (src/machine-roles.ts roleCannot).
+  const why = m.cannot?.[/** @type {MachineRoleKey} */ (r.role)];
+  if (why) return why;
   if (r.role === 'ci' && m.report?.os === 'macos') return 'CI runners need Windows or Linux.';
   if (r.role === 'screen' && m.worker?.host && !m.worker.wsl) return 'Windows only, and this PC runs Linux.';
   if (r.role === 'turns' && m.owner_id === null) return 'A machine runs only its owner\'s minions, and this one is shared: add that PC again with "Mine" ticked.';

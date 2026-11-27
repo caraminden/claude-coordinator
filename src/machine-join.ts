@@ -40,6 +40,8 @@ export type MachineReport = {
   screen: boolean | null;
   /** The person running it can become an administrator (UAC, sudo): what CI's setup needs once. */
   admin: boolean | null;
+  /** Windows: Hyper-V there, and its VMs' names (null: Hyper-V is there but the agent may not list them). Null off Windows or from an older agent. */
+  hyperv: { present: boolean; vms: string[] | null } | null;
   /** The agent's own version (an agent that reports nothing is from before, and its row offers Update). */
   agent: number;
 };
@@ -61,6 +63,7 @@ export function cleanReport(v: unknown): MachineReport | null {
   const os = r.os === 'windows' || r.os === 'linux' || r.os === 'macos' ? r.os : null;
   if (!os) return null;
   const w = r.wsl && typeof r.wsl === 'object' ? (r.wsl as Record<string, unknown>) : null;
+  const hv = r.hyperv && typeof r.hyperv === 'object' ? (r.hyperv as Record<string, unknown>) : null;
   return {
     host: text(r.host, 100),
     os,
@@ -73,6 +76,7 @@ export function cleanReport(v: unknown): MachineReport | null {
     gpu: text(r.gpu, 120) || null,
     screen: flag(r.screen),
     admin: flag(r.admin),
+    hyperv: hv ? { present: hv.present === true, vms: Array.isArray(hv.vms) ? [...new Set(hv.vms.map((n) => text(n, 100)).filter(Boolean))].slice(0, 50) : null } : null,
     agent: Number.isInteger(r.agent) ? Math.min(r.agent as number, 1_000_000) : 0,
   };
 }

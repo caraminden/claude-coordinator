@@ -152,11 +152,21 @@ test('waits, with no marker, for disk space and for other processes to let go', 
 });
 
 test('kills a copy that runs past its budget, and leaves the old file in place', () => {
-  // 1 ms: a node process can't even start in that, on any disk. (50 ms passed on GitHub's fast runners: the copy beat it.)
   const db = stopped();
   const ino = statSync(db).ino;
   const rows = settings(db);
-  const r = moveToNoCow(db, fakeOps(), { budgetMs: 1 });
+  // A held write lock keeps the copy in its checkpoint's 1 s busy wait, so it is still running when the budget
+  // ends on any disk; and 1 ms, which a node process can't even start in. A copy left to race a 50 ms budget
+  // won on GitHub's fast runners: 2 MB took 40 ms (#2225, #2227).
+  const writer = new DatabaseSync(db);
+  writer.exec('BEGIN IMMEDIATE');
+  let r: ReturnType<typeof moveToNoCow>;
+  try {
+    r = moveToNoCow(db, fakeOps(), { budgetMs: 1 });
+  } finally {
+    writer.exec('ROLLBACK');
+    writer.close();
+  }
   assert.equal(r.moved, false);
   assert.match(r.note, /the copy took over 0.001 s/);
   assert.equal(statSync(db).ino, ino);

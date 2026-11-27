@@ -622,7 +622,7 @@ A ship, its own check and the early next train never wait for one; main's run st
 No proof starts while a ship's red tests run again alone (`rerun failed files alone`); one already running goes on.
 **One Citadel job at a time** (#1906; Josh, 2026-11-24: "Citadel never runs two heavy jobs at once"): the runs of Citadel's
 own repo go one by one, in the order ship, main's full run, a ship's own check (`check/**`, a light check) or the early next
-train (`early/**`), then heavy jobs and suites started by hand, then flake proofs. A job is let in when it asks; one told to wait is
+train (`early/**`), then heavy jobs and suites started by hand, then flake proofs. A heavy job on GitHub's own runners (`heavy gh-…`, a public repo's light check included: #2242) and a pre-ship run (`pre/**`) aren't on the desktop, so they aren't in that order. A job is let in when it asks; one told to wait is
 stopped and started again by itself. A ship's run stops whatever runs but a flake proof and a job past its 2 hours, main's included, until main's has
 waited 4 hours for ships: then it runs beside them (#1902's cap, two of them then run at once, as with a proof and the caps below). An own check or early run starts only
 on an idle desktop (`ci_busy` in `deploy-queue.sh` before the push, the ask after): its ship goes on without it, and the stopped run

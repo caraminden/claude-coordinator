@@ -354,4 +354,26 @@ runner was busy. Those 96 are the gap.
 - What it can't catch: a file the affected map doesn't pick (#1169's second ship broke 12 files no rule maps to its
   change), and a red that is a skip, not a failure (#1561's realtime test; `citadel-test` passes a skip, CI fails one).
   Replayed against the 16 reds, the failing file was in the ship's own and affected set for 13.
-- Each logs `light check · <branch> · <verdict> · <s>`. Off: `LAND_LIGHT_CHECK=0` or `<state>/light-check-off`.
+- Each logs `light check · <branch> · <verdict> · <s>[ · runner after <s>]`. Off: `LAND_LIGHT_CHECK=0` or `<state>/light-check-off`.
+
+### On GitHub's own runners (#2242, quick train piece 2)
+
+Josh, 2026-11-24, on #1910's card: "Plan approved: build it this way." (the quick check gets a promised runner); Cara,
+2026-11-27, on the card after #1912's count: "Go, with both changes". Nov 22 to 25, 45 of 92 light checks were skipped:
+37 found no idle side runner, 8 another light check holding it. From the own check's switch-off (`<state>/own-check-off`,
+Nov 24, 8:29 PM PST) none ran at all, since only the own check calls one; at #2209's go-live (Nov 27) the side runner was
+busy, the long and check runners offline. So in place of a reservation on the desktop:
+
+- On a public repo (one `repos/<slug>` read: `private` false) the light check runs on GitHub's own runners
+  (`CITADEL_HEAVY_GITHUB=1`): free there, never busy with the desktop's optional work, many at once, so no idle gate
+  and no lock. A private repo keeps the side runner and its gates as above.
+- heavy-ci.ts names such a run `heavy gh-…` (`heavy shipgh-…` for a ship's): `kindOf` in `src/ci-hold.ts` and
+  `ci_busy` leave it alone, as #2210's `pre/` runs. Before, the hold took a GitHub-hosted light check for a desktop
+  check and cancelled it (the replay shows run 46075091331, Nov 27 2:11 PM PST).
+- GitHub not starting it within `LAND_LIGHT_CHECK_QUEUE` (360 s; a ship's 20 shards can take the account's jobs for
+  about 5 min) is no runner: heavy-ci.ts cancels it and exits 120, and the ship joins the line unchecked, saying
+  `no runner on GitHub's own runners took it (<why>)`, logged `skipped: no runner on …`. Its retro line gives the wait
+  for a runner (`runner after <s>`), from heavy-ci.ts's `CITADEL_HEAVY_QUEUED_FILE`.
+- A ship touching `public/` also runs `test/instant-open-browser.test.ts` (#1912's change 1: the map leaves it out for
+  its 41 CPU-s, and it went red in burn-in on front-end ships twice). A light check that passed took 67 s at the median
+  (90th percentile 99 s), within its 240 s for the tests.

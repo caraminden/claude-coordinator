@@ -4,12 +4,12 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { CLOUD_SOURCE, CLOUD_SWITCH, cloudCostUsd, keepNights, nightSightings, readNight, SWEEP, sweepsKey, type SweepNight } from '../src/cloud-flakes.ts';
+import { CLOUD_SOURCE, cloudCostUsd, HELPERS_SWITCH, keepNights, nightSightings, readNight, SWEEP, sweepsKey, type SweepNight } from '../src/cloud-flakes.ts';
 import { Store } from '../src/db.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
 import { projectRoutes } from '../src/routes/projects.ts';
 import { flakeBrief } from '../src/flakes.ts';
-import { batchStep, fits, flag, judge, readBatches, sessionText, switchOff } from '../tools/cloud-flake.ts';
+import { batchStep, fits, flag, helpersOff, io, judge, proof, readBatches, sessionText, sweep } from '../tools/cloud-flake.ts';
 
 // Flake repeat-runs in cloud sessions (#2187): a night's results as a minion posts them, the cloud sightings they make, which
 // the Test health tab shows as cloud-only and the fix-minion count never sees, and the VM script's verdicts.
@@ -92,6 +92,8 @@ test("a cloud sighting never hides a land's, names no land's minion, and is coun
   const brief = flakeBrief(file, row.count - row.cloud, [], [], row.cloud).message;
   assert.match(brief, /passed alone 1 time in the last 14 days \(the Test health tab on the CI page counts these\), and the nightly cloud sweep saw it fail 1 time among 10 copies/);
   assert.doesNotMatch(flakeBrief(file, 3, []).message, /cloud sweep saw/);
+  assert.doesNotMatch(brief, /cloud-flake\.ts/, 'cloud helpers off: the brief reads as it did before them');
+  assert.match(flakeBrief(file, 3, [], [], 0, true).message, /tools\/cloud-flake\.ts proof test\/near\.test\.ts/);
 });
 
 test("a proof's failure seen in the cloud stands; only a file the cloud proved nothing about runs again at home", () => {
@@ -131,11 +133,23 @@ test('a minion posts its night; the tab shows it beside the flakes, with its cos
   const project = store.createProject('Near scheme', null);
   const t = store.createTicket({ project_id: project.id, title: 'Nightly cloud flake sweep', permission_mode: 'x', created_by: 'T' });
   const night = { sha: 'b'.repeat(40), sessions: 1, minutes: 30, files: [row('test/x.test.ts', 'flaky', 1), row('test/y.test.ts', 'clean')] };
-  const req = Object.assign(new (await import('node:stream')).PassThrough(), { headers: { 'content-type': 'application/json' } });
-  req.end(JSON.stringify(night));
+  const { PassThrough } = await import('node:stream');
+  const body = (b: unknown) => Object.assign(new PassThrough(), { headers: { 'content-type': 'application/json' } }).end(JSON.stringify(b));
+  const tab = { project: { ...store.getProject(project.id)!, repo_dir: null, land_mode: 'land' } };
+  // The cloud helpers switch off (the default): nothing posts, nothing picks, no sweep on the tab.
+  assert.equal((await call('POST', '/api/tickets/:ticket/cloud-sweep', { req: body(night), ticket: store.getTicket(t.id) })).status, 409);
+  assert.equal((await call('GET', '/api/tickets/:ticket/cloud-sweep/picks', { url: new URL('http://x/'), ticket: store.getTicket(t.id) })).status, 409);
+  assert.equal((await call('GET', '/api/projects/:project/test-health', tab)).body.sweeps, undefined);
+  assert.equal((await call('GET', '/api/tickets/:ticket/cloud-helpers/switch', { ticket: store.getTicket(t.id) })).body.on, false);
+  store.setSetting(HELPERS_SWITCH, true);
+  after(() => store.setSetting(HELPERS_SWITCH, null));
+  assert.equal((await call('GET', '/api/tickets/:ticket/cloud-helpers/switch', { ticket: store.getTicket(t.id) })).body.on, true);
+  const req = body(night);
   const posted = await call('POST', '/api/tickets/:ticket/cloud-sweep', { req, ticket: store.getTicket(t.id) });
   assert.deepEqual([posted.status, posted.body.sightings, posted.body.costUsd], [200, 1, 0.75]);
-  const health = await call('GET', '/api/projects/:project/test-health', { project: { ...store.getProject(project.id)!, repo_dir: null, land_mode: 'land' } });
+  assert.equal((await call('POST', '/api/tickets/:ticket/cloud-sweep', { req: body(night), ticket: store.getTicket(t.id) })).status, 409, 'a retried post counts nothing twice');
+  assert.equal((await call('POST', '/api/tickets/:ticket/cloud-sweep', { req: body({ ...night, files: [{ ...row('test/y.test.ts', 'clean'), copies: 1.5 }] }), ticket: store.getTicket(t.id) })).status, 400, 'copies are whole');
+  const health = await call('GET', '/api/projects/:project/test-health', tab);
   assert.deepEqual(
     health.body.flakes.map((f: { file: string; cloud: number; count: number }) => [f.file, f.count, f.cloud]),
     [['test/x.test.ts', 1, 1]],
@@ -147,26 +161,39 @@ test('a minion posts its night; the tab shows it beside the flakes, with its cos
   assert.equal((await call('POST', '/api/tickets/:ticket/cloud-sweep', { req: bad, ticket: store.getTicket(t.id) })).status, 400);
 });
 
-test("the admin's cloud switch (#2193's, default off) keeps a turn's runs at home until it's set on", async () => {
-  const project = store.createProject('Switch scheme', null);
-  const t = store.createTicket({ project_id: project.id, title: 'x', permission_mode: 'x', created_by: 'T' });
-  const on = async () => (await call('GET', '/api/tickets/:ticket/cloud-sweep/switch', { ticket: store.getTicket(t.id) })).body;
-  assert.deepEqual(await on(), { on: false }, 'unset reads as off');
-  store.setSetting(CLOUD_SWITCH, true);
-  assert.deepEqual(await on(), { on: true });
-  store.setSetting(CLOUD_SWITCH, null);
-  const saved = [process.env.COORDINATOR_API, process.env.COORDINATOR_TICKET];
+test('with the cloud helpers switch off, no cloud run starts: a proof runs at home and the sweep runs nothing', async () => {
+  const started: string[] = [];
+  const homed: string[] = [];
+  const saved = { ...io };
+  const env = [process.env.COORDINATOR_API, process.env.COORDINATOR_TICKET, process.env.CITADEL_CLOUD];
+  let on = false;
+  Object.assign(io, {
+    noCloud: () => null, // everything else ready for the cloud
+    helpersOff: () => helpersOff(async () => ({ on })),
+    home: (files: string[], _: number, why: string) => (homed.push(`${files.join()}: ${why}`), true),
+    push: (src: string) => started.push(`push ${src}`),
+    drop: () => {},
+    start: async () => (started.push('session'), { batches: [], started: true, minutes: 1, sha: null, error: null }),
+  });
   try {
-    delete process.env.COORDINATOR_API;
-    assert.equal(await switchOff(async () => ({ on: false })), null, 'by hand, outside a turn, nothing to ask');
     Object.assign(process.env, { COORDINATOR_API: 'http://x', COORDINATOR_TICKET: '1' });
-    assert.equal(await switchOff(async () => ({ on: true })), null);
-    assert.match((await switchOff(async () => ({ on: false }))) ?? '', /off for every scheme/);
-    assert.match((await switchOff(async () => Promise.reject(new Error('HTTP 502')))) ?? '', /couldn't read.*502/, 'unread is off');
+    assert.equal(await proof(['test/cloud-flakes.test.ts'], 10, 1, null), 0);
+    assert.equal(await sweep(10, 10, true), 0);
+    assert.deepEqual(started, [], 'a cloud run started with the switch off');
+    assert.match(homed.join('\n'), /^test\/cloud-flakes\.test\.ts: Citadel's cloud helpers are off/);
+    on = true;
+    await proof(['test/cloud-flakes.test.ts'], 10, 1, null);
+    assert.equal(started.length, 2, 'switched on, the same proof reaches the cloud (so the check above can fail)');
+    Object.assign(io, { helpersOff: () => helpersOff(async () => Promise.reject(new Error('HTTP 502'))) });
+    assert.equal(await sweep(10, 10, true), 1, "a switch it couldn't read is no clean night");
+    delete process.env.COORDINATOR_API;
+    assert.match((await helpersOff(async () => ({ on: true })))?.why ?? '', /CITADEL_CLOUD=1/, 'by hand outside a turn: off unless asked for');
   } finally {
+    Object.assign(io, saved);
     for (const [k, v] of [
-      ['COORDINATOR_API', saved[0]],
-      ['COORDINATOR_TICKET', saved[1]],
+      ['COORDINATOR_API', env[0]],
+      ['COORDINATOR_TICKET', env[1]],
+      ['CITADEL_CLOUD', env[2]],
     ] as const)
       v === undefined ? delete process.env[k] : (process.env[k] = v);
   }

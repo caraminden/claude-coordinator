@@ -18,11 +18,15 @@ export { CLOUD_SOURCE };
  * but never under a session's start (CLOUD.costUsd.start, #2147's measure of a session's first 20 minutes, ~$0.40). */
 export const cloudCostUsd = (minutes: number, sessions = 1) => Math.round(Math.max(minutes * 2.5, sessions * CLOUD.costUsd.start * 100)) / 100;
 
-/** The admin switch for every scheme's cloud sessions, default off: #2193's CLOUD_SWITCH in src/cloud-pool.ts, read the same way
- * (on only when set true). tools/cloud-flake.ts starts sessions itself, not through CloudPool.takes(), so it asks this through
- * GET /api/tickets/:ticket/cloud-sweep/switch and runs at home while it's off.
- * shortcut: a copy of #2193's key, import CLOUD_SWITCH once both are on main. */
-export const CLOUD_SWITCH = 'cloud-sessions';
+/**
+ * Citadel's cloud helpers switch: whether a minion's turn may hand work to a cloud session it waits on (this file's flake runs;
+ * #2200's `citadel-cloud run` reuses it), in every scheme. Off unless an admin set it true (Cara, 2026-11-27, "Ship dark, switch
+ * off"): off, no minion or schedule starts a cloud run, the sweep's posts are refused and the Test health tab shows no sweep.
+ * Apart from #2193's `cloud-sessions` switch, which is for minions whose turns run as cloud sessions.
+ */
+export const HELPERS_SWITCH = 'cloud-helpers';
+export const HELPERS_OFF = "Citadel's cloud helpers are off (an admin switch, off by default)";
+export const helpersOn = (store: { getSetting<T>(key: string): T | null }) => store.getSetting<boolean>(HELPERS_SWITCH) === true;
 
 export const SWEEP = {
   /** Files a night reruns, and copies at once of each (one batch, under load, as tools/flake-proof.sh runs it). */
@@ -72,15 +76,16 @@ export function readNight(body: unknown, minion: number | null, now: number): Sw
   if (!body || typeof body !== 'object') return 'the body must be a JSON object';
   const b = body as Record<string, unknown>;
   const num = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? v : null);
-  const sessions = num(b.sessions, 20);
+  const whole = (v: unknown, max: number) => (Number.isInteger(v) ? num(v, max) : null);
+  const sessions = whole(b.sessions, 20);
   const minutes = num(b.minutes, 24 * 60);
   if (sessions == null || minutes == null) return 'sessions (0 to 20) and minutes (0 to 1440) must be numbers';
   if (!Array.isArray(b.files) || b.files.length > 50) return 'files must be a list of at most 50';
   const files: SweepFile[] = [];
   for (const raw of b.files as unknown[]) {
     const f = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    const copies = num(f.copies, 100);
-    const failed = num(f.failed, 100);
+    const copies = whole(f.copies, 100);
+    const failed = whole(f.failed, 100);
     if (typeof f.file !== 'string' || !FILE.test(f.file) || f.file.split('/').includes('..')) return `a file must be a repo path: ${String(f.file).slice(0, 80)}`;
     if (!(VERDICTS as readonly unknown[]).includes(f.verdict)) return `${f.file}: verdict must be one of ${VERDICTS.join(', ')}`;
     if (copies == null || failed == null || failed > copies) return `${f.file}: copies and failed must be counts, failed no more than copies`;

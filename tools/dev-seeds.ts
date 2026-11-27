@@ -18,7 +18,7 @@ import { pacificDay } from '../src/pacific.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { loopKey, type LoopState } from '../src/minion-relay.ts';
 import { queueKey } from '../src/minion-queue.ts';
-import { sweepsKey } from '../src/cloud-flakes.ts';
+import { HELPERS_SWITCH, sweepsKey } from '../src/cloud-flakes.ts';
 import { sleepKey } from '../src/needs.ts';
 import { startCard, startHoldKey, startNote } from '../src/minion-budget.ts';
 import { CARD_OPTIONS } from '../src/welcome.ts';
@@ -1555,6 +1555,7 @@ mock.boards('#takes', { boards: [
           ]);
       // #2187: two nights of the cloud sweep, the last with one flaky file (the cloud-only one above) and one stopped.
       const sweepFile = (file: string, verdict: 'clean' | 'flaky' | 'stopped', failed = 0, seconds = 40) => ({ file, copies: 10, failed, verdict, seconds, detail: verdict === 'flaky' ? `failing tests:\n✖ ${file} › paints once (timed out)` : '' });
+      c.store.setSetting(HELPERS_SWITCH, true); // cloud helpers on, so the tab shows the sweep
       c.store.setSetting(sweepsKey(c.project.id), [
         {
           at: now - 5 * 3_600_000,

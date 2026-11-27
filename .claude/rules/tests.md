@@ -42,6 +42,6 @@ path is not found). A server
 also stops its own turns on finding its test gone (`src/exit-with-parent.ts`), and each CI job clears what is left
 as it starts and ends (`test/ci-leftovers.ts`, #1900).
 
-Before the first hand-off, run `tools/burn-in.sh <test file> [copies]` on every test file you touched, one call per file (the second argument is copies, not a file): old tests with shared state fail on whoever next edits them. A failure in 10 of 10 copies is a real failure, not a race. Repeats of a flaky file you are fixing go to a cloud session instead, off perigee's CPU: `tools/cloud-flake.ts proof <file>...` as a background command in your turn, then `citadel-wait pid` (#2187; not `citadel-job`, which leaves out your Claude login; it falls back to the burn-in at home by itself, `--help`). Editing a file a judge pins needs `node tools/judge-replay.ts <id> --record`, or `test/judges.test.ts` goes red.
+Before the first hand-off, run `tools/burn-in.sh <test file> [copies]` on every test file you touched, one call per file (the second argument is copies, not a file): old tests with shared state fail on whoever next edits them. A failure in 10 of 10 copies is a real failure, not a race. Editing a file a judge pins needs `node tools/judge-replay.ts <id> --record`, or `test/judges.test.ts` goes red.
 
 Locally a minion runs only the tests it changed, the ones named after the files it changed and the repo-wide list (`citadel-test`, or `--affected`); the tests that merely use a changed file are CI's (#1928). `citadel-test --wide` runs them too.

@@ -33,7 +33,7 @@ import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
-import { CLOUD_SWITCH, keepNights, nightSightings, readNight, SWEEP, type SweepNight, sweepsKey } from '../cloud-flakes.ts';
+import { HELPERS_OFF, helpersOn, keepNights, nightSightings, readNight, SWEEP, type SweepNight, sweepsKey } from '../cloud-flakes.ts';
 import { LAND_REDS_MS, landReds, readRetro } from '../land-reds.ts';
 import { runsOnPick } from './workers.ts';
 import { MODEL_REQUIRED, scheduleFields, scheduleTemplate, scheduleView } from './schedule-api.ts';
@@ -1632,7 +1632,8 @@ export const projectRoutes: Route[] = [
       const since = Date.now() - LAND_REDS_MS;
       const read = (await app.ciHealth?.runsSince(project, since)) ?? null;
       const landRed = read && { ...landReds(read.runs, await readRetro(projectSharedDir(app.dataDir, project.id), since, Date.now()), since), partial: read.partial };
-      const sweeps = (store.getSetting<SweepNight[]>(sweepsKey(project.id)) ?? []).slice(0, 7);
+      // The cloud helpers switch off (#2187, the default): no sweep section, as before cloud helpers.
+      const sweeps = helpersOn(store) ? (store.getSetting<SweepNight[]>(sweepsKey(project.id)) ?? []).slice(0, 7) : undefined;
       json(res, 200, { fast: project.land_mode === 'fast' ? (app.fastMode?.view(project.id) ?? null) : null, flakes, landReds: landRed, sweeps, now: Date.now() });
     },
   },
@@ -1645,7 +1646,7 @@ export const projectRoutes: Route[] = [
       const file = url.searchParams.get('file') ?? '';
       const row = app.store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file);
       if (!row) throw new HttpError(404, 'No flake of that file in the last 14 days');
-      json(res, 200, flakeBrief(file, row.count - row.cloud, app.store.flakeDetails(project.id, file), app.store.flakeMessages(project.id, file, Date.now() - FLAKE_WINDOW_MS).messages, row.cloud));
+      json(res, 200, flakeBrief(file, row.count - row.cloud, app.store.flakeDetails(project.id, file), app.store.flakeMessages(project.id, file, Date.now() - FLAKE_WINDOW_MS).messages, row.cloud, helpersOn(app.store)));
     },
   },
 
@@ -1653,11 +1654,11 @@ export const projectRoutes: Route[] = [
   // only sightings off the cloud (its own don't pick themselves), and the night it posts back, on the Test health tab.
   {
     method: 'GET',
-    path: '/api/tickets/:ticket/cloud-sweep/switch',
+    path: '/api/tickets/:ticket/cloud-helpers/switch',
     who: ['minion'],
-    refuse: "Only a minion's turn runs the cloud sweep",
+    refuse: "Only a minion's turn hands work to a cloud helper",
     handler({ res, app }) {
-      json(res, 200, { on: app.store.getSetting<boolean>(CLOUD_SWITCH) === true });
+      json(res, 200, { on: helpersOn(app.store) });
     },
   },
   {
@@ -1666,6 +1667,7 @@ export const projectRoutes: Route[] = [
     who: ['minion'],
     refuse: "Only a minion's turn runs the cloud sweep",
     handler({ res, url, app, ticket }) {
+      if (!helpersOn(app.store)) throw new HttpError(409, HELPERS_OFF);
       const n = Math.min(50, Math.max(1, Number(url.searchParams.get('n')) || SWEEP.files));
       json(res, 200, { files: app.store.flakeCounts(ticket.project_id, Date.now() - FLAKE_WINDOW_MS, n, true).map((f) => f.file) });
     },
@@ -1676,9 +1678,13 @@ export const projectRoutes: Route[] = [
     who: ['minion'],
     refuse: "Only a minion's turn runs the cloud sweep",
     async handler({ req, res, app, ticket }) {
+      if (!helpersOn(app.store)) throw new HttpError(409, HELPERS_OFF);
       const night = readNight(await readJson(req), ticket.number ?? null, Date.now());
       if (typeof night === 'string') throw new HttpError(400, night);
       const { store } = app;
+      const last = store.getSetting<SweepNight[]>(sweepsKey(ticket.project_id))?.[0];
+      // A retried post of the same night would count its sightings twice.
+      if (last && last.minion === night.minion && last.sha === night.sha && JSON.stringify(last.files) === JSON.stringify(night.files)) throw new HttpError(409, 'That night is already posted');
       store.setSetting(sweepsKey(ticket.project_id), keepNights(store.getSetting<SweepNight[]>(sweepsKey(ticket.project_id)) ?? [], night));
       const seen = nightSightings(night);
       if (seen.length) store.addFlakeEvents(ticket.project_id, ticket.id, night.sha, night.at, seen);

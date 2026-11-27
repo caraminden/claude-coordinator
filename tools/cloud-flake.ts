@@ -8,8 +8,8 @@
 //       Your flake proof: each file's batches of <copies> at once under load (tools/flake-proof.sh's shape), all in ONE session,
 //       on your branch's committed tip (pushed to a scratch branch for it, deleted after). Exits 0 when every batch was clean.
 //       It runs at home instead (tools/burn-in.sh, a heavy slot, at most 4 copies) when you have no cloud setup (no `claude`,
-//       a repo not on GitHub, CITADEL_CLOUD=0, the admin's cloud switch off (Settings, every scheme's cloud sessions; off by
-//       default), or a session that won't start: your claude.ai account needs GitHub connected),
+//       a repo not on GitHub, CITADEL_CLOUD=0, Citadel's cloud helpers switch off (an admin's, off by default), or a session
+//       that won't start: your claude.ai account needs GitHub connected),
 //       for a file whose batch won't fit a 25-minute step (by --seconds: one run alone × copies / 2), and for a file the cloud
 //       stopped at its step limit or skipped a test on (a tool the VM lacks: it proves nothing there).
 //       A clean cloud proof is your own evidence; the fix's held proof is still flake-proof.yml (the Test health tab's count).
@@ -17,7 +17,7 @@
 //       The nightly sweep (a schedule's minion runs it): the scheme's flakiest files of 14 days, one batch each, on main's tip
 //       on GitHub; the night (results, sessions × minutes, its cost) goes to the Test health tab, and each flaky file there
 //       becomes a cloud sighting, marked cloud-only, which never refuses a ship or starts a fix minion. Exits 1 when a
-//       picked file came back with no result (the night says which). While the admin's cloud switch is off it runs nothing.
+//       picked file came back with no result (the night says which). While the cloud helpers switch is off it runs nothing.
 //
 // The session runs tools/cloud-flake-vm.sh's steps, each under 25 minutes, and pushes its results to a cloud/ branch, which
 // src/cloud-turn.mjs (the same driver a cloud turn uses) reads back and deletes. Citadel's repo only: the VM script runs node tests.
@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CLOUD, cloudBranch } from '../src/cloud-pool.ts';
-import { cloudCostUsd, readNight, SWEEP, type SweepFile } from '../src/cloud-flakes.ts';
+import { cloudCostUsd, HELPERS_OFF, readNight, SWEEP, type SweepFile } from '../src/cloud-flakes.ts';
 import { githubRepo } from '../src/github.ts';
 import { jsonLines } from '../src/json-lines.ts';
 
@@ -146,17 +146,28 @@ function noCloud(): string | null {
 }
 
 /**
- * Why the admin's switch keeps this turn off the cloud (#2193's `cloud-sessions` setting, default off), or null. Asked of the
- * server in a minion's turn; a person running it by hand outside one is on their own login and skips it. `read` is for tests.
+ * Why Citadel's cloud helpers switch keeps this run at home (HELPERS_SWITCH, src/cloud-flakes.ts: off unless an admin set it on;
+ * Cara, 2026-11-27, "Ship dark, switch off"), or null when it's on. A minion's turn asks the server; outside one (a person by
+ * hand) it's off unless CITADEL_CLOUD=1. `failed`: the switch couldn't be read, so it counts as off.
  */
-export async function switchOff(read = () => api('cloud-sweep/switch')): Promise<string | null> {
-  if (!process.env.COORDINATOR_API || !process.env.COORDINATOR_TICKET) return null;
+export async function helpersOff(read = () => api('cloud-helpers/switch')): Promise<{ why: string; failed: boolean } | null> {
+  if (!process.env.COORDINATOR_API || !process.env.COORDINATOR_TICKET) return process.env.CITADEL_CLOUD === '1' ? null : { why: "outside a minion's turn, cloud helpers need CITADEL_CLOUD=1", failed: false };
   try {
-    return ((await read()) as { on?: unknown }).on === true ? null : "cloud sessions are off for every scheme (the admin's switch)";
+    return ((await read()) as { on?: unknown }).on === true ? null : { why: HELPERS_OFF, failed: false };
   } catch (err) {
-    return `couldn't read the admin's cloud switch: ${(err as Error).message}`;
+    return { why: `couldn't read the cloud helpers switch: ${(err as Error).message}`, failed: true };
   }
 }
+
+/** What starts or touches a cloud run, swapped out by tests (test/cloud-flakes.test.ts: none of it may run while the switch is off). */
+export const io = {
+  noCloud: () => noCloud(),
+  helpersOff: () => helpersOff(),
+  home: (files: string[], copies: number, why: string) => home(files, copies, why),
+  push: (src: string) => git('push', '-q', 'origin', `HEAD:refs/heads/${src}`),
+  drop: (src: string) => git('push', '-q', 'origin', '--delete', src),
+  start: (p: Plan) => session(p),
+};
 
 function home(files: string[], copies: number, why: string): boolean {
   let ok = true;
@@ -182,35 +193,35 @@ export function judge(files: string[], batches: number, ran: SweepFile[]): { aga
   return { again, clean: ran.every((b) => b.verdict === 'clean' || (unproven(b) && again.includes(b.file))) };
 }
 
-async function proof(files: string[], copies: number, batches: number, seconds: number | null): Promise<number> {
+export async function proof(files: string[], copies: number, batches: number, seconds: number | null): Promise<number> {
   for (const f of files) if (!existsSync(join(repo, f))) throw new Error(`no such file: ${f}`);
-  const off = noCloud() ?? (await switchOff());
-  if (off) return home(files, copies, off) ? 0 : 1;
+  const off = (await io.helpersOff())?.why ?? io.noCloud();
+  if (off) return io.home(files, copies, off) ? 0 : 1;
   const tooBig = files.filter((f) => !fits(seconds, copies));
   const cloud = files.filter((f) => !tooBig.includes(f));
-  let ok = !tooBig.length || home(tooBig, copies, `a batch of ${copies} would run over a ${CLOUD.stepMinutes}-minute step`);
+  let ok = !tooBig.length || io.home(tooBig, copies, `a batch of ${copies} would run over a ${CLOUD.stepMinutes}-minute step`);
   if (!cloud.length) return ok ? 0 : 1;
   if (git('status', '--porcelain', '--untracked-files=no')) console.log('cloud-flake: uncommitted changes stay here: the session runs your last commit');
   const id = Number(process.env.COORDINATOR_TICKET) || 0;
   const src = `cloud/src-t${id}-${Date.now().toString(36)}`;
-  git('push', '-q', 'origin', `HEAD:refs/heads/${src}`);
+  io.push(src);
   try {
-    const ran = await session({ ref: src, branch: cloudBranch(id, Date.now()), steps: cloud.flatMap((f) => Array.from({ length: batches }, () => batchStep(f, copies))) });
+    const ran = await io.start({ ref: src, branch: cloudBranch(id, Date.now()), steps: cloud.flatMap((f) => Array.from({ length: batches }, () => batchStep(f, copies))) });
     if (!ran.batches) {
       console.log(`cloud-flake: no results from the cloud: ${ran.error}`);
       if (ran.started) console.log(costLine(ran.minutes));
-      return home(cloud, copies, 'the cloud session gave no results') && ok ? 0 : 1;
+      return io.home(cloud, copies, 'the cloud session gave no results') && ok ? 0 : 1;
     }
     for (const b of ran.batches) console.log(line(b));
     console.log(costLine(ran.minutes));
     const { again, clean } = judge(cloud, batches, ran.batches);
     ok = clean && ok;
-    if (again.length) ok = home(again, copies, 'the cloud stopped it, skipped a test or ran fewer batches') && ok;
+    if (again.length) ok = io.home(again, copies, 'the cloud stopped it, skipped a test or ran fewer batches') && ok;
     console.log(`cloud-flake: ${ok ? 'every batch clean' : 'not clean'}`);
     return ok ? 0 : 1;
   } finally {
     try {
-      git('push', '-q', 'origin', '--delete', src);
+      io.drop(src);
     } catch (err) {
       console.log(`cloud-flake: couldn't delete ${src}: ${(err as Error).message}`);
     }
@@ -231,14 +242,14 @@ async function api(path: string, body?: unknown): Promise<unknown> {
 }
 
 /** `post` false: print the night instead of posting it. CLOUD_FLAKE_REF: sweep another branch on origin (a try of a change to the VM script before it reaches main). */
-async function sweep(n: number, copies: number, post: boolean): Promise<number> {
-  const off = noCloud();
-  if (off) throw new Error(`the sweep runs only in the cloud: ${off}`);
-  const switched = await switchOff();
+export async function sweep(n: number, copies: number, post: boolean): Promise<number> {
+  const switched = await io.helpersOff();
   if (switched) {
-    console.log(`cloud-flake: no sweep tonight: ${switched}; nothing ran`);
-    return 0;
+    console.log(`cloud-flake: no sweep tonight: ${switched.why}; nothing ran`);
+    return switched.failed ? 1 : 0;
   }
+  const off = io.noCloud();
+  if (off) throw new Error(`the sweep runs only in the cloud: ${off}`);
   if (post && !process.env.COORDINATOR_TOKEN) throw new Error("no turn token here to post the night with: run it in a minion's turn, or with --no-post");
   git('fetch', '-q', 'origin', process.env.CLOUD_FLAKE_REF || 'main');
   const onMain = new Set(git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', 'test').split('\n'));
@@ -252,7 +263,7 @@ async function sweep(n: number, copies: number, post: boolean): Promise<number> 
   const id = Number(process.env.COORDINATOR_TICKET) || 0;
   console.log(`cloud-flake: sweeping ${picks.length} files × ${copies} copies on ${process.env.CLOUD_FLAKE_REF || 'main'}: ${picks.join(', ')}`);
   const ref = process.env.CLOUD_FLAKE_REF || 'main';
-  const ran = await session({ ref, branch: cloudBranch(id, Date.now()), steps: picks.map((f) => batchStep(f, copies)) });
+  const ran = await io.start({ ref, branch: cloudBranch(id, Date.now()), steps: picks.map((f) => batchStep(f, copies)) });
   for (const b of ran.batches ?? []) console.log(line(b));
   console.log(costLine(ran.minutes));
   const missing = ran.batches ? picks.filter((f) => !ran.batches!.some((b) => b.file === f)) : [];

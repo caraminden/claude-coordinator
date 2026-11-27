@@ -350,13 +350,10 @@ test("Builds refuses a Mac, and images that aren't published or aren't pinned by
   assert.throws(() => t.setups.start(t.machine(), 'builds', 'setup', t.josh), /aren't all published yet \(citadel-build-node, citadel-build-rust\)/);
   assert.equal(t.sent.length, 0);
   assert.throws(() => buildImages(imagesFile({ android: { image: 'ghcr.io/caraminden/citadel-build-android:latest', mb: 1 } })), /pinned by digest/);
-  // The shipped file reads: published or not, it is the shape both sides take.
-  try {
-    const shipped = buildImages();
-    assert.ok(Object.values(shipped.images).every((i) => /^ghcr\.io\/caraminden\/citadel-build-[a-z]+@sha256:[a-f0-9]{64}$/.test(i)));
-    assert.deepEqual(shipped.volumes, ['citadel-gradle', 'citadel-cargo', 'citadel-npm']);
-  } catch (err) {
-    assert.match((err as Error).message, /aren't all published yet/);
-  }
+  // The shipped file: all three published, each pinned by digest on Citadel's registry.
+  const shipped = buildImages();
+  assert.deepEqual(Object.keys(shipped.images).sort(), ['android', 'node', 'rust']);
+  for (const [kind, image] of Object.entries(shipped.images)) assert.match(image, new RegExp(`^ghcr\\.io/caraminden/citadel-build-${kind}@sha256:[a-f0-9]{64}$`));
+  assert.deepEqual(shipped.volumes, ['citadel-gradle', 'citadel-cargo', 'citadel-npm']);
   assert.ok(JSON.parse(readFileSync(BUILD_IMAGES_FILE, 'utf8')).images.android);
 });

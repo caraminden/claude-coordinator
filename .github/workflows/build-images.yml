@@ -10,6 +10,8 @@ on:
     branches-ignore: [main, 'land/**', 'check/**', 'early/**']
     paths:
       - 'tools/build-images/**'
+      - '!tools/build-images/images.json' # pasting the digests in rebuilds nothing
+      - '!tools/build-images/README.md'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
 

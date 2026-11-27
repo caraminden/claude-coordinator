@@ -1,9 +1,22 @@
 {
-  "about": "Citadel's build images for the Builds role (H1, tools/build-images/README.md), pinned by digest. .github/workflows/build-images.yml prints these lines after each push; the server reads this file and hands it to a machine's agent in each Builds Set up. null: not published yet.",
+  "about": "Citadel's build images for the Builds role (H1, tools/build-images/README.md), pinned by digest. .github/workflows/build-images.yml prints these lines after each push; the server reads this file and hands it to a machine's agent in each Builds Set up. Built from fce85339e by run 45938049159 (2026-11-26); mb is the unpacked size podman reports.",
   "images": {
-    "android": { "image": null, "mb": null },
-    "node": { "image": null, "mb": null },
-    "rust": { "image": null, "mb": null }
+    "android": {
+      "image": "ghcr.io/caraminden/citadel-build-android@sha256:46baaf8c7fff80657f3637c283d7ba954f119a13a6caa367b1e024d6ec60ddcb",
+      "mb": 1296
+    },
+    "node": {
+      "image": "ghcr.io/caraminden/citadel-build-node@sha256:a88cddfd42a58f64c78b3d7fc2c3b4b5c72f4942eb756176ae7a5b3f693b9c82",
+      "mb": 178
+    },
+    "rust": {
+      "image": "ghcr.io/caraminden/citadel-build-rust@sha256:7e3fcc2924ca2c64f592cd822b1c8aa0522a963a24fdf48b2858655e9ece3401",
+      "mb": 419
+    }
   },
-  "volumes": ["citadel-gradle", "citadel-cargo", "citadel-npm"]
+  "volumes": [
+    "citadel-gradle",
+    "citadel-cargo",
+    "citadel-npm"
+  ]
 }

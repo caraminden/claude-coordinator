@@ -138,7 +138,7 @@ test('a PC the scheme is unticked on is never picked; with none lending, waiting
   assert.deepEqual(w.started, ['add Delve linux cara-desktop']);
 });
 
-test('an open no-machine card is withdrawn once a PC lends the scheme CI or serves its repo, not just because the queue reads empty (#2220)', async () => {
+test('an open no-machine card is withdrawn once a PC lends the scheme CI, and on nothing less (#2220)', async () => {
   const w = world();
   const other = w.store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras.git', w.cara.id);
   const pc = w.pc('cara-desktop', w.cara.id, [other.id]);
@@ -146,8 +146,9 @@ test('an open no-machine card is withdrawn once a PC lends the scheme CI or serv
   w.queued.set('caraminden/delve', new Set(['delve-ci-linux']));
   await w.auto.pass();
   assert.equal(w.cards.length, 1);
-  // ShipWatch's read goes empty (a restart, a cancelled job): nothing lends Delve CI still, so the card stays true.
+  // ShipWatch's read goes empty (a restart, a cancelled job), or a leftover runner shows that remove() takes off: still true.
   w.queued.clear();
+  w.samples.set(`${pc.id}:linux`, new Set(['caraminden/delve']));
   await w.auto.pass();
   assert.equal(w.settled.length, 0);
   // Someone ticks Delve there: nothing is left to ask, so the card goes before anyone answers it.
@@ -161,20 +162,23 @@ test('an open no-machine card is withdrawn once a PC lends the scheme CI or serv
   assert.match(w.settled[0].line, /cara-desktop/);
   // Unticked again with jobs waiting: a new card at once, not after the week's wait.
   w.store.writeMachineRoles(pc.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, projects: [other.id] } : r)));
+  w.samples.clear();
   w.queued.set('caraminden/delve', new Set(['delve-ci-linux']));
   await w.auto.pass();
   assert.equal(w.cards.length, 2);
-  // A runner for the repo showing up on a connected PC settles it too.
-  w.samples.set(`${pc.id}:linux`, new Set(['caraminden/delve']));
+});
+
+test("the card comes down from a chat that isn't the scheme's Taskmaster any more, and other cards there stay (#2220)", async () => {
+  const w = world();
+  w.pc('cara-desktop', w.cara.id, [w.delve.id]);
+  const old = w.store.createTicket({ project_id: w.delve.id, title: 'was the Taskmaster', permission_mode: 'default', created_by: 'Claude' });
+  w.store.addEvent(old.id, 'question', { id: 'ci', questions: [noMachineCard(w.store, w.delve, 'linux', [])] });
+  w.store.addEvent(old.id, 'question', { id: 'mine', questions: [{ header: 'CI runners', question: 'Add a second runner?', options: [] }] });
   await w.auto.pass();
   assert.deepEqual(
-    w.settled.map((s) => s.question),
-    ['q1', 'q2'],
+    w.settled.map((s) => [s.ticket, s.question]),
+    [[old.id, 'ci']],
   );
-  // That PC only holds a runner (it lends Delve nothing), so its going quiet doesn't ask again within the week.
-  w.samples.clear();
-  await w.auto.pass();
-  assert.equal(w.cards.length, 2);
 });
 
 test('a queued job with a label no runner has gets one even with no workflow file read; a failed add waits longer, a busy agent only a few minutes', async () => {

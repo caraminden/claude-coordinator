@@ -7,8 +7,8 @@
 // ticking a scheme makes that PC register its runners; Josh, 2026-11-25: "load balance across all valid machines"), one
 // PC at a time in M6's order, through the runner agent there (src/ci-runner.ts RunnerJobs). A scheme unticked under a PC's
 // CI runners has that PC's runners taken off. People hear of it only when it fails (the job's note) or when no PC lends CI
-// to a scheme whose jobs wait: one card to its members naming the PCs they could ask, withdrawn once a PC lends it CI or
-// serves its repo (#2220). `ci_runners` stays for odd cases.
+// to a scheme whose jobs wait: one card to its members naming the PCs they could ask, withdrawn once a PC lends it CI
+// (#2220). `ci_runners` stays for odd cases.
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { lendsRole } from './access.ts';
@@ -192,29 +192,23 @@ export class CiAuto {
   }
 
   /**
-   * An unanswered no-machine card whose question no longer holds comes down (#2220: one sat 8 hours after the scheme was
-   * ticked, and its person answered a stale question). Only on a PC lending the scheme CI or serving its repo: an empty
-   * queue read (a restart, a cancelled job) proves nothing. Found by its words, so cards posted before this count too.
+   * An unanswered no-machine card comes down once a PC lends the scheme CI (#2220: one sat 8 hours after the scheme was
+   * ticked, and its person answered a stale question). Only a lend: an empty queue read (a restart, a cancelled job)
+   * proves nothing, and a runner on a PC not lending is one remove() may be taking off. Found by its words, so cards
+   * posted before this count too, in whichever chat has it (a split moves who the scheme's Taskmaster is).
    */
   private withdraw(project: Project) {
     const { store } = this.d;
-    const slug = repoSlug(project.repo_url)?.toLowerCase();
-    const taskmaster = store.getOverlord(project.id);
-    if (!slug || !taskmaster) return;
-    for (const e of store.openCardsOf(taskmaster.id)) {
+    const pc = store.listMachines().find((m) => lendsCi(store, m, project));
+    if (!pc) return;
+    for (const e of store.openCards(project.id)) {
       if (e.kind !== 'question') continue;
       const card = JSON.parse(e.data) as { id: string; questions?: CardQuestion[] };
       const [q, more] = card.questions ?? [];
       if (more || q?.header !== CARD_HEADER || !q.question.startsWith(waiting(project))) continue;
-      const os: Os = q.question.startsWith(`${waiting(project)}Linux`) ? 'linux' : 'windows';
-      const lent = store.listMachines().find((m) => lendsCi(store, m, project));
-      const serving = lent ? undefined : this.d.runnerMachines(os).find((m) => this.d.reposOn(m.id, os).has(slug));
-      const pc = lent ?? serving;
-      if (!pc) continue;
-      this.d.settle({ ticket: taskmaster.id, question: card.id }, `Withdrew the CI runners card: ${pc.name} ${lent ? `now lends ${project.name} its CI runners` : `has a runner for ${project.name}`}, so there's nothing to answer.`);
-      // Unticked again while jobs wait, that's news: ask at once, not after CARD_MS. Not for a PC only still holding a
-      // runner (CI off there): it would bring a new card each time it slept.
-      if (lent) store.deleteSetting(cardKey(project));
+      this.d.settle({ ticket: e.ticket_id, question: card.id }, `Withdrew the CI runners card: ${pc.name} now lends ${project.name} its CI runners, so there's nothing to answer.`);
+      // Unticked again while jobs wait, that's news: ask at once, not after CARD_MS.
+      store.deleteSetting(cardKey(project));
     }
   }
 

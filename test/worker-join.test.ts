@@ -39,7 +39,7 @@ function joined() {
   const say = (over: Record<string, unknown> = {}) => join.report(machine, { boot: 'a', installed: 1, host: 'PC', wsl: true, caps: CAPS, image: { state: 'ready', text: 'x' }, github: true, disk_gb: 3, full: false, ...over });
   return { join, machine, at, say, settings };
 }
-const all = (id: string, over: Record<string, string> = {}, done = true) => ({ id, done, lines: ['image', 'folders', 'sync', 'process', 'link', 'tools', 'disk', 'programs'].map((key) => ({ key, state: over[key] ?? 'ok', text: key })) });
+const all = (id: string, over: Record<string, string> = {}, done = true) => ({ id, done, lines: ['image', 'folders', 'sync', 'process', 'link', 'tools', 'disk', 'programs', 'turn'].map((key) => ({ key, state: over[key] ?? 'ok', text: key })) });
 
 test('a worker is here by its syncs; away, the row keeps its host and caps and nothing that may have changed', async () => {
   const { join, machine, at, say } = joined();
@@ -293,7 +293,11 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     assert.equal(agent.worker.cfg.max, CAPS.workers);
     assert.deepEqual(readFileSync(join(work, 'image', 'Containerfile')), readFileSync(join(import.meta.dirname, '..', 'deploy', 'claude-container', 'Containerfile')), "the build files are the app's");
     assert.match(readFileSync(join(work, 'image-claude', 'Containerfile'), 'utf8'), /claude-code@2\.4\.11 /);
-    assert.equal(pod.asked.filter((a) => a.startsWith('build')).length, 2, 'built once, in two steps');
+    assert.deepEqual(readFileSync(join(work, 'image', 'worker', 'Containerfile')), readFileSync(join(import.meta.dirname, '..', 'deploy', 'worker-image', 'Containerfile')), 'and the worker layer, under worker/');
+    const builds = pod.asked.filter((a) => a.startsWith('build'));
+    assert.equal(builds.length, 3, 'built once, in three steps');
+    assert.match(builds[1], /^build -t localhost\/citadel-worker-tools:[0-9a-f]{12} -f \S+\/image\/worker\/Containerfile --build-arg BASE=localhost\/citadel-worker-base:[0-9a-f]{12} /, 'the worker layer on the base');
+    assert.match(readFileSync(join(work, 'image-claude', 'Containerfile'), 'utf8'), /^FROM localhost\/citadel-worker-tools:/, 'claude on the worker layer');
     assert.ok(pod.built.has(readFileSync(join(work, 'image-tag'), 'utf8')));
     const here = (await view()).worker;
     assert.deepEqual(here.caps, CAPS);

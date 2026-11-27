@@ -1,6 +1,6 @@
 // A headless Chromium page for tests of public/ui/ (tip-browser.test.ts), driven over the DevTools
 // protocol on a pipe as tools/boot-check.ts does: no dependency, no port to clash with anyone's.
-// Uses Playwright's chrome-headless-shell from ~/.cache/ms-playwright; `chromium()` is null without one.
+// Uses Playwright's chrome-headless-shell from $PLAYWRIGHT_BROWSERS_PATH or ~/.cache/ms-playwright; `chromium()` is null without one.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type ServerResponse } from 'node:http';
@@ -11,7 +11,8 @@ import type { Readable, Writable } from 'node:stream';
 import { themeCss } from '../src/theme.ts';
 
 export function chromium(): string | null {
-  const cache = join(homedir(), '.cache', 'ms-playwright');
+  // Playwright's own variable first: a worker machine's image keeps its headless shell there (deploy/worker-image, #2249).
+  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright');
   const dirs = existsSync(cache) ? readdirSync(cache).filter((d) => /^chromium_headless_shell-\d+$/.test(d)) : [];
   dirs.sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
   for (const d of dirs) {

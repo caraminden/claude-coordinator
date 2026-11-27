@@ -15,7 +15,8 @@ const unitTool = join(import.meta.dirname, '..', 'tools', 'heavy-unit');
 const tmp = tempRoot('heavy-unit-');
 const root = tmp.dir;
 after(() => tmp.teardown());
-const inContainer = existsSync('/run/.containerenv') || existsSync('/.dockerenv');
+// A container with no systemd of its own (people's on perigee); a worker machine's boots one (deploy/worker-image, #2249).
+const inContainer = (existsSync('/run/.containerenv') || existsSync('/.dockerenv')) && !existsSync('/run/systemd/system');
 // Grows until something stops it: a few MB of node, then 10 MB a step, to 1 GB at most, so a box that doesn't enforce
 // the test's 96M (no memory controller for the user's units) fails the test instead of filling up.
 const ALLOC = `node -e 'const a=[];for(let i=0;i<100;i++)a.push(Buffer.alloc(1e7,1))'`;

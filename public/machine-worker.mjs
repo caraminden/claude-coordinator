@@ -38,6 +38,25 @@ const COUNT_MAX = 100_000;
 /** A wrapper whose beat is older than this no longer runs (it beats every 5 s). */
 const BEAT_STALE_MS = 30_000;
 
+/** The file in Citadel's worker image naming the env its tools need (deploy/worker-image/Containerfile). */
+const TURN_ENV = '/etc/citadel/turn-env.json';
+/** How long one folder's `npm ci` may take before a turn starts (src/worktree-deps.ts INSTALL_MS is the server's). */
+const DEPS_S = 180;
+
+/**
+ * What a turn's env (the server's, made for perigee) changes to here, for what the container has (#2249).
+ * XDG_RUNTIME_DIR: the server's names its own user's /run/user folder, which isn't here; with systemd it is this user's
+ * real one, else the turn's temp folder, as in people's containers on perigee (src/turn-launch.ts, #225).
+ * @param {Record<string, string>} env @param {{ systemd: boolean, env: Record<string, string> }} box @param {string} uid
+ * @returns {Record<string, string>}
+ */
+export function turnEnvHere(env, box, uid) {
+  const out = { ...box.env };
+  if (box.systemd) out.XDG_RUNTIME_DIR = `/run/user/${uid}`;
+  else if (env.TMPDIR) out.XDG_RUNTIME_DIR = env.TMPDIR;
+  return out;
+}
+
 /** The worker block of a config file, checked; throws with what is wrong. @param {unknown} raw */
 export function workerConfig(raw) {
   const c = /** @type {Record<string, unknown>} */ (raw ?? {});
@@ -101,17 +120,37 @@ export function boxOf(cfg, launch) {
  * host folders to (T8, host reach), in its own container `name`; a plain worker passes none. Both share the home volume, so one sign-in.
  * @param {ReturnType<typeof workerConfig>} cfg @param {{ home: string, roots: string[] }} launch @param {{ src: string, dst: string, ro?: boolean }[]} [extraMounts] @param {string} [name]
  */
-export function containerArgs(cfg, launch, extraMounts = [], name = cfg.container) {
+export function containerArgs(cfg, launch, extraMounts = [], name = cfg.container, systemd = false) {
   const binds = [...launch.roots.map((r) => ({ src: join(cfg.root, 'fs', r), dst: r, ro: false })), ...extraMounts];
   // The owner's page caps under the PC's own (worker-agent.mjs fit): part of the spec, so an idle container takes new ones.
   const limits = cfg.limits ? ['--cpus', String(Math.max(1, cfg.limits.threads)), '--memory', `${Math.max(2, cfg.limits.memory_gb)}g`] : [];
-  const spec = JSON.stringify([cfg.image, launch.home, binds, ...(limits.length ? [limits] : [])]);
-  const args = ['--rm', '--replace', '--name', name, '--init', '--userns=keep-id', '--network=host', '--pids-limit=32768', ...limits, '--label', `citadel.spec=${createHash('sha256').update(spec).digest('hex').slice(0, 12)}`];
-  args.push('-e', `HOME=${launch.home}`, '-v', `${cfg.container}-home:${launch.home}:U`);
+  const spec = JSON.stringify([cfg.image, launch.home, binds, ...(limits.length ? [limits] : []), ...(systemd ? ['systemd'] : [])]);
+  // Citadel's worker image boots systemd (deploy/worker-image, #2249): it runs as the container's root, and turns run as
+  // this computer's user (keep-id's), by --user on each exec (Worker.inBox). podman's :U would hand the home volume to
+  // root then, so it is left off: the volume is this user's already (keep-id), and bootSystemd sees to its top folder.
+  const init = systemd ? ['--systemd=always', '--user', '0:0'] : ['--init'];
+  const args = ['--rm', '--replace', '--name', name, ...init, '--userns=keep-id', '--network=host', '--pids-limit=32768', ...limits, '--label', `citadel.spec=${createHash('sha256').update(spec).digest('hex').slice(0, 12)}`];
+  args.push('-e', `HOME=${launch.home}`, '-v', `${cfg.container}-home:${launch.home}${systemd ? '' : ':U'}`);
   for (const m of binds) args.push('--mount', `type=bind,src=${m.src},dst=${m.dst}${m.ro ? ',ro' : ''}`);
-  args.push(cfg.image, 'sleep', 'infinity');
+  args.push(cfg.image, ...(systemd ? ['/sbin/init'] : ['sleep', 'infinity']));
   return args;
 }
+
+/** The label Citadel's worker image carries (deploy/worker-image/Containerfile): it boots systemd, and has what perigee's turns have. */
+export const SYSTEMD_LABEL = 'citadel.systemd';
+
+/**
+ * Run in a worker container's turn's folder (its worktree) once it is brought here: what the server's own worktrees get
+ * before a first turn (src/worktree-deps.ts, #1649), since node_modules is git-ignored and never travels. Each tracked
+ * npm lockfile whose ignored node_modules isn't there gets `npm ci --prefer-offline`, its cache in the home volume.
+ * Prints a `failed <folder>` line for each that didn't install.
+ */
+export const DEPS_SH = `cd "$1" 2>/dev/null || exit 0
+git ls-files -z -- ':(glob)**/package-lock.json' ':(glob)**/npm-shrinkwrap.json' 2>/dev/null | xargs -0 -r -n1 dirname | sort -u | while read -r d; do
+  [ -e "$d/node_modules" ] && continue
+  git check-ignore -q "$d/node_modules/" || continue
+  (cd "$d" && timeout -k 10 "$2" npm ci --prefer-offline --no-audit --no-fund --loglevel=error </dev/null >/dev/null 2>&1) || echo "failed $d"
+done`;
 
 /** A turn as this agent takes it up. @param {{ dir: string, local: string, launch: Launch } & Partial<Turn>} t @returns {Turn} */
 const newTurn = (t) => ({ applied: 0, acked: null, sentWhole: {}, starting: false, dropped: false, seeded: false, script: null, home: 0, homeFailed: null, asked: 0, steering: false, checking: false, checked: Date.now(), nextTry: 0, failures: 0, ref: -1, final: false, counting: false, ...t });
@@ -181,6 +220,16 @@ export class Worker {
     /** @type {{ dir: string, stays?: string }[]} */
     this.cleared = [];
     this.checkpointMs = o.checkpointMs ?? CHECKPOINT_MS;
+    /** Who turns run as in the container: this computer's user, as keep-id maps it (containerArgs). */
+    this.user = `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`;
+    /** Per image: whether it boots systemd (SYSTEMD_LABEL). @type {Map<string, boolean>} */
+    this.systemd = new Map();
+    /** Images that carry the label but whose systemd didn't come up here: their containers run without it. @type {Set<string>} */
+    this.unbooted = new Set();
+    /** Per running container: whether systemd runs in it, and the env its image adds to a turn's. @type {Map<string, { systemd: boolean, env: Record<string, string> }>} */
+    this.boxes = new Map();
+    /** Per container: the ensureContainer running for it, which the next one waits on. @type {Map<string, Promise<void>>} */
+    this.ensuring = new Map();
     mkdirSync(join(this.cfg.root, 'fs'), { recursive: true, mode: 0o700 });
     // The turns an earlier run of this agent held: their wrappers ran on in the container without it.
     try {
@@ -336,7 +385,7 @@ export class Worker {
     const stop = async () => {
       const pid = this.pid(t);
       if (!pid || existsSync(join(t.local, 'exit.json'))) return;
-      await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
+      await this.exec(this.cfg.podman, [...this.inBox(boxOf(this.cfg, t.launch)), 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
       // Its wrapper writes its end once claude is gone: what it wrote last is part of what goes.
       for (let i = 0; i < 20 && !existsSync(join(t.local, 'exit.json')); i++) await sleep(250);
     };
@@ -407,7 +456,7 @@ export class Worker {
         if (!existsSync(join(t.local, 'host-began'))) throw new Error('its start mark is gone');
         // Files new or changed since, and whether a folder changed: a delete or rename shows only there.
         const sh = `f=$(find "$1" -xdev -type f -newer "$2" 2>/dev/null | head -n ${COUNT_MAX + 1} | wc -l) && d=$(find "$1" -xdev -type d -newer "$2" 2>/dev/null | head -n 1 | wc -l) && echo "$f $d"`;
-        const r = await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', sh, 'sh', m.dst, since], 5 * 60_000);
+        const r = await this.exec(this.cfg.podman, [...this.inBox(boxOf(this.cfg, t.launch)), 'sh', '-c', sh, 'sh', m.dst, since], 5 * 60_000);
         const [n, d] = r.out.trim().split(/\s+/).map(Number);
         if (r.code || !Number.isFinite(n) || !Number.isFinite(d)) throw new Error(`counting ${m.dst} failed: ${r.err.trim().split('\n').pop() || `exit ${r.code}`}`);
         if (n || d) folders.push({ name: m.dst.slice(HOST_IN.length + 1), files: Math.min(n, COUNT_MAX), ...(n > COUNT_MAX ? { more: /** @type {const} */ (true) } : {}), ...(d ? { dirs: /** @type {const} */ (true) } : {}) });
@@ -449,7 +498,7 @@ export class Worker {
         // Its container may have stopped with the machine since the turn began.
         if (!ask.start) await this.ensureBox(t.launch);
         const arg = Buffer.from(JSON.stringify({ app: `http://127.0.0.1:${this.port}`, dir: t.dir, state: at, ...ask })).toString('base64');
-        const r = await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), this.cfg.node ?? t.launch.wrapper[0], program, arg], ask.start ? 60 * 60_000 : 15 * 60_000);
+        const r = await this.exec(this.cfg.podman, [...this.inBox(boxOf(this.cfg, t.launch)), this.cfg.node ?? t.launch.wrapper[0], program, arg], ask.start ? 60 * 60_000 : 15 * 60_000);
         const last = r.out.trim().split('\n').pop() ?? '';
         return r.code || !last.startsWith('{') ? { error: (r.err.trim() || last || `exit ${r.code}`).slice(-300) } : JSON.parse(last);
       } catch (err) {
@@ -529,7 +578,7 @@ export class Worker {
     for (const sig of sigs) {
       if (!/^SIG(INT|TERM|KILL)$/.test(sig)) continue;
       const s = sig.slice(3);
-      await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `kill -${s} -${pid} 2>/dev/null || kill -${s} ${pid}`]);
+      await this.exec(this.cfg.podman, [...this.inBox(boxOf(this.cfg, t.launch)), 'sh', '-c', `kill -${s} -${pid} 2>/dev/null || kill -${s} ${pid}`]);
     }
     t.applied += sigs.length;
     this.save();
@@ -540,7 +589,7 @@ export class Worker {
     this.turns.delete(t.dir);
     this.save();
     const pid = this.pid(t);
-    if (pid && !existsSync(join(t.local, 'exit.json'))) await this.exec(this.cfg.podman, ['exec', boxOf(this.cfg, t.launch), 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
+    if (pid && !existsSync(join(t.local, 'exit.json'))) await this.exec(this.cfg.podman, [...this.inBox(boxOf(this.cfg, t.launch)), 'sh', '-c', `kill -KILL -${pid} 2>/dev/null || kill -KILL ${pid}`]);
     rmSync(t.local, { recursive: true, force: true });
     // The last marked turn here gone, its container goes with it: nothing it left running keeps the owner's folders, and
     // the next one mounts the folders as they are listed then (T8).
@@ -559,14 +608,16 @@ export class Worker {
       await this.fetchFolder(t);
       for (const r of launch.roots) mkdirSync(this.local(r), { recursive: true });
       if (launch.cwd && this.mine(launch.cwd)) mkdirSync(this.local(launch.cwd), { recursive: true });
-      this.fitSpec(t);
       // A host turn's start (T8): the folders' files written after it are the ones its end counts.
       if (launch.host === true) writeFileSync(join(t.local, 'host-began'), '');
       await this.ensureBox(launch);
+      // After the container: whether systemd runs in it decides the turn's XDG_RUNTIME_DIR.
+      this.fitSpec(t);
       if (launch.sync && !t.dropped) await this.bring(t);
+      if (launch.sync && !t.dropped && launch.cwd && this.mine(launch.cwd)) await this.deps(launch);
       if (t.dropped || !existsSync(join(t.local, 'spec.json'))) return;
       const wrapper = [this.cfg.node ?? launch.wrapper[0], ...launch.wrapper.slice(1)];
-      const r = await this.exec(this.cfg.podman, ['exec', '-d', boxOf(this.cfg, launch), ...wrapper]);
+      const r = await this.exec(this.cfg.podman, [...this.inBox(boxOf(this.cfg, launch), '-d'), ...wrapper]);
       if (r.code) throw new Error(`the turn's wrapper did not start: ${r.err.trim()}`);
       this.log(`Turn ${dir.split('/').pop()} started.`);
     } catch (err) {
@@ -625,7 +676,49 @@ export class Worker {
     for (const dir of [spec.env.TMPDIR, spec.env.COORDINATOR_FILES_DIR, spec.env.COORDINATOR_SHARED_DIR]) if (this.mine(dir) && t.launch.roots.some((r) => dir.startsWith(`${r}/`))) mkdirSync(this.local(dir), { recursive: true });
     if (this.cfg.claude) spec.command = this.cfg.claude;
     if (this.cfg.node && spec.pool) spec.pool.node = this.cfg.node;
+    Object.assign(spec.env, turnEnvHere(spec.env, this.boxes.get(boxOf(this.cfg, t.launch)) ?? { systemd: false, env: {} }, this.user.split(':')[0]));
     writeFileSync(file, JSON.stringify(spec), { mode: 0o600 });
+  }
+
+  /** `podman exec` into `box` as the turns' user, with `opts` before the container's name. @param {string} box @param {...string} opts */
+  inBox(box, ...opts) {
+    return ['exec', ...opts, '--user', this.user, box];
+  }
+
+  /** The packages a brought worktree needs (DEPS_SH): a failed install is logged, and the turn starts anyway, as on the server. @param {Launch} launch */
+  async deps(launch) {
+    const r = await this.exec(this.cfg.podman, [...this.inBox(boxOf(this.cfg, launch)), 'sh', '-c', DEPS_SH, 'sh', String(launch.cwd), String(DEPS_S)], (DEPS_S + 30) * 1000);
+    const failed = r.out.split('\n').filter((l) => l.startsWith('failed '));
+    if (r.code || failed.length) this.log(`npm ci in ${launch.cwd} did not finish: ${failed.join(', ') || r.err.trim().split('\n').pop()}`);
+  }
+
+  /** Whether `image` boots systemd: Citadel's worker image does, an owner's own may not. Asked once per image. @param {string} image */
+  async bootsSystemd(image) {
+    if (this.unbooted.has(image)) return false;
+    if (!this.systemd.has(image)) {
+      const r = await this.exec(this.cfg.podman, ['image', 'inspect', '--format', `{{index .Config.Labels "${SYSTEMD_LABEL}"}}`, image]);
+      if (r.code) return false;
+      this.systemd.set(image, r.out.trim() === '1');
+    }
+    return this.systemd.get(image) === true;
+  }
+
+  /**
+   * A container just started with systemd: wait for its boot, start the turns' user's manager (linger, so it stays with no
+   * login), and see to the home volume's top folder. Throws with why it didn't come up. @param {string} box @param {string} home
+   */
+  async bootSystemd(box, home) {
+    const { podman } = this.cfg;
+    const [uid] = this.user.split(':');
+    const root = (/** @type {string[]} */ cmd, timeout = 60_000) => this.exec(podman, ['exec', '--user', '0:0', box, ...cmd], timeout);
+    // Its bus comes up a moment after podman says the container runs: until then systemctl can't connect, and says so.
+    const up = await root(['sh', '-c', 'for i in $(seq 240); do s=$(systemctl is-system-running --wait 2>&1); case $s in *bus*|"") sleep 0.5 ;; *) break ;; esac; done; echo "$s"'], 150_000);
+    if (!/^(running|degraded)$/.test(up.out.trim())) throw new Error(`systemd did not start in it (${up.out.trim() || up.err.trim().split('\n').pop() || `exit ${up.code}`})`);
+    await root(['chown', this.user, home]);
+    const linger = await root(['loginctl', 'enable-linger', uid]);
+    if (linger.code) throw new Error(`its user manager did not start: ${linger.err.trim().split('\n').pop()}`);
+    const sock = await this.exec(podman, [...this.inBox(box), 'sh', '-c', `for i in $(seq 60); do [ -S /run/user/${uid}/systemd/private ] && exit 0; sleep 0.5; done; exit 1`], 60_000);
+    if (sock.code) throw new Error(`its user manager did not start: /run/user/${uid} has no systemd socket`);
   }
 
   /** The container a turn runs in, with its folders when it is a marked minion's (boxOf). @param {Launch} launch */
@@ -639,16 +732,59 @@ export class Worker {
    * @param {Launch} launch @param {{ src: string, dst: string, ro?: boolean }[]} [extraMounts] @param {string} [container] a host turn's own (boxOf)
    */
   async ensureContainer(launch, extraMounts = [], container = this.cfg.container) {
-    const { podman } = this.cfg;
-    const args = containerArgs(this.cfg, launch, extraMounts, container);
+    // One at a time per container: a turn arriving while another's container boots systemd waits for it to be ready.
+    const p = (this.ensuring.get(container) ?? Promise.resolve()).catch(() => {}).then(() => this.ensureOnce(launch, extraMounts, container));
+    this.ensuring.set(container, p);
+    try {
+      return await p;
+    } finally {
+      if (this.ensuring.get(container) === p) this.ensuring.delete(container);
+    }
+  }
+
+  /** ensureContainer's work, with no other for the same container running. @param {Launch} launch @param {{ src: string, dst: string, ro?: boolean }[]} extraMounts @param {string} container */
+  async ensureOnce(launch, extraMounts, container) {
+    const { podman, image } = this.cfg;
+    const systemd = await this.bootsSystemd(image);
+    const args = containerArgs(this.cfg, launch, extraMounts, container, systemd);
     const want = args[args.indexOf('--label') + 1].split('=')[1];
     const st = await this.exec(podman, ['container', 'inspect', '--format', '{{.State.Running}} {{index .Config.Labels "citadel.spec"}}', container]);
     const [running, has] = st.code ? [] : st.out.trim().split(' ');
     const others = [...this.turns.values()].some((t) => boxOf(this.cfg, t.launch) === container && !t.starting && !existsSync(join(t.local, 'exit.json')));
-    if (running === 'true' && (has === want || others)) return;
+    if (running === 'true' && (has === want || others)) {
+      // An agent started again finds its container running: what it is made of is read again.
+      if (!this.boxes.has(container)) this.boxes.set(container, await this.boxFacts(container, has === want ? systemd : null));
+      return;
+    }
     const r = await this.exec(podman, ['run', '-d', ...args], 15 * 60_000);
-    if (r.code) throw new Error(`the worker container did not start: ${r.err.trim().split('\n').pop()}`);
-    await this.version(['exec', container]);
+    try {
+      if (r.code) throw new Error(`the worker container did not start: ${r.err.trim().split('\n').pop()}`);
+      if (systemd) await this.bootSystemd(container, launch.home);
+    } catch (err) {
+      if (!systemd) throw err;
+      // Turns still run without it, as they did before #2249, with what perigee's own containers have: told, not hidden.
+      this.log(`${container}: ${err.message}. Its turns run without systemd until this agent starts again.`);
+      this.unbooted.add(image);
+      await this.exec(podman, ['rm', '-f', '-t', '0', container]);
+      return this.ensureOnce(launch, extraMounts, container);
+    }
+    this.boxes.set(container, await this.boxFacts(container, systemd));
+    await this.version(this.inBox(container));
+  }
+
+  /**
+   * What a running container gives its turns: systemd (`known`, or read from it when null) and the image's turn env file.
+   * @param {string} box @param {boolean | null} known @returns {Promise<{ systemd: boolean, env: Record<string, string> }>}
+   */
+  async boxFacts(box, known) {
+    const r = await this.exec(this.cfg.podman, [...this.inBox(box), 'sh', '-c', `cat ${TURN_ENV} 2>/dev/null; echo; [ -S "/run/user/$(id -u)/systemd/private" ] && echo systemd; true`]);
+    const lines = r.code ? [] : r.out.trim().split('\n');
+    let env = {};
+    try {
+      const o = JSON.parse(lines.find((l) => l.startsWith('{')) ?? '{}');
+      env = Object.fromEntries(Object.entries(o).filter(([k, v]) => typeof v === 'string' && /^[A-Z][A-Z0-9_]*$/.test(k) && !['PATH', 'HOME', 'XDG_RUNTIME_DIR'].includes(k)));
+    } catch {}
+    return { systemd: known ?? lines.includes('systemd'), env };
   }
 
   /** Its load and sign-in, for the app's placement: each read again as it ages, on the sync that finds it old. */
@@ -727,7 +863,7 @@ export class Worker {
     const { podman, container } = this.cfg;
     const lines = [];
     const line = (/** @type {string} */ name, /** @type {boolean} */ ok, /** @type {string} */ text) => lines.push({ name, ok, text });
-    const inside = (/** @type {string} */ sh) => this.exec(podman, ['exec', container, 'sh', '-c', sh]);
+    const inside = (/** @type {string} */ sh) => this.exec(podman, [...this.inBox(container), 'sh', '-c', sh]);
     try {
       for (const r of launch.roots) mkdirSync(this.local(r), { recursive: true });
       await this.ensureContainer(launch);
@@ -753,8 +889,31 @@ export class Worker {
       const exe = await inside(`${probe}/cmd.exe /c exit 0`);
       line('no Windows programs', exe.code !== 0, exe.code !== 0 ? 'a Windows program (cmd.exe) cannot start inside the container' : 'cmd.exe STARTED inside the container: WSL interop reaches it');
     }
+    line(...(await this.turnTools(container)));
     rmSync(this.local(probe), { recursive: true, force: true });
     return lines;
+  }
+
+  /**
+   * The self-test's line on what a turn here has of a perigee turn's (#2249): a user systemd that runs a unit, pwsh with
+   * PSScriptAnalyzer, the .NET 8 SDK and Chrome's headless shell. An owner's own image is theirs to fill, so it passes with that said.
+   * @param {string} box @returns {Promise<[string, boolean, string]>}
+   */
+  async turnTools(box) {
+    const facts = this.boxes.get(box);
+    if (!this.unbooted.has(this.cfg.image) && !(await this.bootsSystemd(this.cfg.image))) return ['turn tools', true, `${this.cfg.image} is not Citadel's worker image: what its turns have is up to it`];
+    // Not a fail: a worker whose systemd won't boot still runs turns as it did before #2249, and a fail would hold it (worker-join hold).
+    if (!facts?.systemd) return ['turn tools', true, 'systemd did not start in the container, so turns there run without a user systemd, as before (the agent log says why)'];
+    const env = turnEnvHere({}, facts, this.user.split(':')[0]);
+    const checks = [
+      ['systemd-run --user', 'systemd-run --user --quiet --collect --wait true'],
+      ['pwsh with PSScriptAnalyzer', "pwsh -NoProfile -Command 'if (Get-Module -ListAvailable PSScriptAnalyzer) { exit 0 } else { exit 3 }'"],
+      ['the .NET 8 SDK', "dotnet --list-sdks | grep -q '^8\\.'"],
+      ['headless Chrome', 'ls "$PLAYWRIGHT_BROWSERS_PATH"/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell >/dev/null'],
+    ];
+    const missing = [];
+    for (const [name, sh] of checks) if ((await this.exec(this.cfg.podman, [...this.inBox(box), 'env', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'sh', '-c', sh], 120_000)).code) missing.push(name);
+    return missing.length ? ['turn tools', false, `turns there lack ${missing.join(', ')}`] : ['turn tools', true, 'turns there have a user systemd, pwsh, the .NET 8 SDK and headless Chrome, as on perigee'];
   }
 }
 

@@ -282,9 +282,9 @@ try {
   rmSync(root, { recursive: true, force: true });
 }
 
-/** The newest Playwright headless Chromium, which this box keeps in ~/.cache/ms-playwright. */
+/** The newest Playwright headless Chromium, in $PLAYWRIGHT_BROWSERS_PATH (a worker's image, #2249) or ~/.cache/ms-playwright. */
 function chromium(): string {
-  const cache = join(homedir(), '.cache', 'ms-playwright');
+  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright');
   const dirs = existsSync(cache) ? readdirSync(cache).filter((d) => /^chromium_headless_shell-\d+$/.test(d)) : [];
   dirs.sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
   for (const d of dirs) {

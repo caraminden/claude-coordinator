@@ -28,6 +28,12 @@ export const BLOB_BYTES = 16 * 1024 * 1024;
 const REPO = join(import.meta.dirname, '..');
 /** The build files of the worker's image: people's container image (deploy/claude-container), with claude on top there. */
 const IMAGE_DIR = join(REPO, 'deploy', 'claude-container');
+/**
+ * The worker's own layer over it (#2249): systemd, pwsh, .NET 8 and headless Chrome, so a turn on a machine has what one
+ * on perigee has. Offered as `worker/<file>`, so people's containers on perigee, built from IMAGE_DIR alone, never change for it.
+ */
+const WORKER_LAYER_DIR = join(REPO, 'deploy', 'worker-image');
+const LAYER = 'worker/';
 /** What the worker's own program is made of: it restarts itself, between turns, when this hash changes from the one it first heard. */
 const AGENT_FILES = ['worker-agent.mjs', 'machine-worker.mjs'].map((f) => join(REPO, 'public', f));
 /** The scratch repo's files beside its nonce: what `node tools/host-tools.ts check` needs, so it runs in the checkout it came in. */
@@ -241,7 +247,7 @@ export class WorkerJoin {
       if (version) this.claudeHere.version = version;
     }
     // Read once: a deploy that changes them restarts this server, and a front-end-only one is picked up at the next.
-    this.offer ??= { image: { hash: await imageHashAsync(IMAGE_DIR), files: await filesUnder(IMAGE_DIR) }, agent: await agentHash() };
+    this.offer ??= { image: await imageOffer(), agent: await agentHash() };
     return { claude: this.claudeHere.version, ...this.offer };
   }
 
@@ -399,8 +405,19 @@ async function filesUnder(dir: string): Promise<string[]> {
   return out;
 }
 
+/** The worker image's build files, people's image's and the worker layer's under worker/, and one hash of both: either changing builds it again. */
+export async function imageOffer(): Promise<{ hash: string; files: string[] }> {
+  const [base, layer] = await Promise.all([imageHashAsync(IMAGE_DIR), imageHashAsync(WORKER_LAYER_DIR)]);
+  const files = [...(await filesUnder(IMAGE_DIR)), ...(await filesUnder(WORKER_LAYER_DIR)).map((f) => `${LAYER}${f}`)];
+  return { hash: createHash('sha256').update(`${base}\0${layer}`).digest('hex').slice(0, 12), files };
+}
+
 /** One of the image's build files by its name in a worker's offer, as a path in this repo, or null when there is none by that name. */
 export async function imageFile(name: string): Promise<string | null> {
+  if (name.startsWith(LAYER)) {
+    const rest = name.slice(LAYER.length);
+    return (await filesUnder(WORKER_LAYER_DIR)).includes(rest) ? join('deploy', 'worker-image', rest) : null;
+  }
   return (await filesUnder(IMAGE_DIR)).includes(name) ? join('deploy', 'claude-container', name) : null;
 }
 

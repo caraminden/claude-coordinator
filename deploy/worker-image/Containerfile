@@ -1,0 +1,41 @@
+# A worker machine's own layer (public/worker-agent.mjs builds it between people's container image, deploy/claude-container,
+# and claude on top), so a minion's turn on a machine has what a turn on perigee has and runs most jobs either place
+# (#2249). People's containers on perigee don't get it: they keep their image as it is. The versions follow
+# .github/actions/ci-tools, so a worker's test run sees the tools CI's does; bump them together.
+ARG BASE
+FROM ${BASE}
+# systemd as the container's first process (machine-worker.mjs containerArgs, podman --systemd=always), and a user
+# manager for the turn's user, so systemctl --user, systemd-run --user and /run/user/<uid> are real, as on perigee.
+# Only what a container needs: no getty, no timesyncd, no network setup (the host's network is the container's).
+# From bookworm-backports: tools/heavy-unit's systemd-run --expand-environment=no needs systemd 254 or newer, and
+# bookworm's own is 252, so heavy commands would run in place instead of in their own scope as on perigee.
+RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' >/etc/apt/sources.list.d/backports.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends -t bookworm-backports systemd systemd-sysv dbus dbus-user-session libpam-systemd \
+ && rm -rf /var/lib/apt/lists/* \
+ && { systemctl mask getty.target console-getty.service systemd-timesyncd.service systemd-networkd.service \
+    systemd-resolved.service systemd-firstboot.service systemd-udevd.service systemd-remount-fs.service \
+    sys-kernel-config.mount sys-kernel-debug.mount sys-kernel-tracing.mount 2>/dev/null || true; } \
+ && systemd-run --help | grep -q -- --expand-environment
+# pwsh and PSScriptAnalyzer for the .ps1 lint (test/ps1-lint.test.ts), for every user.
+RUN v=7.6.9 && mkdir -p /opt/pwsh/$v \
+ && curl -fsSL --retry 3 "https://github.com/PowerShell/PowerShell/releases/download/v$v/powershell-$v-linux-x64.tar.gz" | tar -xz -C /opt/pwsh/$v \
+ && chmod +x /opt/pwsh/$v/pwsh && ln -s /opt/pwsh/$v/pwsh /usr/local/bin/pwsh \
+ && pwsh -NoProfile -Command 'Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope AllUsers -Force' \
+ && rm -rf /root/.local/share/powershell /root/.cache
+# The .NET 8 SDK (the desktop launcher's tests, test/desktop-launcher-trial.test.ts; NuGet restores).
+RUN curl -fsSL --retry 3 -o /tmp/dotnet-install.sh https://dot.net/v1/dotnet-install.sh \
+ && bash /tmp/dotnet-install.sh --channel 8.0 --install-dir /opt/dotnet --no-path \
+ && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet && rm -f /tmp/dotnet-install.sh && rm -rf /root/.dotnet /root/.nuget \
+ && DOTNET_CLI_TELEMETRY_OPTOUT=1 dotnet --list-sdks | grep -q '^8\.'
+# Chrome for Testing's headless shell, in Playwright's layout, for the browser tests (test/browser.ts).
+RUN v=156.0.8078.4 dir=/opt/ms-playwright/chromium_headless_shell-1248 && mkdir -p $dir \
+ && curl -fsSL --retry 3 -o /tmp/chs.zip "https://storage.googleapis.com/chrome-for-testing-public/$v/linux64/chrome-headless-shell-linux64.zip" \
+ && python3 -m zipfile -e /tmp/chs.zip $dir && rm -f /tmp/chs.zip \
+ && chmod +x $dir/chrome-headless-shell-linux64/chrome-headless-shell && chmod -R a+rX /opt/ms-playwright
+# What a turn here adds to the env perigee sent it (machine-worker.mjs fitSpec): where these tools are. JSON, one object.
+RUN mkdir -p /etc/citadel && printf '%s\n' '{"PLAYWRIGHT_BROWSERS_PATH":"/opt/ms-playwright","DOTNET_ROOT":"/opt/dotnet","DOTNET_CLI_TELEMETRY_OPTOUT":"1"}' > /etc/citadel/turn-env.json
+# machine-worker.mjs SYSTEMD_LABEL: containers from this image boot systemd.
+LABEL citadel.systemd=1
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

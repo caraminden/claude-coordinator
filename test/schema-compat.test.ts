@@ -18,13 +18,10 @@ after(() => rmSync(root, { recursive: true, force: true }));
 // left from long ago, which would test a rollback to a release no deploy goes back to (#1169).
 const live = process.env.DEPLOY_LIVE || join(homedir(), 'claude-coordinator');
 const resolves = (dir: string, ref: string) => spawnSync('git', ['-C', dir, 'rev-parse', '-q', '--verify', `${ref}^{commit}`]).status === 0;
-const release = (
-  [
-    [live, 'last-good'],
-    [repo, 'last-good'],
-    [repo, 'origin/main'],
-  ] as const
-).find(([dir, ref]) => resolves(dir, ref));
+// Without the live checkout (a worker machine's turn, #2249), the repo's own tag only when GitHub's main isn't past it:
+// deploy.sh pushes each live commit there, and that tag may be the stale one.
+const newer = (dir: string, old: string, ref: string) => resolves(dir, ref) && spawnSync('git', ['-C', dir, 'merge-base', '--is-ancestor', old, ref]).status === 0;
+const release = ([[live, 'last-good'], ...(newer(repo, 'last-good', 'origin/main') ? [] : ([[repo, 'last-good']] as const)), [repo, 'origin/main']] as const).find(([dir, ref]) => resolves(dir, ref));
 // A build's merge of main (tools/land.sh --into build/<n> --full) ships nothing and waits in the lands' line, where main
 // may ship a newer schema past the main it took in (#2067). When the last release isn't under HEAD and this is that run,
 // it is checked against the main it took in: land.sh's LAND_BUILD_BASE, or on CI (GITHUB_REF_NAME land/<branch>) where

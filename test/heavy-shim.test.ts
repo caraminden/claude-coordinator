@@ -70,7 +70,8 @@ test('a command not past the shims says so, as the shell would', () => {
   assert.match(r.stderr, /godot: command not found/);
 });
 
-const inContainer = existsSync('/run/.containerenv') || existsSync('/.dockerenv');
+// A container with no systemd of its own (people's on perigee); a worker machine's boots one (deploy/worker-image, #2249).
+const inContainer = (existsSync('/run/.containerenv') || existsSync('/.dockerenv')) && !existsSync('/run/systemd/system');
 const userSystemd = !inContainer && spawnSync('systemd-run', ['--user', '--scope', '--quiet', '--expand-environment=no', 'true']).status === 0;
 const heavySlice = `citadel-heavy-hs${process.pid}.slice`;
 after(() => {

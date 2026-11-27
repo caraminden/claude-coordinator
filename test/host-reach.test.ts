@@ -69,7 +69,7 @@ test("a marked minion's turn runs in its own container with the owner's folders;
   );
   assert.ok(!mounts(run).some((m) => m.includes('/mnt/')), 'nor any Windows drive');
   assert.ok(
-    plain.calls.some((a) => a[0] === 'exec' && a[1] === '-d' && a[2] === 'citadel-worker'),
+    plain.calls.some((a) => a[0] === 'exec' && a[1] === '-d' && a[a.indexOf('--user') + 2] === 'citadel-worker'),
     'its turn runs in the plain container',
   );
 
@@ -83,7 +83,7 @@ test("a marked minion's turn runs in its own container with the owner's folders;
   );
   assert.ok(hostRun.includes('citadel-worker-home:/home/worker:U'), 'the same home volume: the same sign-in');
   assert.ok(
-    marked.calls.some((a) => a[0] === 'exec' && a[1] === '-d' && a[2] === 'citadel-worker-host'),
+    marked.calls.some((a) => a[0] === 'exec' && a[1] === '-d' && a[a.indexOf('--user') + 2] === 'citadel-worker-host'),
     'its turn runs in that container',
   );
   assert.equal(boxOf({ container: 'c' }, { host: false }), 'c');

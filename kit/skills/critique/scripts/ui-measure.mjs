@@ -37,7 +37,7 @@ const HELP = `node ui-measure.mjs <url> [<url>...] [options]
                          list each one you ignore under "Not fixed" with its reason
   --min-tap <px>         phone tap height (default: the page's --citadel-control-h, else --control-h, else 40)
   --dark                 prefers-color-scheme: dark
-  --chrome <path>        the browser (default: newest chrome-headless-shell in ~/.cache/ms-playwright)
+  --chrome <path>        the browser (default: newest chrome-headless-shell in $PLAYWRIGHT_BROWSERS_PATH or ~/.cache/ms-playwright)
   --out <file>           write the JSON there instead of stdout`;
 
 function args(argv) {
@@ -81,7 +81,8 @@ function args(argv) {
 }
 
 export function findChrome() {
-  const cache = join(homedir(), '.cache', 'ms-playwright');
+  // Playwright's own variable first: a worker machine's image keeps the browser there (#2249).
+  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright');
   const dirs = existsSync(cache) ? readdirSync(cache).filter((d) => /^chromium_headless_shell-\d+$/.test(d)) : [];
   dirs.sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
   for (const d of dirs) {

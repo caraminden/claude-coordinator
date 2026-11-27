@@ -45,8 +45,9 @@ cg=$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null)
 here() { exec "$@"; }
 case /$cg/ in */"$slice"/*) here "$@" ;; esac
 [ "${CITADEL_HEAVY_UNIT:-}" != 0 ] || here "$@"
-# A container (podman's marker, docker's) has no host systemd to ask; nor has a box without a user bus.
-{ [ -e /run/.containerenv ] || [ -e /.dockerenv ]; } && here "$@"
+# A container (podman's marker, docker's) has no host systemd to ask, unless systemd booted in it (a worker machine's,
+# deploy/worker-image, #2249); nor has a box without a user bus.
+{ [ -e /run/.containerenv ] || [ -e /.dockerenv ]; } && [ ! -d /run/systemd/system ] && here "$@"
 command -v systemd-run >/dev/null && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ] || here "$@"
 
 # Bind to the caller's unit only when it is one of Citadel's own work units: never to the server (a restart would

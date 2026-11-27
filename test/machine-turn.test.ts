@@ -327,6 +327,9 @@ const fakePodman = (turnsDir: string) =>
 const { spawn, spawnSync } = require('node:child_process');
 const a = process.argv.slice(2);
 require('node:fs').appendFileSync(${JSON.stringify(calls)}, a.join(' ') + '\\n');
+// Who it runs as in the container (machine-worker.mjs inBox): this computer's user, which is who runs this.
+const as = a.indexOf('--user');
+if (a[0] === 'exec' && as > 0 && as <= 2) a.splice(as, 2);
 if (a.includes('--version')) { console.log('9.9.9 (fake)'); process.exit(0); }
 if (a[0] !== 'exec') process.exit(a[0] === 'run' ? 0 : 1);
 const detached = a[1] === '-d';

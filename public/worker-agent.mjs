@@ -22,6 +22,8 @@ const BUILD_MS = 60 * 60_000;
 const IMAGE = 'localhost/citadel-worker';
 /** Before there is an image: never run, so podman doesn't go looking for it. */
 const NO_IMAGE = `${IMAGE}:none`;
+/** The worker layer's build file among the app's (src/worker-join.ts WORKER_LAYER_DIR, offered under worker/). */
+const WORKER_LAYER = 'worker/Containerfile';
 /** Exit status the service takes as "don't start me again" (RestartPreventExitStatus): a newer install has this machine's token. */
 const REPLACED = 64;
 /** The root helper's one command this user may run through sudo (install-worker.sh's sudoers file): the page's caps, raised. */
@@ -368,13 +370,18 @@ export class WorkerAgent {
     const { podman, root } = this.cfg;
     const dir = join(root, 'image');
     const base = `${IMAGE}-base:${want.hash}`;
+    // The worker's own layer (deploy/worker-image, #2249: systemd, pwsh, .NET, Chrome), offered as worker/ by an app that has it.
+    const layer = want.files.includes(WORKER_LAYER) ? `${IMAGE}-tools:${want.hash}` : null;
+    const steps = layer ? 3 : 2;
     const step = async (/** @type {string} */ text, /** @type {string[]} */ args) => {
       this.image = { state: 'building', text };
       this.log(text);
       const r = await this.exec('nice', ['-n', '19', podman, 'build', ...args], BUILD_MS);
       if (r.code) throw new Error(lastLine(r.err) || lastLine(r.out) || `podman build ended with ${r.code}`);
     };
-    if ((await this.exec(podman, ['image', 'exists', base])).code) {
+    const missing = async (/** @type {string} */ t) => (await this.exec(podman, ['image', 'exists', t])).code !== 0;
+    const needBase = await missing(base);
+    if (needBase || (layer && (await missing(layer)))) {
       rmSync(dir, { recursive: true, force: true });
       for (const f of want.files) {
         const to = join(dir, f);
@@ -385,20 +392,22 @@ export class WorkerAgent {
         mkdirSync(dirname(to), { recursive: true });
         writeFileSync(to, Buffer.from(await res.arrayBuffer()));
       }
-      await step('Building its image (1 of 2): the tools turns use. The first build takes about 5 minutes.', ['-t', base, dir]);
     }
+    if (needBase) await step(`Building its image (1 of ${steps}): the tools turns use. The first build takes about 5 minutes.`, ['-t', base, dir]);
+    if (layer && (await missing(layer))) await step(`Building its image (2 of 3): what perigee's turns have (systemd, pwsh, .NET 8, headless Chrome). It takes a few minutes.`, ['-t', layer, '-f', join(dir, WORKER_LAYER), '--build-arg', `BASE=${base}`, dirname(join(dir, WORKER_LAYER))]);
     const top = join(root, 'image-claude');
     mkdirSync(top, { recursive: true });
-    writeFileSync(join(top, 'Containerfile'), `FROM ${base}\nRUN npm install -g --no-audit --no-fund @anthropic-ai/claude-code@${claude} && npm cache clean --force\n`);
-    await step(`Building its image (2 of 2): claude ${claude}`, ['-t', tag, top]);
+    writeFileSync(join(top, 'Containerfile'), `FROM ${layer ?? base}\nRUN npm install -g --no-audit --no-fund @anthropic-ai/claude-code@${claude} && npm cache clean --force\n`);
+    await step(`Building its image (${steps} of ${steps}): claude ${claude}`, ['-t', tag, top]);
   }
 
   /** Earlier images, but one a container still uses (podman refuses those). @param {string} tag */
   async prune(tag) {
     const { podman } = this.cfg;
-    const all = (await this.exec(podman, ['images', '--format', '{{.Repository}}:{{.Tag}}'])).out.split('\n').filter((t) => t.startsWith(`${IMAGE}:`) || t.startsWith(`${IMAGE}-base:`));
-    const base = `${IMAGE}-base:${tag.split(':')[1].split('-')[0]}`;
-    for (const old of all.filter((t) => t !== tag && t !== base)) await this.exec(podman, ['rmi', old]);
+    const all = (await this.exec(podman, ['images', '--format', '{{.Repository}}:{{.Tag}}'])).out.split('\n').filter((t) => t.startsWith(`${IMAGE}:`) || t.startsWith(`${IMAGE}-base:`) || t.startsWith(`${IMAGE}-tools:`));
+    const hash = tag.split(':')[1].split('-')[0];
+    const keep = [tag, `${IMAGE}-base:${hash}`, `${IMAGE}-tools:${hash}`];
+    for (const old of all.filter((t) => !keep.includes(t))) await this.exec(podman, ['rmi', old]);
     await this.exec(podman, ['image', 'prune', '-f']);
   }
 
@@ -429,7 +438,7 @@ export class WorkerAgent {
         return false;
       }
     };
-    const inside = (/** @type {string} */ sh, timeout = 60_000) => this.exec(podman, ['exec', container, 'sh', '-c', sh], timeout);
+    const inside = (/** @type {string} */ sh, timeout = 60_000) => this.exec(podman, [...this.worker.inBox(container), 'sh', '-c', sh], timeout);
     try {
       line('image', 'running', 'Waiting for the image');
       while (this.building) await sleep(500);
@@ -477,13 +486,18 @@ export class WorkerAgent {
       await check('process', async () => {
         const began = performance.now();
         const file = join(TEST_ROOT, 'pid');
-        const r = await this.exec(podman, ['exec', '-d', container, 'sh', '-c', `echo $$ > ${file}; exec sleep 300`]);
+        const r = await this.exec(podman, [...this.worker.inBox(container, '-d'), 'sh', '-c', `echo $$ > ${file}; exec sleep 300`]);
         if (r.code) throw new Error(`it did not start: ${lastLine(r.err)}`);
         const pid = await until(() => Number(safeRead(w.local(file))) || 0);
         if (!pid) throw new Error('it did not start');
         if ((await inside(`kill -0 ${pid} && kill ${pid}`)).code) throw new Error('it was not running a moment after it started');
         if (!(await until(async () => (await inside(`kill -0 ${pid}`)).code !== 0))) throw new Error('it did not stop');
         return `${((performance.now() - began) / 1000).toFixed(1)} s`;
+      });
+      await check('turn', async () => {
+        const l = of('turn tools');
+        if (!l?.ok) throw new Error(l?.text ?? 'it said nothing');
+        return l.text;
       });
       await check('link', () => this.link());
       await check('tools', async () => {
@@ -495,7 +509,7 @@ export class WorkerAgent {
     } catch (err) {
       // What stopped it is the first check's failure; the rest were never reached.
       if (!test.lines.some((l) => l.state === 'fail')) line('image', 'fail', err.message);
-      for (const key of ['image', 'folders', 'sync', 'process', 'link', 'tools', 'disk', 'programs']) {
+      for (const key of ['image', 'folders', 'sync', 'process', 'turn', 'link', 'tools', 'disk', 'programs']) {
         const l = test.lines.find((t) => t.key === key);
         if (!l || l.state === 'running') line(key, 'fail', 'Not tried: the check before it failed');
       }

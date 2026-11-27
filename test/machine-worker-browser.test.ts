@@ -122,7 +122,7 @@ test('the self-test runs from the row, line by line, and the row ends Ready; the
   await page.eval(`(() => { ${worker('.worker-part-head button')}.click(); })()`);
   await wait('it running, at once', `${worker('.worker-part-head button')}.textContent === 'Running…'`);
   await until('the worker to hear of it', () => asked);
-  const keys = ['image', 'folders', 'sync', 'process', 'link', 'tools', 'disk', 'programs'];
+  const keys = ['image', 'folders', 'sync', 'process', 'link', 'tools', 'disk', 'programs', 'turn'];
   says.test = {
     id: asked!,
     done: false,
@@ -133,7 +133,7 @@ test('the self-test runs from the row, line by line, and the row ends Ready; the
   };
   await wait('its first line', `${worker('.worker-checks li[data-state=ok]')}?.textContent.includes('claude 2') && !!${worker('.worker-checks li[data-state=running]')}`);
   says.test = { id: asked!, done: true, lines: keys.map((key) => ({ key, state: 'ok', text: 'fine' })) };
-  await wait('all green', `${worker()}.dataset.tone === 'ok' && ${worker()}.querySelectorAll('.worker-checks li[data-state=ok]').length === 8`);
+  await wait('all green', `${worker()}.dataset.tone === 'ok' && ${worker()}.querySelectorAll('.worker-checks li[data-state=ok]').length === ${keys.length}`);
   assert.match(await cardText(), /My worker pool: up to 3 at once[^]*Its owner's minions run there, up to 3 at once[^]*Last passed whole/);
   await page.eval(`[...${worker()}.querySelectorAll('.worker-fold')].find((d) => /caps/.test(d.textContent)).open = true`);
   await wait('the caps', `!!document.getElementById('worker-cap-${id}-threads')`);

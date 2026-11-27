@@ -25,7 +25,7 @@ async function deadPort(): Promise<number> {
   return port;
 }
 
-const cache = join(homedir(), '.cache', 'ms-playwright');
+const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright');
 const hasChromium = existsSync(cache) && readdirSync(cache).some((d) => /^chromium_headless_shell-\d+$/.test(d));
 
 test('the stand-in executable leaves the Claude config path available as a directory', { timeout: 60_000 }, async () => {

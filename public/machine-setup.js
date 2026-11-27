@@ -149,6 +149,7 @@ export const WORKER_CHECKS = {
   tools: 'Host tools',
   disk: 'Your disk is out of reach',
   programs: "Windows programs can't start",
+  turn: "What perigee's turns have",
 };
 
 /** The fixed caps every worker started on before #2250 (the Build 7 spec's): one still on all four was never sized to its PC. */

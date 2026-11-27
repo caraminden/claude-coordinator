@@ -131,7 +131,7 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit-admin\tools\win-
 - It asks for the box's password (user `citadel`, from her password manager), copies the driver's files into the box, and asks before the one step with downtime: it shuts the box down cleanly, adds the GPU partition and starts it again (about 3 minutes; a job running then fails and is run again).
 - Running it again later (after a driver update) only copies the files again: no restart. It refuses while a GPU job is running.
 
-**Switch GPU jobs off while she plays** (Josh, 2026-11-19: "There should be a switch I can flip that blocks all GPU jobs until unswitched", then "I meant a switch in the citadel UI"). In Citadel, Machines, open `citadel-test-box`: untick **GPU jobs**. It saves at once; nothing on her PC or the box changes. While it's off a `run-gpu` task is refused before it reaches the box, and one already running is stopped at once. Everything else on the box (CI, `run`, `build`) goes on in software. Tick it again to let GPU jobs run.
+**Switch GPU jobs off while she plays** (Josh, 2026-11-19: "There should be a switch I can flip that blocks all GPU jobs until unswitched", then "I meant a switch in the citadel UI"). In Citadel, Machines, open `citadel-test-vm`: untick **GPU jobs**. It saves at once; nothing on her PC or the box changes. While it's off a `run-gpu` task is refused before it reaches the box, and one already running is stopped at once. Everything else on the box (CI, `run`, `build`) goes on in software. Tick it again to let GPU jobs run.
 
 **Take it off:** in PowerShell as administrator on her PC:
 

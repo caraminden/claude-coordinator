@@ -84,6 +84,7 @@ export type RoleSetupDeps = {
 };
 
 /** What a Builds Set up pulls and makes: tools/build-images/images.json, each image pinned by digest. */
+const BUILD_KINDS = ['android', 'node', 'rust'];
 export type BuildImages = { images: Record<string, string>; volumes: string[] };
 export const BUILD_IMAGES_FILE = fileURLToPath(new URL('../tools/build-images/images.json', import.meta.url));
 /** That file as this release shipped it, read once at load (a ship that changes it restarts the server). */
@@ -96,8 +97,8 @@ const SHIPPED_IMAGES = (() => {
 })();
 
 /**
- * The build images to pull, from the file's text. Throws a 409 while the Android one, the self-test's, isn't published,
- * and a 500 when the file is broken.
+ * The build images to pull, from the file's text. Throws a 409 until all three are published, so a green tick means a
+ * machine has every one, and a 500 when the file is broken.
  */
 export function buildImages(text: string | Error = SHIPPED_IMAGES): BuildImages {
   let raw: { images?: Record<string, { image?: unknown } | null>; volumes?: unknown };
@@ -113,7 +114,8 @@ export function buildImages(text: string | Error = SHIPPED_IMAGES): BuildImages 
     if (!/^[a-z]+$/.test(kind) || typeof v.image !== 'string' || !IMAGE.test(v.image)) throw new HttpError(500, `Citadel's build image list has a bad ${kind} image: each is pinned by digest`);
     images[kind] = v.image;
   }
-  if (!images.android) throw new HttpError(409, "Citadel's build images aren't published yet, so there's nothing to pull: try again once they are");
+  const missing = BUILD_KINDS.filter((k) => !images[k]);
+  if (missing.length) throw new HttpError(409, `Citadel's build images aren't all published yet (${missing.map((k) => `citadel-build-${k}`).join(', ')}): try again once they are`);
   const volumes = Array.isArray(raw.volumes) ? raw.volumes.filter((v): v is string => typeof v === 'string' && /^citadel-[a-z]+$/.test(v)) : [];
   return { images, volumes };
 }

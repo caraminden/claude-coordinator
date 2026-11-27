@@ -1,5 +1,5 @@
 // The agent's side of a role's Set up and self-test (Build 7 M4, src/role-setup.ts). machine-agent.mjs downloads this
-// file from the app at each press and runs one ask: { id, role, kind: 'setup' | 'test', caps? }. Each step's line goes
+// file from the app at each press and runs one ask: { id, role, kind: 'setup' | 'test', caps?, builds? }. Each step's line goes
 // back as it runs; what needs an administrator goes back as fixed words (public/role-setup.js ADMIN_NEEDS), never as a
 // command. Node only, no other file: it runs on the owner's PC beside machine-agent.mjs.
 import { spawn } from 'node:child_process';

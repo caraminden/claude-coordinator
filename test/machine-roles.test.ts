@@ -227,7 +227,23 @@ test('PATCH roles: owner and admins only; on with no list is every scheme its ow
   await patchRoles(app, as(cara), m, { role: 'ci', on: false });
   const back = await patchRoles(app, as(josh), m, { role: 'ci', on: true });
   assert.deepEqual(back.roles.find((r) => r.role === 'ci')?.projects, [shared.id]);
+  // The Builds role (H1) starts off, and round-trips through machine_roles: on, every scheme he's in, its threads cap.
+  assert.deepEqual(
+    s.machineRoles(m.id).find((r) => r.role === 'builds'),
+    { role: 'builds', on: false, caps: {}, setup: null, projects: [] },
+  );
+  const builds = await patchRoles(app, as(josh), m, { role: 'builds', on: true, caps: { threads: 6 } });
+  assert.deepEqual(
+    builds.roles.find((r) => r.role === 'builds'),
+    { role: 'builds', on: true, caps: { threads: 6 }, setup: null, projects: [mine.id, shared.id], name: 'Builds' },
+  );
   s.db.close();
+  const again = new Store(join(dir, 'patch.db'));
+  assert.deepEqual(
+    again.machineRoles(m.id).find((r) => r.role === 'builds'),
+    { role: 'builds', on: true, caps: { threads: 6 }, setup: null, projects: [mine.id, shared.id] },
+  );
+  again.db.close();
 });
 
 test('each role decides alone: Tools for sessions, GPU jobs for machine jobs, CI for runner tokens', async () => {
@@ -276,43 +292,4 @@ test('rolesFromLegacy and legacyFromRoles round-trip every lend shape', () => {
     assert.ok(sameLend(back.lend, lend as never), JSON.stringify(lend));
     assert.deepEqual(back.projects, [1, 3]);
   }
-});
-
-test('the Builds role round-trips through machine_roles: on, its schemes and its threads cap; starts off for an old machine', async () => {
-  const s = new Store(join(dir, 'builds.db'));
-  const josh = s.createUser({ name: 'Josh', login: 'josh' });
-  const a = s.createProject('a', null, josh.id);
-  const b = s.createProject('b', null, josh.id);
-  const m = s.createMachine('josh-pc', '', 'Josh', josh.id);
-  assert.deepEqual(
-    s.machineRoles(m.id).find((r) => r.role === 'builds'),
-    { role: 'builds', on: false, caps: {}, setup: null, projects: [] },
-  );
-  const app = {
-    store: s,
-    machines: { rolesChanged: () => {}, endSessionsWhere: () => {}, list: () => [], view: () => ({}) },
-    runner: { turnLine: { pump: () => {} } },
-    jobs: { drop: () => {} },
-    broadcast: () => {},
-  } as unknown as Parameters<typeof patchRoles>[0];
-  const on = await patchRoles(app, { uid: josh.id, admin: false } as Parameters<typeof patchRoles>[1], m, { role: 'builds', on: true, caps: { threads: 6 } });
-  assert.deepEqual(
-    on.roles.find((r) => r.role === 'builds'),
-    { role: 'builds', on: true, caps: { threads: 6 }, setup: null, projects: [a.id, b.id], name: 'Builds' },
-  );
-  s.db.close();
-  const again = new Store(join(dir, 'builds.db'));
-  assert.deepEqual(
-    again.machineRoles(m.id).find((r) => r.role === 'builds'),
-    { role: 'builds', on: true, caps: { threads: 6 }, setup: null, projects: [a.id, b.id] },
-  );
-  assert.deepEqual(
-    again
-      .machineRoles(m.id)
-      .filter((r) => r.on)
-      .map((r) => r.role),
-    ['tools', 'gpu', 'builds'],
-    'Tools and GPU jobs as before, and Builds',
-  );
-  again.db.close();
 });

@@ -24,8 +24,9 @@ RUN apt-get update -q \
  && mise use -g java@temurin-21 node@24 \
  && ln -s "$(mise where java@temurin-21)" /opt/java \
  && ln -s "$(mise where node@24)" /opt/node
+# mise's shims first, so a scheme's own mise.toml picks its java and node; JAVA_HOME is the image's for Gradle's default.
 ENV JAVA_HOME=/opt/java \
-    PATH=/opt/java/bin:/opt/node/bin:/opt/gradle/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/mise/shims:$PATH
+    PATH=/opt/mise/shims:/opt/java/bin:/opt/node/bin:/opt/gradle/bin:/opt/android-sdk/cmdline-tools/latest/bin:$PATH
 
 RUN curl -fsSL -o /tmp/cmdline.zip "https://dl.google.com/android/repository/$CMDLINE_ZIP" \
  && echo "$CMDLINE_SHA1  /tmp/cmdline.zip" | sha1sum -c - \

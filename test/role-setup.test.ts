@@ -309,7 +309,7 @@ const imagesFile = (images: Record<string, { image: string | null; mb: number | 
 
 test('Builds Set up sends the images by digest, the volumes and its threads cap to the agent; a failed step shows on the role', () => {
   const t = world({ os: 'linux' });
-  t.deps.buildImages = imagesFile({ android: { image: `ghcr.io/caraminden/citadel-build-android@${digest('a')}`, mb: 2500 }, node: { image: `ghcr.io/caraminden/citadel-build-node@${digest('b')}`, mb: 300 }, rust: { image: null, mb: null } });
+  t.deps.buildImages = imagesFile({ android: { image: `ghcr.io/caraminden/citadel-build-android@${digest('a')}`, mb: 2500 }, node: { image: `ghcr.io/caraminden/citadel-build-node@${digest('b')}`, mb: 300 }, rust: { image: `ghcr.io/caraminden/citadel-build-rust@${digest('c')}`, mb: 900 } });
   t.store.writeMachineRoles(t.machine().id, (roles) => roles.map((r) => (r.role === 'builds' ? { ...r, on: true, caps: { threads: 4 } } : r)));
   const run = t.setups.start(t.machine(), 'builds', 'setup', t.josh);
   assert.deepEqual(t.sent, [
@@ -319,7 +319,7 @@ test('Builds Set up sends the images by digest, the volumes and its threads cap 
         role: 'builds',
         kind: 'setup',
         caps: { threads: 4 },
-        builds: { images: { android: `ghcr.io/caraminden/citadel-build-android@${digest('a')}`, node: `ghcr.io/caraminden/citadel-build-node@${digest('b')}` }, volumes: ['citadel-gradle', 'citadel-cargo', 'citadel-npm'] },
+        builds: { images: { android: `ghcr.io/caraminden/citadel-build-android@${digest('a')}`, node: `ghcr.io/caraminden/citadel-build-node@${digest('b')}`, rust: `ghcr.io/caraminden/citadel-build-rust@${digest('c')}` }, volumes: ['citadel-gradle', 'citadel-cargo', 'citadel-npm'] },
       },
     },
   ]);
@@ -335,8 +335,8 @@ test("Builds refuses a Mac, and images that aren't published or aren't pinned by
   const mac = world({ os: 'macos' });
   assert.throws(() => mac.setups.start(mac.machine(), 'builds', 'setup', mac.josh), /Linux, or Windows with WSL/);
   const t = world({ os: 'linux' });
-  t.deps.buildImages = imagesFile({ android: { image: null, mb: null } });
-  assert.throws(() => t.setups.start(t.machine(), 'builds', 'setup', t.josh), /aren't published yet/);
+  t.deps.buildImages = imagesFile({ android: { image: `ghcr.io/caraminden/citadel-build-android@${digest('a')}`, mb: 1 }, node: { image: null, mb: null } });
+  assert.throws(() => t.setups.start(t.machine(), 'builds', 'setup', t.josh), /aren't all published yet \(citadel-build-node, citadel-build-rust\)/);
   assert.equal(t.sent.length, 0);
   assert.throws(() => buildImages(imagesFile({ android: { image: 'ghcr.io/caraminden/citadel-build-android:latest', mb: 1 } })), /pinned by digest/);
   // The shipped file reads: published or not, it is the shape both sides take.
@@ -345,7 +345,7 @@ test("Builds refuses a Mac, and images that aren't published or aren't pinned by
     assert.ok(Object.values(shipped.images).every((i) => /^ghcr\.io\/caraminden\/citadel-build-[a-z]+@sha256:[a-f0-9]{64}$/.test(i)));
     assert.deepEqual(shipped.volumes, ['citadel-gradle', 'citadel-cargo', 'citadel-npm']);
   } catch (err) {
-    assert.match((err as Error).message, /aren't published yet/);
+    assert.match((err as Error).message, /aren't all published yet/);
   }
   assert.ok(JSON.parse(readFileSync(BUILD_IMAGES_FILE, 'utf8')).images.android);
 });

@@ -351,3 +351,42 @@ adr_commit() {
   git commit -q -m "${n:+#$n: }$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed" || return 1
   sed 's/^/land: /' <<<"$renamed" >&2
 }
+
+mode_checks() {
+  label=$branch # for the retro log's lines: which kind of run this is
+  untouched="main is untouched"
+  case $mode in
+    into | full)
+      label="$branch · into $build"
+      [ "$mode" = into ] || label="$label, full"
+      untouched="$build is untouched"
+      # The main the build took in: schema-compat checks against it, not a later release main (#2067).
+      if [ "$mode" = full ]; then LAND_BUILD_BASE=$(git merge-base HEAD main) && export LAND_BUILD_BASE; fi
+      [[ $branch != build/* ]] || refuse "run it from a feeder's branch or the build minion's own, not from a build branch"
+      git show-ref -q --verify "refs/heads/$build" || refuse "$build doesn't exist: its build minion makes it (git branch $build main), so nothing merged"
+      for f in "${files[@]}"; do { [[ $f != -* ]] && [ -f "$f" ]; } || refuse "$f is not a file in $here: name the test files this change touched"; done
+      if [ "$mode" = into ] && [ ${#files[@]} -eq 0 ]; then
+        code=$(git diff --name-only "refs/heads/$build...HEAD" | grep -vE '\.md$|^docs/' || true)
+        [ -z "$code" ] || refuse "name the test files this change touched (tools/land.sh --into $build <test files>): only a docs-only change (*.md, docs/) merges in untested, and it changes $(head -n 3 <<<"$code" | sed ':a;N;$!ba;s/\n/, /g')$([ "$(wc -l <<<"$code")" -le 3 ] || echo ' and more'). Nothing merged"
+      fi
+      claims_gate
+      # This run changes the claims: its mark, written whole then moved into place (a half-written one reads as a dead run's).
+      if [ "$mode" = into ] && [ -z "$check" ] && ! git diff --quiet "$(git merge-base "refs/heads/$build" HEAD)" HEAD -- build-claims.md; then
+        claims_flag=$(claims_mark).$$ claims_new=$(claims_mark)-new.$$ # not a name claims_inflight's glob takes: it would drop it as a dead run's
+        trap 'rm -f "$claims_flag" "$claims_new"' EXIT # then land_timing's
+        queue_proc $$ >"$claims_new" && mv -f "$claims_new" "$claims_flag"
+      fi ;;
+    land)
+      # A branch on a build's commits would put part of that build live. Not commits that came off main (a rolled-back
+      # restart) after a merge of main took them into the build: the rebase below leaves those behind.
+      taken=$(cut -d' ' -f1 "$state/taken-back" 2>/dev/null || true)
+      while read -r ref; do
+        for mb in $(git merge-base --all HEAD "$ref" 2>/dev/null); do
+          git merge-base --is-ancestor "$mb" main && continue
+          for t in $taken; do git merge-base --is-ancestor "$mb" "$t" 2>/dev/null && continue 2; done
+          refuse "$branch carries commits of ${ref#refs/heads/} that main doesn't have, so landing it would put part of that build live; nothing landed. Merge it into the build instead: tools/land.sh --into ${ref#refs/heads/} <the test files you touched>"
+        done
+      done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/')
+  esac
+  return 0
+}

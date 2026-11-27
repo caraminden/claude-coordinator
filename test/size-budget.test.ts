@@ -89,12 +89,12 @@ test('the check fails on growth past the limit or past an allowed size, and pass
 
 // The ship script in bytes (#2099; Josh, 2026-11-26, approving #1921's plan): tools/land.sh and its parts
 // (tools/land/<part>.sh). Lines don't bound it (a third of its lines ran past 160 characters), so each file has a byte
-// limit, the lot a total, and lines past 160 characters a count. Until the split's last step these are a falling
-// ceiling, lowered by each step to what it leaves; then the plan's limits (specs/ship-script-split.md, "The shape").
+// limit, the lot a total, and lines past 160 characters a count: the plan's hard limits (specs/ship-script-split.md,
+// "The shape"), land.sh at 25 KB since the split left it at 22 (#2099), and the total and count at what the split left.
 // Raising one needs the decision quoted beside it. A part with no row here fails: give it one.
 export const SHIP_LIMITS = {
   files: {
-    'tools/land.sh': 85_000,
+    'tools/land.sh': 25_000,
     'tools/land/common.sh': 10_000,
     'tools/land/prepare.sh': 30_000,
     'tools/land/guards.sh': 20_000,
@@ -104,8 +104,12 @@ export const SHIP_LIMITS = {
     'tools/land/early.sh': 15_000,
     'tools/land/blame.sh': 30_000,
     'tools/land/main-red.sh': 10_000,
+    'tools/land/rebase.sh': 15_000,
+    'tools/land/gate.sh': 20_000,
+    'tools/land/settings.sh': 10_000,
+    'tools/land/ship.sh': 10_000,
   } as Record<string, number>,
-  total: 216_700, // what the trim leaves with #2141's 2.5 KB on top
+  total: 219_300, // +2,500 for step 7's phase functions (their wrappers and indents); Cara, 2026-11-26: "Do steps 6 and 7"
   longLines: 176,
 };
 

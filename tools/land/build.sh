@@ -120,3 +120,22 @@ claims_gate() {
   fi
   claims_check main
 }
+
+build_tip() {
+  if [ "$mode" = build ]; then
+    # The rebased copy is past the merge of main, so HEAD is no longer at the build's tip: the copy that merged names it.
+    if [ -n "$resumed" ]; then build=${LAND_BUILD:-}; else build=$(git for-each-ref --points-at HEAD --format='%(refname:lstrip=2)' 'refs/heads/build/'); fi
+    if ! [[ $build =~ ^build/[1-9][0-9]{0,5}$ ]]; then
+      # One merge ahead of a build: a --build that stopped after merging main, or a merge by hand; with the commit
+      # that renumbered its ADRs (below) on top of it, if it made one.
+      ahead= tip=HEAD
+      ! grep -qF 'Numbered at ship time by tools/land.sh' <<<"$(git log -1 --format=%b HEAD)" || tip=HEAD^ # not a pipe: #646
+      [ -n "$build" ] || ! git rev-parse -q --verify "$tip^2" >/dev/null || ahead=$(git for-each-ref --points-at "$tip^1" --format='%(refname:lstrip=2)' 'refs/heads/build/' | head -n 1)
+      [ -z "$ahead" ] || refuse "$branch is one merge ahead of $ahead (a --build that stopped after merging main, or a merge of main by hand): run tools/land.sh --into $ahead --full first, then this again. Nothing landed"
+      refuse "$branch is not at the tip of a build branch${build:+ (it is at more than one: $(echo $build))}: bring it to its build's tip first (git merge --ff-only build/<n>). Nothing landed"
+    fi
+    label="$branch · lands $build"
+    ! git cat-file -e HEAD:build-claims.md 2>/dev/null || refuse "build-claims.md, the build's claims, is still on $branch and would ship to main: git rm it, commit, run tools/land.sh --into $build (a docs-only merge), then this again. Nothing landed"
+  fi
+  return 0
+}

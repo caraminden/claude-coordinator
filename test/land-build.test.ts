@@ -321,7 +321,7 @@ test('a merge of main that changes land.sh hands --build over to the merged copy
   r.commit(bwt, 'b.txt', 'in the build\n');
   git(r.source, 'branch', '-f', 'build/3', 'ticket/9-build');
   const script = join(r.source, 'tools', 'land.sh');
-  writeFileSync(script, readFileSync(script, 'utf8').replace('say "running the tests"', 'say "running the tests (the merged land.sh)"'));
+  writeFileSync(script, readFileSync(script, 'utf8').replace('\nland_verdict #', '\nsay "running the tests (the merged land.sh)" # only a copy that took over says it\nland_verdict #'));
   git(r.source, 'commit', '-qam', 'newer land.sh');
   const res = spawnSync('bash', [join(bwt, 'tools', 'land.sh'), '--build'], { cwd: bwt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note') } });
   assert.equal(res.status, 0, res.stderr);

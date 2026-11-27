@@ -121,7 +121,7 @@ else if (url.endsWith('/runs/7') && mode === 'held') {
   fs.writeFileSync(path.join(dir, 'polls'), String(n));
   // mode skip: queued, then completed at the next look, never seen in progress.
   const status = mode === 'queued' || (mode === 'busy' && n < 12) ? 'queued' : mode === 'busy' ? 'completed' : mode === 'skip' ? (n < 2 ? 'queued' : 'completed') : ['queued', 'in_progress'][n - 1] ?? 'completed';
-  out({ id: 7, status, conclusion: status === 'completed' ? 'failure' : null, html_url: 'https://github.com/o/r/actions/runs/7' });
+  out({ id: 7, status, conclusion: status === 'completed' ? 'failure' : null, html_url: 'https://github.com/o/r/actions/runs/7', created_at: process.env.FAKE_GH_CREATED });
 } else if (/\\/runs\\/7\\/jobs$|\\/jobs\\/9\\/logs$/.test(url) && (mode === 'skip' || (mode === 'blip' && !fs.existsSync(path.join(dir, 'blip-' + url.split('/').pop()))))) {
   // mode blip: the first read of the jobs and of the log each fail once; skip: the jobs never read.
   fs.writeFileSync(path.join(dir, 'blip-' + url.split('/').pop()), '');
@@ -267,6 +267,21 @@ test("a CI job's history line counts its wait for a runner as waiting, and only 
   assert.ok(wait >= 1, `it waited ${wait} s`);
   const [, odd] = at('59');
   assert.ok(odd < 59, 'never more than the time that passed here');
+});
+
+test("a CI job's history line says runner only when the run waited a minute for one, not when reading it was slow (#2109)", () => {
+  const r = repo();
+  const waited = (created: string) => {
+    assert.equal(run(r, 'busy', { CITADEL_HEAVY_CI_POLL: '0.2', FAKE_GH_CREATED: created, CITADEL_HEAVY_CI_QUEUE: '60' }).status, 3);
+    rmSync(join(r.gh, 'polls'));
+    return readFileSync(join(r.gh, 'locks', 'history'), 'utf8')
+      .trim()
+      .split('\n')
+      .at(-1)!
+      .split('\t')[9];
+  };
+  assert.equal(waited('2026-11-20T09:58:00Z'), 'runner');
+  assert.equal(waited('2026-11-20T09:59:30Z'), 'none');
 });
 
 test("a ship's CI run goes first: a new heavy job waits for it before it is dispatched, and never runs on perigee", () => {

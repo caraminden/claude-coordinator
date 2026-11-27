@@ -53,7 +53,7 @@ function tile(app: Pick<App, 'runner' | 'store' | 'minionJobs' | 'heavyNow'>, se
   const { people, machines, ...rest } = app.runner.turnLine.summary();
   const places = machines.map(({ owner, ...m }) => ({ ...m, owner: app.store.getUser(owner)?.name ?? null, mine: mine(session, owner), limits: limitRows(app, m.id) }));
   const { min, max } = app.runner.turnLine.limits();
-  return { ...rest, heavy: app.heavyNow?.() ?? { home: [], machines: [] }, machines: places, min, max, limits: limitRows(app), waits: waitsEnded(app.minionJobs.stats()), people: people.map(({ person, ...p }) => ({ name: app.store.getUser(person)?.name ?? 'Automatic', ...p })) };
+  return { ...rest, heavy: app.heavyNow?.((id) => app.store.canSee(session, id)) ?? { home: [], machines: [] }, machines: places, min, max, limits: limitRows(app), waits: waitsEnded(app.minionJobs.stats()), people: people.map(({ person, ...p }) => ({ name: app.store.getUser(person)?.name ?? 'Automatic', ...p })) };
 }
 
 export const workerRoutes: Route[] = [

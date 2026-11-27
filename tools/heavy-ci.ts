@@ -477,6 +477,8 @@ async function main(argv: string[]): Promise<number> {
     }
     started = true;
     const took = Math.round((Date.parse(job?.completed_at ?? '') - Date.parse(job?.started_at ?? '')) / 1000);
+    // For the history line (#2109): a minute or more from the run's dispatch to a runner starting it is a wait for one.
+    if (Date.parse(job?.started_at ?? '') - Date.parse(run.created_at ?? '') >= 60_000 && process.env.CITADEL_HEAVY_WAITED_FILE) writeFileSync(process.env.CITADEL_HEAVY_WAITED_FILE, 'runner');
     if (took >= 0 && process.env.CITADEL_HEAVY_RAN_FILE) writeFileSync(process.env.CITADEL_HEAVY_RAN_FILE, `${took}\n`);
     const out = job ? commandOutput(ghText(`repos/${slug}/actions/jobs/${job.id}/logs`, 'reading the log'), run.conclusion) : { lines: [], code: null };
     if (out.lines.length) process.stdout.write(out.lines.join('\n') + '\n');

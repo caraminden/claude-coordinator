@@ -2704,14 +2704,11 @@ const app: App = {
   runnerCap,
   heavy: heavyPlacer,
   buildPlacer,
-  heavyNow: () =>
+  heavyNow: (canSee) =>
     heavyNow({
       perigee: heavySnapshot.get(),
-      owners: appOwners(
-        store.listContraptions(),
-        () => true,
-        (id) => store.getProject(id)?.name,
-      ),
+      owners: appOwners(store.listContraptions(), canSee, (id) => store.getProject(id)?.name),
+      canSee,
       machines: store.listMachines(),
       jobs: store.machineJobs({ states: ['queued', 'starting', 'running'] }, 200).reverse(),
       balanced: (id) => balancer.jobsOn(id),

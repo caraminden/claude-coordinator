@@ -195,7 +195,13 @@ async function follow(started: { job: number; machine: string }, kind: string, b
     j = now;
     if (j.state === 'running') ranFrom ??= Date.now();
     // For citadel-heavy's history line (#2109): what held it on the machine, kept once it starts.
-    if (j.state === 'queued' && env.CITADEL_HEAVY_WAITED_FILE) writeFileSync(env.CITADEL_HEAVY_WAITED_FILE, j.online ? 'room' : 'offline');
+    if (j.state === 'queued' && env.CITADEL_HEAVY_WAITED_FILE) {
+      try {
+        writeFileSync(env.CITADEL_HEAVY_WAITED_FILE, j.online ? 'room' : 'offline');
+      } catch {
+        // A note for the history: the job is followed to its end without it.
+      }
+    }
     away = j.online ? null : (away ?? Date.now());
     if (away !== null && Date.now() - away >= AWAY_MS) {
       const stopped = await call('POST', '', { do: 'stop', job: id }).then(

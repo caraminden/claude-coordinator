@@ -104,7 +104,9 @@ export function hostLoadBlock(l) {
                             .slice(0, 3)
                             .map((o) => `${WAITED[/** @type {keyof typeof WAITED} */ (o.why)] ?? o.why} ${o.jobs}`)
                             .join(', ')
-                        : 'nothing',
+                        : p.longestS > 0
+                          ? 'not recorded'
+                          : 'nothing',
                     ),
                   ),
                 ),

@@ -216,7 +216,6 @@ export function workersPanel(page) {
       h('div', { class: 'st-sub muted' }, quickLane(w.lane)),
       h('div', { class: 'st-sub muted' }, waitsLine(w.waits), tooCold(w.waits) ? ' ' : '', tooCold(w.waits) ? toneChip('warn', 'over 10% cold') : ''),
       places ?? '',
-      homeHeavy || others.length ? h('div', { class: 'hue-rows st-places' }, homeHeavy ?? '', ...others) : '',
       h(
         'div',
         { class: 'st-workers-act' },
@@ -227,6 +226,8 @@ export function workersPanel(page) {
           : [button('pause', 'Pause new turns', 'Running turns finish; no new minion turn starts until Resume', () => pause(true)), button('stop', 'Pause and stop running ones', 'Running turns stop and carry on where they were after Resume', () => pause('stop'))]),
       ),
       places ? '' : limits,
+      // Below the controls: a job showing up on a poll must not move them.
+      homeHeavy || others.length ? h('div', { class: 'hue-rows st-places' }, homeHeavy ?? '', ...others) : '',
       h(
         'div',
         { class: 'hue-rows st-line-rows' },

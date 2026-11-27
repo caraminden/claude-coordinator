@@ -924,7 +924,7 @@ test("a log-only job CI gives back (no runner took it) goes to the Builds role b
 });
 
 test("waiting in perigee's line with the slot busy and no machine free, it asks again and leaves the line once one has room", async () => {
-  const { env } = folder(1);
+  const { dir, env } = folder(1);
   const e = elsewhere(env);
   const { go, holder } = await holdSlot(env);
   const here = join(root, `ran-here-${n++}`);
@@ -933,9 +933,14 @@ test("waiting in perigee's line with the slot busy and no machine free, it asks 
     waiter = job(e.env, 'Peek #2 (cara)', touch(here));
     await until('it to wait in the line', () => /waiting for one/.test(waiter!.err()));
     await until('it to ask the Builds role again', () => e.asked().some((a) => a.startsWith('--place-only')));
+    // timing-ok: the wait itself is what the history line below measures, in whole seconds.
+    await new Promise((done) => setTimeout(done, 2100));
     writeFileSync(e.room, '');
     assert.equal(await waiter.done, 7, waiter.err());
     assert.match(waiter.err(), /leaves perigee's line/);
+    // #2109: the wait in perigee's line counts on the machine's history line, with what it was for.
+    assert.ok(Number(lastLine(dir)[4]) >= 2, `waited ${lastLine(dir)[4]} s`);
+    assert.notEqual(lastLine(dir)[9], 'none');
     assert.ok(!existsSync(here), 'nothing ran on perigee');
   } finally {
     writeFileSync(go, '');

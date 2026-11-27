@@ -82,8 +82,8 @@
 # - A job with no past runs is light unless the caller guesses heavy: `citadel-heavy --heavy <command...>` (or
 #   CITADEL_HEAVY_GUESS=heavy), Cara: "Let the minion make an intelligent guess for unknowns". Its own runs decide after.
 # Priority jobs skip the judgment, and CITADEL_HEAVY_JUDGE=0 turns it off. A light job's nested citadel-heavy calls are judged on their own.
-# The history line's last column is the command's CPU time in seconds (its waited-for children, from /proc/$$/stat), so
-# old 8-column lines still parse; CI jobs write - there. A light job's line says light where it waited.
+# The history line's ninth column is the command's CPU time in seconds (its waited-for children, from /proc/$$/stat), so
+# old 8-column lines still parse; a job that ran elsewhere writes - there. The tenth, last, is what it waited on.
 set -uo pipefail
 
 say() { echo "citadel-heavy: $*" >&2; }
@@ -270,7 +270,8 @@ run_elsewhere() {
   waited=$(head -c 20 "$held" 2>/dev/null | tr -d '\t\n')
   rm -f "$fell" "$ran" "$on" "$held"
   [ "$status" != fallback ] || return 0
-  { mkdir -p "$dir" && printf '%s\t%s\t%s\ton:%s\t%s\t%s\t%s\t-\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "${m:-?}" "$((all - took))" "$took" "$status" "${waited:-${reason:-none}}" >>"$dir/history"; } 2>/dev/null
+  # One that left perigee's line for the machine waited there too, from $lined.
+  { mkdir -p "$dir" && printf '%s\t%s\t%s\ton:%s\t%s\t%s\t%s\t-\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "${m:-?}" "$(((t1 - ${lined:-$t1}) / 1000000 + all - took))" "$took" "$status" "${waited:-${reason:-none}}" >>"$dir/history"; } 2>/dev/null
   exit "$status"
 }
 [ -z "$elsewhere" ] || run_elsewhere "$@"
@@ -284,6 +285,7 @@ try_elsewhere() {
   [ -z "$marked" ] || rm -f "$dir/first"
   exec 7>&- 6>&-
   rm -f "$waitfile"
+  lined=$t0
   run_elsewhere "$@"
   # It was taken before this one got there: back into the line, without asking again.
   CITADEL_HEAVY_NO_ELSEWHERE=1 exec "$0" "${orig[@]}"
@@ -311,21 +313,21 @@ if [ -n "$hasci" ] && [ ${#back[@]} -eq 0 ]; then
     done
     printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/ci-$key-$cislot.who" 2>/dev/null
   fi
-  t1=$(us) fell=$(mktemp) ran=$(mktemp)
-  CITADEL_HEAVY_FALLBACK_FILE=$fell CITADEL_HEAVY_RAN_FILE=$ran "${ci[@]}" "$@"
+  t1=$(us) fell=$(mktemp) ran=$(mktemp) held=$(mktemp)
+  CITADEL_HEAVY_FALLBACK_FILE=$fell CITADEL_HEAVY_RAN_FILE=$ran CITADEL_HEAVY_WAITED_FILE=$held "${ci[@]}" "$@"
   status=$?
   # The file, not the status, says nothing ran there: a command may exit 120 itself.
   [ -s "$fell" ] && status=fallback
   # What the runner worked on it, so the wait for a runner counts as waiting, not as how long the job takes (#1863).
   all=$((($(us) - t1) / 1000000)) took=$(cat "$ran" 2>/dev/null)
   [[ $took =~ ^[0-9]{1,7}$ ]] && [ "$took" -le "$all" ] || took=$all
-  rm -f "$fell" "$ran"
+  # The repo's CI turn, else what the client saw: a wait for a runner.
+  [ "$ciwaited" != none ] || ciwaited=$(head -c 20 "$held" 2>/dev/null | tr -d '\t\n')
+  rm -f "$fell" "$ran" "$held"
   [ -z "$cislot" ] || { rm -f "$dir/ci-$key-$cislot.who"; exec 5>&-; }
   if [ "$status" != fallback ]; then
     # 75: handed over to Citadel for ships, so it took no time here.
-    # A minute or more before its runner worked it, with the CI turn free, is a wait for a runner.
-    [ "$ciwaited" != none ] || [ $((all - took)) -lt 60 ] || ciwaited=runner
-    [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000 + all - took))" "$took" "$status" "$ciwaited" >>"$dir/history"; } 2>/dev/null
+    [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000 + all - took))" "$took" "$status" "${ciwaited:-none}" >>"$dir/history"; } 2>/dev/null
     exit "$status"
   fi
   # CI gave it back (no runner took it): a machine with the Builds role still comes before perigee's line.

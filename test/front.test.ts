@@ -348,16 +348,22 @@ test('a reader that dies mid-request is replaced, and its request answered by th
   for (let i = 0; i < 6; i++) await fromReader(srv, PATHS[0]);
 });
 
-test('a reader that hangs: its request gets a 503 the page retries, the other reader answers, and the thread is replaced', { timeout: 60_000 }, async () => {
+test('a reader that hangs: its request gets a 503 the page retries, the other reader answers, and the thread is replaced', { timeout: 120_000 }, async () => {
   await readerAnswers(srv);
-  const hanging = get(srv, `${PATHS[0]}?citadel-test-reader=hang`, srv.cookie, true);
-  // Meanwhile the other reader answers, those asked of the hung one first included.
-  await Promise.all(Array.from({ length: 4 }, () => fromReader(srv, PATHS[0])));
-  const hung = await hanging;
-  assert.equal(hung.status, 503);
-  assert.equal(JSON.parse(hung.body).retry, true);
-  // Two replacements so far: the dead one's, then this one's.
-  await until('the hung reader is replaced', () => /Reader thread silent for \d+ s: replacing it/.test(logged()) && readyAgain() === 2);
+  // The asks sent while it hangs, those asked of the hung one first included, are the other reader's on their first ask:
+  // never the main thread's after a wait (#2003). A snapshot change on its way to the front as they arrive sends them to
+  // main with no reader asked (fromReader), which this can't tell from that fallback, so then the hang is made again.
+  await until("a hang with every ask beside it a reader's", async () => {
+    const before = readyAgain();
+    const hanging = get(srv, `${PATHS[0]}?citadel-test-reader=hang`, srv.cookie, true);
+    const beside = await Promise.all(Array.from({ length: 4 }, () => get(srv, PATHS[0], srv.cookie)));
+    const hung = await hanging;
+    assert.equal(hung.status, 503);
+    assert.equal(JSON.parse(hung.body).retry, true);
+    await until('the hung reader is replaced', () => /Reader thread silent for \d+ s: replacing it/.test(logged()) && readyAgain() > before);
+    for (const got of beside) assert.equal(got.status, 200);
+    return beside.every((got) => got.reader);
+  });
   const all = await Promise.all(Array.from({ length: 8 }, () => fromReader(srv, PATHS[0])));
   assert.deepEqual(
     all.map((g) => g.status),
@@ -517,8 +523,17 @@ test("a client can't set the peer headers, not even on a connection that asked f
 });
 
 test("a restart answers what the front thread already took, a reader's answer included, then exits", { timeout: 60_000 }, async () => {
-  const slow = get(srv, `${PATHS[0]}?citadel-test-reader=slow`, srv.cookie);
-  await until('the reader has the request', () => logged().includes('Reader test hook: slow'));
+  const held = () => logged().split('Reader test hook: slow').length;
+  let slow!: Promise<Got>;
+  // A try the main thread took (fromReader) never reaches the reader: it is back at once, and sent again.
+  await until('a reader has the request', async () => {
+    const before = held();
+    let back = false;
+    slow = get(srv, `${PATHS[0]}?citadel-test-reader=slow`, srv.cookie);
+    void slow.then(() => (back = true));
+    await until('the reader has the request, or the main thread answered it', () => held() > before || back);
+    return held() > before;
+  });
   srv.proc.kill('SIGTERM');
   const got = await slow;
   assert.equal(got.status, 200);

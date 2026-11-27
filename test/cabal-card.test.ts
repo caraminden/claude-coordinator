@@ -37,6 +37,7 @@ test('one card per open cabal: its Overseer by name, a member a roster row, coun
   store.db.prepare('INSERT INTO turns (ticket_id, ended_at, cost_usd, session_cost_usd) VALUES (?, 1, 3, 0)').run(lead.id);
   const [card] = await cabalCards(store, p.id, deps);
   assert.equal(card.overseer, "Build 7's Overseer");
+  assert.equal(card.name, 'Build 7', "its section's heading in the list (#2181)");
   assert.deepEqual([card.lead, card.build, card.done, card.finished, card.next, card.asks, card.spend], [lead.id, 7, 'shipped', 0, 1, 1, 3]);
   assert.deepEqual(
     card.members.map((m) => [m.id, m.label, m.state]),

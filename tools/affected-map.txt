@@ -70,6 +70,17 @@ src/turn-progress.ts: test/list-reads.test.ts test/front.test.ts
 src/turn-spend.ts: test/list-reads.test.ts test/front.test.ts
 src/plan-usage.ts: test/list-reads.test.ts test/front.test.ts
 src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+# runner.ts's split-out parts from #1840 keep the runner's rows above, since the code those tests caught moved with them
+# (effort retro #2216: src/closing.ts had stopped picking closed-cleanup). A module moved out of a mapped file takes its rows.
+src/held-mail.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/turn-messages.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/closing.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/dismissed-cleanup.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/turn-events.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/stream-events.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/fresh.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/keepalive-run.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
+src/turn-keys.ts: test/list-reads.test.ts test/boot-check.test.ts test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).
 server.ts: test/boot-imports.test.ts

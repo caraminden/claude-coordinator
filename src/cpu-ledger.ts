@@ -28,6 +28,7 @@ export const CPU_SOURCES: { key: string; label: string; group: string }[] = [
   { key: 'builds', label: 'Ships, kit-sync, fast-verify', group: 'builds' },
   { key: 'heavy', label: 'citadel-heavy builds and tests', group: 'builds' },
   { key: 'godot', label: 'perigee-godot', group: 'godot' },
+  { key: 'godot-mcp', label: 'perigee-godot bridges (godot-ai)', group: 'godot' },
   { key: 'embed', label: 'citadel-embed (search index)', group: 'apps' },
   { key: 'contraptions', label: 'Contraptions', group: 'apps' },
   { key: 'apps', label: 'Other app units', group: 'apps' },
@@ -104,16 +105,16 @@ export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
     ['contraptions', join(mgr, 'contraptions.slice')],
     ['embed', join(app, 'citadel-embed.service')],
     ['godot', join(app, 'perigee-godot.service')],
+    // godot-ai's bridges, which the server starts in scopes there (src/server-tools.ts, #2179): a source of its own, as the slice goes when the last one ends.
+    ['godot-mcp', join(app, 'app-godot.slice')],
   ];
-  const [dirs, hostUsers, mine, mgrTotal, citadelTotal, appTotal, godotBridges, host, ...reads] = await Promise.all([
+  const [dirs, hostUsers, mine, mgrTotal, citadelTotal, appTotal, host, ...reads] = await Promise.all([
     hostDir(citadel).catch(() => [] as string[]),
     readStat(join(userSlice, 'cpu.stat')),
     readStat(join(mineSlice, 'cpu.stat')),
     readStat(join(mgr, 'cpu.stat')),
     readStat(join(citadel, 'cpu.stat')),
     readStat(join(app, 'cpu.stat')),
-    // godot-ai's bridges: the server starts each in a scope there (src/server-tools.ts, #2179).
-    readStat(join(app, 'app-godot.slice', 'cpu.stat')),
     readHost(o.procStat ?? PROC_STAT),
     ...named.map(([, dir]) => readStat(join(dir, 'cpu.stat'))),
   ]);
@@ -121,7 +122,6 @@ export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
   named.forEach(([k], i) => {
     if (reads[i]) s[k] = reads[i]!;
   });
-  if (godotBridges) s.godot = s.godot ? [s.godot[0] + godotBridges[0], s.godot[1] + godotBridges[1]] : godotBridges;
   // Each person's container is its own unit: citadel-claude-<n>.service.
   const boxes = dirs.filter((d) => /^citadel-claude-\d+\.service$/.test(d));
   const boxReads = await Promise.all(boxes.map((d) => readStat(join(citadel, d, 'cpu.stat'))));
@@ -168,7 +168,7 @@ function withRemainders(d: Record<string, [number, number]>) {
   const boxes = Object.keys(d).filter((k) => k.startsWith('container:'));
   const out: Record<string, [number, number]> = {};
   for (const [k, v] of Object.entries(d)) if (!k.startsWith('t:')) out[k] = v;
-  const apps = less('t:app', ['embed', 'godot']);
+  const apps = less('t:app', ['embed', 'godot', 'godot-mcp']);
   const citadelRest = less('t:citadel', ['server', 'turns', 'taskmasters', 'builds', 'heavy', ...boxes]);
   const mgrRest = less('t:mgr', ['t:citadel', 't:app', 'contraptions']);
   if (apps) out.apps = apps;

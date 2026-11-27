@@ -88,9 +88,11 @@ export class ServerToolSessions {
     this.home = home;
   }
 
-  open(tool: ServerTool, ticketId: number, who: string, res: ServerResponse): void {
+  /** Opens a session for a minion whose scheme is on the tool's list; false, writing nothing, for anyone else. */
+  open(tool: ServerTool, minion: { id: number; project_id: number; kind: string }, who: string, res: ServerResponse): boolean {
+    if (!serverToolsFor(minion.project_id, minion.kind, [tool]).length) return false;
     const id = randomBytes(12).toString('hex');
-    this.sessions.set(id, { tool, ticketId, who, res, child: null });
+    this.sessions.set(id, { tool, ticketId: minion.id, who, res, child: null });
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ session: id })}\n\n`);
     const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
@@ -98,6 +100,7 @@ export class ServerToolSessions {
       clearInterval(ping);
       this.end(id);
     });
+    return true;
   }
 
   /** A message from the turn's proxy. False when the session is gone (or another minion's). */
@@ -126,7 +129,7 @@ export class ServerToolSessions {
     const gone = (why: string) => {
       if (this.sessions.get(id) !== s) return;
       this.log(`${s.tool.name} (${s.who}): its MCP server ${why}`);
-      // Its proxy gives up rather than reconnecting, which would only start it again.
+      // The stdio proxy (src/machine-mcp.ts) gives up on it; the pooled one opens a fresh session on the next call.
       s.res.write(`data: ${JSON.stringify({ closed: true })}\n\n`);
       this.end(id);
     };

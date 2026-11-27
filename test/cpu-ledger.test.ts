@@ -41,10 +41,12 @@ test('a reading names each source and keeps raw totals; other users are one tota
   assert.ok(!Object.keys(l.s).some((k) => /^\d+$/.test(k) || k.includes('user-')), 'no per-user names');
 });
 
-test("perigee-godot's line counts the godot-ai bridges the server starts in app-godot.slice (#2179)", async () => {
+test('the godot-ai bridges the server starts in app-godot.slice are a perigee-godot source of their own (#2179)', async () => {
   const t = tree({ ...base(), [`${M}/app.slice/app-godot.slice`]: [2e6, 1e6] });
   try {
-    assert.deepEqual((await readLedger({ ...t, uid: UID })).s.godot, [11e6, 2e6]);
+    const l = await readLedger({ ...t, uid: UID });
+    assert.deepEqual(l.s.godot, [9e6, 1e6]);
+    assert.deepEqual(l.s['godot-mcp'], [2e6, 1e6]);
   } finally {
     rmSync(t.root, { recursive: true, force: true }); // timing-ok: own temp dir
   }

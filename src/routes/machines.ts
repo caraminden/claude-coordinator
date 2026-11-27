@@ -15,7 +15,7 @@ import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import { POOLED_WINDOWS } from '../machine-pick.ts';
-import { SERVER_TOOLS, serverToolKey, serverToolsFor, type ServerTool } from '../server-tools.ts';
+import { SERVER_TOOLS, serverToolKey, type ServerTool } from '../server-tools.ts';
 import type { Machine, Project, Ticket } from '../db.ts';
 import { hostReach, startedLine } from '../host-reach.ts';
 import { cleanCaps, isRole, ROLE_NAMES, ROLES, type Role, type RoleRow } from '../machine-roles.ts';
@@ -586,8 +586,8 @@ async function postTurnSession({ req, res, app, caller, params }: Ctx) {
 
 /** A minion's proxy opens a session to a tool the server runs (src/server-tools.ts, #2179): only in a scheme on its list. */
 function openToolSession({ res, app, caller }: Ctx, tool: ServerTool) {
-  if (!app.serverTools || !serverToolsFor(caller!.project_id, caller!.kind).includes(tool)) throw new HttpError(403, `${tool.name} isn't lent to this scheme`);
-  app.serverTools.open(tool, caller!.id, `#${caller!.number} in ${app.store.getProject(caller!.project_id)?.name ?? 'a scheme'}`, res);
+  const who = `#${caller!.number} in ${app.store.getProject(caller!.project_id)?.name ?? 'a scheme'}`;
+  if (!app.serverTools?.open(tool, caller!, who, res)) throw new HttpError(403, `${tool.name} isn't lent to this scheme`);
 }
 
 async function postToolSession({ req, res, app, caller, params }: Ctx) {

@@ -51,6 +51,24 @@ function stream() {
 // An echo MCP server: answers each request with its own id, and prints what it was given as environment.
 const ECHO = `process.stdin.setEncoding('utf8');let b='';process.stdin.on('data',(c)=>{b+=c;let i;while((i=b.indexOf('\\n'))>=0){const m=JSON.parse(b.slice(0,i));b=b.slice(i+1);process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{secret:process.env.SECRET_THING??null,home:process.env.HOME}})+'\\n');}});process.stdin.on('end',()=>process.exit(0));`;
 const echo: ServerTool = { name: 'echo', schemes: [1], command: () => [process.execPath, '-e', ECHO], notes: '' };
+const delve = { id: 42, project_id: 1, kind: 'thread' };
+
+test("a session opens only for a minion of a scheme on the tool's list, never its Taskmaster", () => {
+  let ran = 0;
+  const sessions = new ServerToolSessions(
+    () => (ran++, spawn(process.execPath, ['-e', ''])),
+    () => {},
+  );
+  for (const minion of [
+    { id: 9, project_id: 2, kind: 'thread' },
+    { id: 10, project_id: 1, kind: 'coordinator' },
+  ]) {
+    const s = stream();
+    assert.equal(sessions.open(echo, minion, '#9 in Citadel', s.res), false, JSON.stringify(minion));
+    assert.deepEqual(s.got, [], 'nothing is written, so the route can still answer 403');
+  }
+  assert.equal(ran, 0);
+});
 
 test('a session starts its server on its first message, relays both ways, keeps the server env out, and ends it with the stream', async () => {
   process.env.SECRET_THING = 'hunter2';
@@ -68,7 +86,7 @@ test('a session starts its server on its first message, relays both ways, keeps 
   );
   try {
     const s = stream();
-    sessions.open(echo, 42, '#7 in Delve', s.res);
+    assert.equal(sessions.open(echo, delve, '#7 in Delve', s.res), true);
     const id = (s.got[0] as { session: string }).session;
     assert.match(id, /^[0-9a-f]{24}$/);
     assert.equal(started.length, 0, 'nothing runs until the first message');
@@ -91,7 +109,7 @@ test("a server that exits tells the proxy it closed, so it doesn't start it agai
   const quits: ServerTool = { name: 'quits', schemes: [1], command: () => [process.execPath, '-e', 'process.exit(3)'], notes: '' };
   const sessions = new ServerToolSessions(undefined, () => {});
   const s = stream();
-  sessions.open(quits, 42, '#7 in Delve', s.res);
+  sessions.open(quits, delve, '#7 in Delve', s.res);
   const id = (s.got[0] as { session: string }).session;
   sessions.post(id, 42, { jsonrpc: '2.0', id: 1, method: 'initialize' });
   await until('the closed word', () => s.ended());

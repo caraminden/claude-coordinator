@@ -97,8 +97,8 @@ export class CabalCards {
    * before it lands would show a build's Overseer as a loose row, #2203). Bounded: a slow git read never holds a page back.
    */
   warm(ms = 8000): Promise<void> {
-    this.first ??= Promise.race([this.poll(), sleep(ms, undefined, { ref: false }).then(() => {})]).catch(() => {});
-    return this.first;
+    this.first ??= this.poll().catch(() => {});
+    return Promise.race([this.first, sleep(ms, undefined, { ref: false })]).then(() => {});
   }
 
   /** The last cards read for a scheme, for its page load. */

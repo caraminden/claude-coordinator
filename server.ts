@@ -3048,6 +3048,7 @@ if (config.front) {
   );
   if (STATICS) throughFront.statics(STATICS);
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
+  if (!BOOT_CHECK || PREVIEW) await cabals.warm(3000); // the readers' first snapshot carries the open cabals, not none (#2203)
   readersLive = publishLive({
     handed: handover?.handed,
     publish: throughFront.publish,

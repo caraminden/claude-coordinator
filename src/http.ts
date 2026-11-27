@@ -477,7 +477,7 @@ export interface App {
   /** Build branches' headers (src/builds.ts). */
   builds: Pick<Builds, 'get'>;
   /** Open cabals' cards in the minions list (src/cabal-cards.ts). */
-  cabals: Pick<CabalCards, 'get' | 'refresh'>;
+  cabals: Pick<CabalCards, 'get' | 'refresh'> & Partial<Pick<CabalCards, 'warm'>>;
   sharedFiles(projectId: number): Promise<SharedFile[]>;
   sharedDir(ticket: TicketFields): string;
   registryChanged(projectId: number, global: boolean): void;

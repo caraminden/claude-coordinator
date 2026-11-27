@@ -420,10 +420,12 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   if (follow) {
     const { leader, when } = follow;
     waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
-    store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` }, { kind: session.agent === undefined ? 'person' : 'agent', name: session.name });
-    runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unseal starts it now.` });
+    store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build, leader.build != null && store.getSetting<number>(buildOwnerKey(leader.project_id, leader.build)) === leader.id)}` }, { kind: session.agent === undefined ? 'person' : 'agent', name: session.name });
+    runner.emit(id, 'note', {
+      text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build, leader.build != null && store.getSetting<number>(buildOwnerKey(leader.project_id, leader.build)) === leader.id)}. Messages to it wait for that start; Unseal starts it now.`,
+    });
     runner.broadcastTicket(id);
-    notes.push(`Sealed: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with \`unpark\` starts it now.`);
+    notes.push(`Sealed: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build, leader.build != null && store.getSetting<number>(buildOwnerKey(leader.project_id, leader.build)) === leader.id)}. Messages to it are held for that start; message_ticket with \`unpark\` starts it now.`);
   } else {
     runner.send(id, session.name, brief0, [], { brief: true });
   }
@@ -1012,7 +1014,7 @@ export const projectRoutes: Route[] = [
       const all_tms = app.store.listCoordinators(project.id);
       const own = !caller && all_tms.length > 1 ? (app.store.coordinatorFor(project.id, session.uid!) ?? coordinator) : coordinator;
       const taskmasters = all_tms.length > 1 ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : (app.store.getUser(t.coordinator_of)?.name ?? null), updated_at: t.updated_at, status: t.status, ...queueMarks(app, t) })) : [];
-      return json(res, 200, { project, coordinator: readScope(app.store.db, () => ticketView(app, own.id)), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews, cabals: app.cabals?.get(project.id) ?? [] });
+      return json(res, 200, { project, coordinator: readScope(app.store.db, () => ticketView(app, own.id)), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews, cabals: (await app.cabals?.warm?.(), app.cabals?.get(project.id) ?? []) });
     },
   },
   {

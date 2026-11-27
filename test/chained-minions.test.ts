@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { Store } from '../src/db.ts';
+import { buildOwnerKey, Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { type Chain, chainIs, githubPrs, LiveWaiters, mergedPr, mergedPrOf, missingCommits, type PrMerge, startChained } from '../src/wake.ts';
 import { bootServer, holds, stopTurns, stopProcs, testPins } from './helpers.ts';
@@ -246,6 +246,33 @@ test('a feeder merged into its build and dismissed is merged for a chain, and li
   store.updateTicket(feeder.id, { status: 'closed' });
   assert.equal(await w.check(), 1);
   assert.deepEqual([started.map((s) => s.c.ticket), held.length], [[follower], 0]);
+});
+
+// A build's own minion (its owner) is not a feeder: its work sitting on build/<n> says nothing about the build
+// reaching main, so a merged chain on it holds until the build ships (create_ticket start_after on a build owner).
+test('a merged chain on a build owner waits for the build to ship to main; a feeder in the same build still goes', async () => {
+  reset();
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  live.git('branch', 'build/8', 'main');
+  const owner = minion();
+  const feeder = minion();
+  store.updateTicket(owner.id, { build: 8 });
+  store.updateTicket(feeder.id, { build: 8 });
+  store.setSetting(buildOwnerKey(citadel.id, 8), owner.id);
+  for (const t of [owner, feeder]) {
+    live.git('update-ref', `refs/heads/${t.branch}`, live.git('rev-parse', 'build/8'));
+    live.git('update-ref', 'refs/heads/build/8', live.work(t.branch));
+  }
+  const f = await w.follow(owner.id, 'merged');
+  assert.equal(f.state, 'wait', 'at create time: the owner is on build/8, not on main');
+  assert.equal((await w.follow(feeder.id, 'merged')).state, 'go', 'a feeder merged into its build is done');
+  const follower = minion().id;
+  w.chain({ ticket: follower, after: owner.id, when: 'merged', message: 'part two', from: 'Taskmaster', base: f.base, since: f.since });
+  assert.equal(await w.check(), 0, 'later: still waiting');
+  assert.match(w.heldFor(follower) ?? '', /waits for Build 8 to ship/);
+  live.git('merge', '-q', '--ff-only', 'build/8'); // the build ships
+  assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
+  assert.equal(started[0].c.ticket, follower);
 });
 
 // #229: a squash (or rebase) merge on GitHub leaves none of the branch's commits on main, so a leader

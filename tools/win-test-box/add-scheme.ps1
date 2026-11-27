@@ -38,7 +38,7 @@ Say "A read-only deploy key for $Repo"
 New-Item -ItemType Directory -Force $keys | Out-Null
 if (-not (Test-Path $key)) {
   # Start-Process passes -N "" as written; Windows PowerShell drops an empty argument otherwise.
-  $p = Start-Process ssh-keygen -ArgumentList "-q -t ed25519 -N `"`" -C `"citadel-test-box $Repo`" -f `"$key`"" -NoNewWindow -Wait -PassThru
+  $p = Start-Process ssh-keygen -ArgumentList "-q -t ed25519 -N `"`" -C `"citadel-test-vm $Repo`" -f `"$key`"" -NoNewWindow -Wait -PassThru
   if ($p.ExitCode) { throw "ssh-keygen failed ($($p.ExitCode))" }
 }
 while ($true) {
@@ -46,7 +46,7 @@ while ($true) {
   if (-not $LASTEXITCODE) { Write-Host '  GitHub lets this key read the repo.'; break }
   Write-Host @"
   Add this key on GitHub: https://github.com/$Repo/settings/keys/new
-  Title: citadel-test-box. Leave "Allow write access" off.
+  Title: citadel-test-vm. Leave "Allow write access" off.
 
 $(Get-Content "$key.pub")
 

@@ -22,7 +22,7 @@ A Hyper-V VM on Cara's gaming PC (DESKTOP-G248IJ8) for native-app schemes (#369)
 | Starting up | 2 minutes after her PC starts, taking its 8 GB at once. Nothing ever shows on her screen |
 | Games | If "Virtualization-based security" was already running (the Windows 11 default; `new-test-box.ps1` says), the hypervisor was already under her games and the box adds about nothing. If it was off, published numbers for turning the hypervisor on are 1–10% average FPS, more in the 1% lows. Those numbers come from older CPUs |
 
-**Pausing it while she plays:** in PowerShell as administrator, `Save-VM citadel-test-box`. That frees all 8 GB and the processors in about 10 s. `Start-VM citadel-test-box` brings it back as it was. While it's saved, CI desktop jobs queue and minions find the machine offline. Once the box has a GPU partition, Hyper-V may refuse to save it: then `Stop-VM citadel-test-box` (a clean shutdown, about a minute) and `Start-VM citadel-test-box` later, which starts it fresh.
+**Pausing it while she plays:** in PowerShell as administrator, `Save-VM citadel-test-vm`. That frees all 8 GB and the processors in about 10 s. `Start-VM citadel-test-vm` brings it back as it was. While it's saved, CI desktop jobs queue and minions find the machine offline. Once the box has a GPU partition, Hyper-V may refuse to save it: then `Stop-VM citadel-test-vm` (a clean shutdown, about a minute) and `Start-VM citadel-test-vm` later, which starts it fresh.
 
 ## Setting it up (once)
 
@@ -55,27 +55,27 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
    powershell -ExecutionPolicy Bypass -File .\new-test-box.ps1 -IsoPath "$env:USERPROFILE\Downloads\<the ISO>.iso"
    ```
 
-   - **Disk and VM:** it applies Windows 11 Home to a new disk with no Setup screens, creates the VM `citadel-test-box`, starts it and waits while `guest-setup.ps1` sets it up inside. That covers sign-in, never locking, 125%, the corners, Git, Node, mise and Tailscale. The box restarts itself once.
-   - **Its password:** at the end it prints the box's sign-in, `citadel` and a password. Keep it in a password manager, then delete the `citadel-test-box.password.txt` it names.
+   - **Disk and VM:** it applies Windows 11 Home to a new disk with no Setup screens, creates the VM `citadel-test-vm`, starts it and waits while `guest-setup.ps1` sets it up inside. That covers sign-in, never locking, 125%, the corners, Git, Node, mise and Tailscale. The box restarts itself once.
+   - **Its password:** at the end it prints the box's sign-in, `citadel` and a password. Keep it in a password manager, then delete the `citadel-test-vm.password.txt` it names.
    - **Options:** `-MemoryGB`, `-Cpus`, `-DiskGB`, `-Width`/`-Height` (default 1920x1080).
    - **If it stops:** run it again. Once the VM exists it picks up where it was. If it stopped before that, it says which half-made disk to delete first.
    - **"I:\ is not accessible" popups** while it makes the disk are Explorer noticing a partition before it's formatted. Click OK; the script carries on.
 
-4. **Open the box's window:** Hyper-V Manager, `citadel-test-box`, **Connect**. If it offers a size or "enhanced session", close that dialog: it's a basic session, the only kind that never locks the box.
+4. **Open the box's window:** Hyper-V Manager, `citadel-test-vm`, **Connect**. If it offers a size or "enhanced session", close that dialog: it's a basic session, the only kind that never locks the box.
 
    **Typing commands into the box:** a basic session has no shared clipboard, and its Clipboard → Type clipboard text refuses long lines and repeats keys. Use PowerShell Direct from her PC instead, in PowerShell as administrator; Ctrl+V works there because the window is her PC's:
 
    ```powershell
    $cred = Get-Credential citadel   # the box's password from step 3
-   Enter-PSSession -VMName citadel-test-box -Credential $cred
+   Enter-PSSession -VMName citadel-test-vm -Credential $cred
    ```
 
-   The prompt becomes `[citadel-test-box]: PS ...>`, as administrator in the box; `exit` leaves. Enhanced session isn't an option: Windows 11 Home has no Remote Desktop host.
+   The prompt becomes `[citadel-test-vm]: PS ...>`, as administrator in the box; `exit` leaves. Enhanced session isn't an option: Windows 11 Home has no Remote Desktop host.
 
 5. **Sign Tailscale in**, in the box (3 min). The Tailscale icon by the clock in the box, then **Log in**, then sign in in the browser it opens. It's how the box reaches Citadel.
 
 6. **Lend it to Citadel** (2 min):
-   - On Citadel's **Machines** page, add a machine named `citadel-test-vm` (the Hyper-V VM stays `citadel-test-box`), MCP server **None**, no folder.
+   - On Citadel's **Machines** page, add a machine named `citadel-test-vm`, the same name as the VM in Hyper-V, MCP server **None**, no folder.
    - Open its line, add the native-app schemes (Peek Auras) under **Who gets it**, and switch its **Workspace tools** on. A new machine is lent to no scheme until you add one.
    - Copy its **Windows** lines, open PowerShell in the box (not as administrator), and paste them. They should end with "It runs in the background now".
 
@@ -101,7 +101,7 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
 
 Nothing to do.
 - **Restarts look after themselves.** When her PC restarts, the box starts 2 minutes later, signs itself in, and its runners and agent come back. Windows Update in the box is told not to restart it while it's signed in (installs at 03:00, active hours 06:00–23:00), but Windows 11 Home isn't promised to honour that: an update may still restart it at night, and it signs itself in again.
-- **Restart the box gracefully, only ever from inside it:** `Restart-Computer` in the box, or from her PC `Invoke-Command -VMName citadel-test-box -Credential $cred { Restart-Computer -Force }` (there `-Force` only closes apps without asking). **Never `Restart-VM -Force` or a plain `Restart-VM`:** that is a hard reset, like pulling the plug. On 2026-11-10 one put the box into Automatic Repair and lost the settings written just before it.
+- **Restart the box gracefully, only ever from inside it:** `Restart-Computer` in the box, or from her PC `Invoke-Command -VMName citadel-test-vm -Credential $cred { Restart-Computer -Force }` (there `-Force` only closes apps without asking). **Never `Restart-VM -Force` or a plain `Restart-VM`:** that is a hard reset, like pulling the plug. On 2026-11-10 one put the box into Automatic Repair and lost the settings written just before it.
 - **Adding a scheme** is step 7 again.
 - **After each NVIDIA driver update** on her PC, once the box has its GPU: run `gpu-host.ps1` again ([A GPU for jobs that ask](#a-gpu-for-jobs-that-ask)). The box uses copies of her driver's files, and old copies with a new driver can crash GPU jobs or the box. It takes a few minutes and no restart.
 - **Crash dumps are kept** (#549, Josh's pick for Peek Auras #223, 2026-11-11). `guest-setup.ps1` sets Windows Error Reporting LocalDumps: any program that crashes leaves a mini dump (stacks, a few hundred KB to a few MB) in `C:\CrashDumps`, the newest 20 kept, readable by `citadel`, the desktop runner's account. On an already-built box, run `guest-setup.ps1` again or just its "Keeping crash dumps" step.
@@ -136,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit-admin\tools\win-
 **Take it off:** in PowerShell as administrator on her PC:
 
 ```powershell-admin
-Stop-VM citadel-test-box; Remove-VMGpuPartitionAdapter -VMName citadel-test-box; Start-VM citadel-test-box
+Stop-VM citadel-test-vm; Remove-VMGpuPartitionAdapter -VMName citadel-test-vm; Start-VM citadel-test-vm
 ```
 
 ## If something goes wrong

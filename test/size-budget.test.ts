@@ -109,7 +109,9 @@ export const SHIP_LIMITS = {
     'tools/land/settings.sh': 10_000,
     'tools/land/ship.sh': 10_000,
   } as Record<string, number>,
-  total: 219_300, // +2,500 for step 7's phase functions (their wrappers and indents); Cara, 2026-11-26: "Do steps 6 and 7"
+  // +2,500 for step 7's phase functions (their wrappers and indents); Cara, 2026-11-26: "Do steps 6 and 7"
+  // +2,900 for #2212's main_red_hold; Cara, 2026-11-27, on its card: "Raise it 2.9 KB"
+  total: 222_200,
   longLines: 176,
 };
 

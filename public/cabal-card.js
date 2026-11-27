@@ -1,7 +1,7 @@
 // A cabal as one card in the minions list (#2092; Josh, 2026-11-25, picked "B · One crew card"): the Overseer's tag and
 // title, a meter with a segment a member, the counts, and the open asks in red. A click shows its members under it with
 // no request: the cards come with the scheme (src/cabal-cards.ts) and the rows are the page's own.
-import { h, me, threadHref } from './base.js';
+import { h, me, phase, threadHref } from './base.js';
 import { money } from './cabal.js';
 import { cardFor, cardsYours } from './threadstate.js';
 /** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types/list.js' */
@@ -79,7 +79,9 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
             ...c.members.map((m) => {
               const now = liveMember(m, m.id == null ? undefined : tickets.get(m.id));
               const name = [m.label, m.number != null ? `#${m.number}` : '', m.title].filter(Boolean).join(' ');
-              return h('i', { 'data-s': now.state, title: `${name}: ${now.word}` });
+              const seg = h('i', { 'data-s': now.state, title: `${name}: ${now.word}` });
+              // The list redraws on every bit of news: a building segment rejoins the shared pulse, or each redraw starts it over (#2197).
+              return now.state === 'running' ? phase(seg, 1600) : seg;
             }),
           )
         : '',

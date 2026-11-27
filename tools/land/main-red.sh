@@ -4,6 +4,7 @@
 
 train_main_red() {
   local f i wt r n=0 real=() reds=() other=() chg=() hits=() mine=() touched=()
+  main_red='' main_red_other='' main_red_mine='' main_red_riders=0 # a train run again (main_red_hold) is judged afresh
   [ -z "$burn_red" ] || return 1 # a burn-in red is the ship's own new or changed test (#1443)
   mapfile -t real < <(train_real) || true
   for f in "${real[@]}"; do git cat-file -e "$old:$f" 2>/dev/null && n=1; done
@@ -39,7 +40,7 @@ train_main_red() {
   # Passed-alone files go by #1419's rule: a known flake no ship changed is excused; a new one may be the train's own, and
   # the leak guard's red is never a flake. Either counts as another red: no ship through.
   flakes=$(train_labels | sed -n 's/^failed in the full run, passed alone //p' | paste -sd, - | sed 's/,/, /g') || true
-  if [ -n "$main_red_other$main_red_mine" ] || [ ${#touched[@]} -gt 0 ]; then
+  if [ -n "$main_red_other" ]; then
     :
   elif grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed"; then
     main_red_other='the leak guard (the tests left processes running)'
@@ -47,6 +48,11 @@ train_main_red() {
     main_red_other='a skipped test'
   elif [ -n "$flakes" ] && ! known_flakes "$flakes"; then
     main_red_other="$flakes (passed alone, but no known flake)"
+  fi
+  if [ -z "$main_red_other" ] && [ -n "$main_red_mine${touched[*]}" ]; then
+    r=0
+    main_red_hold || r=$?
+    [ "$r" = 2 ] || return "$r"
   fi
   if [ -z "$main_red_other" ] && [ -z "$main_red_mine" ] && [ ${#touched[@]} = 0 ]; then
     through_by[$tip]=$main_red rc=0
@@ -69,6 +75,40 @@ train_main_red() {
   retro_log "red on main too: not $who · $label · $main_red · $ci_url${main_red_other:+ · also red: $main_red_other}"
   train_drop
   return 0
+}
+
+# Hold only the suspects (#2212; Cara, 2026-11-27, "Hold only that ship"): main's red is the only real failure, but ships changed
+# its test or what that imports (mine, touched). Only they leave, refused for nothing: riders go back in line and the rest run CI
+# again (train_again); a front steps aside and the next ship runs the rest (pull_say), or, at its 4th, they go first in line and
+# it is refused as it would be alone. 2: nobody would be left, so the whole train goes back.
+main_red_hold() {
+  local i x t sus='' keep=() was=()
+  for ((i = 0; i < ${#train_n[@]}; i++)); do
+    if [[ " ${touched[*]} " == *" ${train_br[$i]} "* ]]; then sus+="${sus:+, }${train_br[$i]}" train_held_tips+=" ${train_was[$i]}"; else keep+=("$i"); fi
+  done
+  t="red on main too: not $who: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here too, and it is"
+  t+=" the only real failure of $who CI run ($ci_url), but"
+  if [ -n "$main_red_mine" ]; then
+    [ ${#keep[@]} -gt 0 ] || return 2
+    was=("${keep[@]}") keep=()
+    for i in "${was[@]}"; do # one built on a held ship would bring its commits along: back in line
+      for x in "$pre" "$own" $train_held_tips; do ! sits_on "${train_was[$i]}" "$x" || continue 2; done
+      keep+=("$i")
+    done
+    pull_say "${keep[@]}"
+    [ "$aside" -lt 3 ] || { say "$branch has stepped aside 3 times, so the rest of its train goes first in line without it"; return 2; }
+    say "$t $branch, at the front,${sus:+ and $sus,} changed $main_red or what it imports, so it can't ship through main's red:"\
+" it steps aside, keeping its place in line and refused for nothing, and the next ship runs the train without it"
+    retro_log "red on main too: not $who · $label · $main_red · $ci_url · held off: $branch${sus:+, $sus}"
+    aside=$((aside + 1))
+    say "$branch steps aside: the next ship in line runs the train with what is left of it"
+    requeue "back at the front after it stepped aside from its train for main's red: starting over from the rebase"
+  fi
+  say "$t $sus changed $main_red or what it imports, so it can't ship through main's red:"\
+" back in line, refused for nothing, and the train runs again without it"
+  retro_log "red on main too: not $who · $label · $main_red · $ci_url · held off: $sus"
+  train_again "testing the train again without the ships that changed main's red test" "${keep[@]}"
+  [ "$rc" != 1 ] || train_main_red
 }
 
 # Known flakes (#1419, ADR 0006). <files, comma-separated>, each of which passed alone: whether every one is a known flake

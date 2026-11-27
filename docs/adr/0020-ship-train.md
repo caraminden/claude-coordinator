@@ -126,8 +126,10 @@ the last one in line waited for every run ahead of it.
   output says "SHIPPING THROUGH MAIN'S RED" and each ship's shipped line names main's red test ("shipped through main's
   red on …"), so the Taskmaster sees main still needs its fix; the retro log says "shipped through main's red". Still
   #1430's path: a second real failure that passes on main, a failed file never rerun or whose rerun was killed, a
-  flake never seen on another branch, the leak guard's red (processes left running), or a
-  ship that changed main's red test (the front alone is refused, its change doesn't make it pass). A burn-in red and a
+  flake never seen on another branch, or the leak guard's red (processes left running). A ship that changed main's red
+  test or what it imports leaves the train by itself, refused for nothing (#2212; Cara, 2026-11-27, "Hold only that
+  ship"): a rider goes back in line while the rest run CI again and ship through; a front steps aside and the next ship
+  leads them (at its 4th time it is refused instead). Alone, it is refused: its change doesn't make it pass. A burn-in red and a
   test that only times out on main are never main's red. The accepted cost: a second break in the same test stays
   hidden until main's fix ships.
 - **Blame rules on trial** (#1484, from #1455's retro; Cara, 2026-11-21, "pull out some takeaways on how we could avoid

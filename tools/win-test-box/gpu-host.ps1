@@ -22,7 +22,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Name = 'citadel-test-box',
+  [string]$Name = 'citadel-test-vm',
   # The most of each GPU resource (memory, encode, decode, compute) the partition asks for. GeForce
   # drivers aren't known to enforce it, so it's a request, not a cap (README.md).
   [ValidateRange(10, 100)][int]$SharePercent = 50,

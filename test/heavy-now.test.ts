@@ -29,6 +29,7 @@ test('each place lists its heavy jobs, running first, with what a waiting one wa
         : [],
     waits: () => 'waiting for room',
     canSee: () => true,
+    owns: () => true,
     scheme: (id) => (id === 5 ? 'Peek Auras' : 'Delve'),
   });
   assert.deepEqual(now.home, [
@@ -54,9 +55,13 @@ test("a hidden scheme's machine job says neither its scheme nor its command (#21
     perigee: { holders: [], waiters: [] },
     machines: [{ id: 1, name: 'PC' }],
     jobs: [job(10, { reason: 'cargo test --secret' }), job(12, { go: 'now', kind_name: 'train' })],
-    balanced: () => [{ key: 'gpu:12', label: 'GPU job 12', size: 4, since: 2, running: true }],
+    balanced: () => [
+      { key: 'gpu:12', label: 'GPU job 12', size: 4, since: 2, running: true },
+      { key: 'win:run1', label: 'Secret window tests', size: 4, since: 3, running: true },
+    ],
     waits: () => null,
     canSee: () => false,
+    owns: () => false,
     scheme: () => 'Hidden',
   });
   assert.deepEqual(
@@ -64,6 +69,7 @@ test("a hidden scheme's machine job says neither its scheme nor its command (#21
     [
       ['', "Another scheme's job"],
       ['', "Another scheme's job"],
+      ['', 'Another machine job'],
     ],
   );
 });

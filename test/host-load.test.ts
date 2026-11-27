@@ -93,7 +93,17 @@ test('history by place (#2109): perigee, each machine and each repo, with what t
         { why: 'line', jobs: 1 },
       ],
     },
-    { place: "on:Josh's PC", jobs: 2, medianS: 20, longestS: 30, on: [{ why: 'room', jobs: 1 }] },
+    {
+      place: "on:Josh's PC",
+      jobs: 2,
+      medianS: 20,
+      longestS: 30,
+      // The row with no reason is an old line that waited.
+      on: [
+        { why: 'room', jobs: 1 },
+        { why: 'unrecorded', jobs: 1 },
+      ],
+    },
     { place: 'ci:o/r', jobs: 1, medianS: 5, longestS: 5, on: [{ why: 'runner', jobs: 1 }] },
   ]);
 });
@@ -147,4 +157,11 @@ test('an app counts under its home scheme only for a viewer who can see that sch
     ],
   );
   assert.equal(jobOfWho('secret-app deploy', owners).scheme, 'secret-app'); // its own name, not the hidden scheme's
+});
+
+test('by place, an old line elsewhere that waited is not recorded; a recorded none waited on nothing (#2109)', () => {
+  const at = '2026-11-20T10:00:00-0800';
+  const places = parsePlaces([`${at}\ta\tw\ton:old\t3\t3\t0\t-`, `${at}\ta\tw\ton:new\t3\t3\t0\t-\t-\tnone`].join('\n'), 0);
+  assert.deepEqual(places.find((p) => p.place === 'on:old')!.on, [{ why: 'unrecorded', jobs: 1 }]);
+  assert.deepEqual(places.find((p) => p.place === 'on:new')!.on, []);
 });

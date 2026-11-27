@@ -153,7 +153,7 @@ export function workersPanel(page) {
           { class: 'st-heavy' },
           ...jobs.map((j) => {
             const text = `${[j.scheme, j.what].filter(Boolean).join(' ')}${j.threads ? `, ${plural(j.threads, 'thread')}` : ''}`;
-            return h('li', { class: 'small', title: text }, h('span', { class: 'st-heavy-what' }, text), h('span', { class: 'muted' }, j.waiting ? `waiting: ${j.waiting}` : 'running'));
+            return h('li', { class: 'small', title: text }, h('span', { class: 'st-heavy-what' }, text), j.waiting ? toneChip('warn', `waiting: ${j.waiting}`) : toneChip('ok', 'running'));
           }),
         )
       : '';

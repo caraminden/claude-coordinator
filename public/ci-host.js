@@ -17,9 +17,15 @@ const held = (j, now) => span((now - j.since) / 1000);
 /** @type {Record<string, string>} */
 const WHY = { load: 'free slot, box busy', first: 'a deploy goes first', line: 'in line behind another job' };
 /** @type {Record<string, string>} */
-const WAITED = { line: 'in line', slots: 'all slots busy', load: 'perigee busy', memory: 'memory', first: 'a deploy', forced: 'gave up on the load', room: 'room there', offline: 'machine offline', turn: "the repo's CI turn", runner: 'a CI runner' };
+const WAITED = { line: 'in line', slots: 'all slots busy', load: 'perigee busy', memory: 'memory', first: 'a deploy', forced: 'gave up on the load', room: 'room there', offline: 'the machine coming online', turn: "the repo's CI turn", runner: 'a CI runner', unrecorded: 'not recorded' };
 /** @param {string} place 'here', 'on:<machine>' or 'ci:<owner>/<repo>' */
-const placeName = (place) => (place === 'here' ? 'perigee' : place.startsWith('on:') ? place.slice(3) : `CI, ${place.slice(3)}`);
+const placeName = (place) => {
+  if (place === 'here') return ['perigee'];
+  if (place.startsWith('on:')) return [place.slice(3)];
+  // The repo under "CI", breaking after its slash, never inside a name.
+  const [owner, repo] = place.slice(3).split('/');
+  return ['CI', h('div', { class: 'small muted' }, `${owner}/`, h('wbr'), repo ?? '')];
+};
 /** @type {Record<string, string>} */
 const KIND = { deploy: 'app deploy', apk: 'APK build', app: 'app step', turn: 'minions' };
 /** @type {Set<string>} */
@@ -93,21 +99,10 @@ export function hostLoadBlock(l) {
                   h(
                     'tr',
                     {},
-                    h('td', {}, placeName(p.place)),
+                    h('td', {}, ...placeName(p.place)),
                     h('td', { class: 'num' }, p.jobs.toLocaleString()),
                     h('td', { class: 'num host-median' }, span(p.medianS)),
-                    h(
-                      'td',
-                      {},
-                      p.on.length
-                        ? p.on
-                            .slice(0, 3)
-                            .map((o) => `${WAITED[/** @type {keyof typeof WAITED} */ (o.why)] ?? o.why} ${o.jobs}`)
-                            .join(', ')
-                        : p.longestS > 0
-                          ? 'not recorded'
-                          : 'nothing',
-                    ),
+                    h('td', {}, p.on.length ? p.on.slice(0, 3).map((o) => h('div', {}, `${WAITED[/** @type {keyof typeof WAITED} */ (o.why)] ?? o.why} × ${o.jobs}`)) : 'nothing'),
                   ),
                 ),
               ),

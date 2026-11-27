@@ -36,6 +36,8 @@ export interface HeavyNowInput {
   scheme: (projectId: number) => string;
   /** A hidden scheme's machine job says nothing of it: its command is its people's (/api/machines/:id/jobs). */
   canSee: (projectId: number) => boolean;
+  /** The machine is the viewer's, or they are an admin: only then are its other jobs' own labels theirs to read. */
+  owns: (machineId: number) => boolean;
 }
 
 export function heavyNow(i: HeavyNowInput): HeavyNow {
@@ -54,7 +56,7 @@ export function heavyNow(i: HeavyNowInput): HeavyNow {
       .filter((h) => !h.key.startsWith('build:'))
       .map((h): HeavyNowJob => {
         const gpu = h.key.startsWith('gpu:') ? i.jobs.find((j) => `gpu:${j.id}` === h.key) : undefined;
-        return { ...(gpu ? named(gpu, `${gpu.kind_name} (GPU job)`) : { scheme: '', what: h.label }), threads: h.size, waiting: h.running ? null : 'no room yet' };
+        return { ...(gpu ? named(gpu, `${gpu.kind_name} (GPU job)`) : { scheme: '', what: i.owns(id) ? h.label : h.key.startsWith('ci:') ? 'A CI job' : 'Another machine job' }), threads: h.size, waiting: h.running ? null : 'no room yet' };
       });
     const jobs = [...builds, ...others].sort((a, b) => Number(a.waiting !== null) - Number(b.waiting !== null));
     return jobs.length ? [{ id, name, jobs }] : [];

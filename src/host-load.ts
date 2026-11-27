@@ -107,7 +107,8 @@ export function parsePlaces(text: string, since: number): PlaceWaits[] {
     if (!who || !(Date.parse(started ?? '') >= since) || !Number.isFinite(w) || wait === '') continue;
     const elsewhere = /^(on|ci):/.test(at4!);
     const place = elsewhere ? at4! : 'here';
-    const why = f[9] ?? (elsewhere || at4 === 'here' ? 'none' : at4!);
+    // An old line for a job elsewhere that did wait never said on what.
+    const why = f[9] ?? (elsewhere ? (w > 0 ? 'unrecorded' : 'none') : at4 === 'here' ? 'none' : at4!);
     const row = by.get(place) ?? by.set(place, { w: [], on: new Map() }).get(place)!;
     row.w.push(w);
     // 'light' ran at once without a slot: it waited on nothing.

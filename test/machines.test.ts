@@ -80,9 +80,10 @@ test("a thread uses a connected machine's MCP server, one copy per turn", async 
 test('an online machine reaches no scheme until it is on its list, and then its minions open it by id (#438)', async () => {
   const [box] = (await call('/api/machines')).filter((x: Machine) => x.name === 'test-box');
   const project = await call('/api/projects', { method: 'POST', body: { name: 'Q' } });
+  let ticket = { id: 0 };
   const turnNow = async (message: string) => {
     const before = turns().length;
-    await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
+    ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
     return (await until('a turn', () => turns().length > before && turns())).at(-1);
   };
   // An admin's new scheme gets nothing by itself, and its minion can't open the machine by id either.
@@ -94,12 +95,15 @@ test('an online machine reaches no scheme until it is on its list, and then its 
   await refused.body!.cancel();
   const lent = await lend(box.id, ...box.projects.map((id: number) => ({ id })), project);
   assert.ok(lent.gets.includes(project.id));
+  // The turn's own proxy opened the machine by id while it ran (results); its owner's machine opens only while that turn
+  // runs (TurnState.owned, Build 10 H1), so once it has ended the same token is refused: wait for the end, not race it.
   const turn = await turnNow('peek again');
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
   assert.match(turn.message, /Connected machines: test-box/);
-  const opened = await fetch(`${base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${turn.token}` } });
-  assert.equal(opened.status, 200);
-  await opened.body!.cancel();
+  await until('the turn to end', async () => (await call(`/api/tickets/${ticket.id}`)).ticket.status !== 'running');
+  const ended = await fetch(`${base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${turn.token}` } });
+  assert.equal(ended.status, 403);
+  await ended.body!.cancel();
   // The per-scheme grant route from #62 is gone.
   await assert.rejects(call(`/api/machines/${box.id}/projects/${project.id}`, { method: 'PUT' }), /404/);
 });

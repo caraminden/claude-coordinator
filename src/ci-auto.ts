@@ -212,8 +212,9 @@ export class CiAuto {
       const pc = lent ?? serving;
       if (!pc) continue;
       this.d.settle({ ticket: taskmaster.id, question: card.id }, `Withdrew the CI runners card: ${pc.name} ${lent ? `now lends ${project.name} its CI runners` : `has a runner for ${project.name}`}, so there's nothing to answer.`);
-      // Should the PC go again while jobs wait, that's news: ask at once, not after CARD_MS.
-      store.deleteSetting(cardKey(project));
+      // Unticked again while jobs wait, that's news: ask at once, not after CARD_MS. Not for a PC only still holding a
+      // runner (CI off there): it would bring a new card each time it slept.
+      if (lent) store.deleteSetting(cardKey(project));
     }
   }
 

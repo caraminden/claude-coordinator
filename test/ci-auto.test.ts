@@ -171,6 +171,10 @@ test('an open no-machine card is withdrawn once a PC lends the scheme CI or serv
     w.settled.map((s) => s.question),
     ['q1', 'q2'],
   );
+  // That PC only holds a runner (it lends Delve nothing), so its going quiet doesn't ask again within the week.
+  w.samples.clear();
+  await w.auto.pass();
+  assert.equal(w.cards.length, 2);
 });
 
 test('a queued job with a label no runner has gets one even with no workflow file read; a failed add waits longer, a busy agent only a few minutes', async () => {

@@ -32,7 +32,7 @@ const wakesItself = (t) => !!t.wakes_on;
 
 /**
  * Each open cabal's minions leave their sections for its card (#2092): the Overseer, its board's members and, with a
- * build, every other minion of that build. A Deploying one stays in Deploying. A cabal whose Overseer isn't open has no
+ * build, every other minion of that build. A Deploying member stays in Deploying; the Overseer never does, its row holds the card through its own full run and ship. A cabal whose Overseer isn't open has no
  * card, nor has one with nothing in `open` (a filter's leavings).
  * @param {Row[]} open
  * @param {CabalCard[]} cabals
@@ -53,7 +53,7 @@ export function cabalSplit(open, cabals, every = open) {
   claim((c, t) => c.build != null && t.build === c.build && !live.some((o) => o.lead === t.id));
   const cards = live.map((cabal) => {
     const mine = here.filter((t) => owner.get(t.id) === cabal);
-    return { cabal, mine, rows: mine.filter((t) => !isDeploying(t)) };
+    return { cabal, mine, rows: mine.filter((t) => t.id === cabal.lead || !isDeploying(t)) };
   });
   const listed = new Set(cards.flatMap((c) => c.rows.map((t) => t.id)));
   return { cards: cards.filter((c) => c.mine.length), rest: open.filter((t) => !listed.has(t.id)) };

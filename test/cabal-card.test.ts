@@ -86,6 +86,34 @@ test("a cabal's minions leave their sections for its card; Deploying ones don't,
   assert.deepEqual([none.cards.length, none.rest.length], [0, 4]);
 });
 
+test("an Overseer's card keeps its Overseer's row through its own full run and ship, in every resting state", () => {
+  const cabal = { lead: 1, build: 10, members: [{ id: 2 }] };
+  const states = {
+    landing: { server_work: { kind: 'land' }, ship: { stage: 'tests' } },
+    pendingDeploy: { state: 'pending-deploy' },
+    sealed: { state: 'parked' },
+    outside: { state: 'outside' },
+    waiting: { state: 'parked', wakes_on: 'x' },
+  };
+  for (const [name, extra] of Object.entries(states)) {
+    const open = [
+      { id: 1, build: 10, status: 'idle', ...extra },
+      { id: 2, build: 10, status: 'idle', state: 'pending-deploy' },
+    ];
+    const { cards, rest } = cabalSplit(open as never, [cabal] as never);
+    assert.deepEqual(
+      cards.map((c) => c.rows.map((t) => t.id)),
+      [[1]],
+      `${name}: the card lists its Overseer`,
+    );
+    assert.deepEqual(
+      rest.map((t) => t.id),
+      [2],
+      `${name}: only the member is Deploying`,
+    );
+  }
+});
+
 test('a card never moves the next build up, keeps its goal members, and stays when a filter hides its Overseer', () => {
   const row = (id: number, build: number | null = null) => ({ id, build, status: 'idle', title: `t${id}` });
   const all = [row(1, 7), row(2, 7), row(3, 8), row(4)];

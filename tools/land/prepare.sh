@@ -147,7 +147,7 @@ smoke() {
   fi
   if [ -x tools/citadel-test ] && [ -f tools/always-tests.txt ]; then
     # The always-tests, and in a plain land the test files the branch adds or changes; citadel-test drops repeats.
-    mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ "$mode" != land ] || git diff --name-only --diff-filter=d "$(git merge-base main HEAD)" HEAD -- 'test/*.test.ts'; [ -z "$formatted" ] || ls test/size-budget.test.ts 2>/dev/null)
+    mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ "$mode" != land ] || git diff --name-only --diff-filter=d "$(git merge-base main HEAD)" HEAD -- 'test/*.test.ts' 'test/*.test.js' 'test/*.test.mjs'; [ -z "$formatted" ] || ls test/size-budget.test.ts 2>/dev/null)
     # The map's @pinned tests when it picks them for this branch's changes (#1544, #2037; an older map: the route test alone).
     if [ -f tools/affected.ts ]; then
       local pinned=" $(sed -n 's/^@pinned[[:space:]]//p' tools/affected-map.txt 2>/dev/null | tr '\n' ' ') " && [ -n "${pinned// /}" ] || pinned=" test/access-matrix.test.ts "
@@ -172,7 +172,7 @@ smoke() {
         # Each failed file once more on its own (no always-tests), as run-tests.sh does: one that passes alone is a
         # likely flake from load, which doesn't decide here (ADR 0006) and gets a flake line. A failure no file names fails.
         local failed=() still=()
-        mapfile -t failed < <(sed -nE 's/^✖ ([^ :]+\.test\.ts)(:[0-9]+)? › .*/\1/p' <<<"$out" | sort -u)
+        mapfile -t failed < <(sed -nE 's/^✖ ([^ :]+\.test\.(ts|js|mjs))(:[0-9]+)? › .*/\1/p' <<<"$out" | sort -u)
         for f in "${failed[@]}"; do
           CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
         done

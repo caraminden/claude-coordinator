@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, test } from 'node:test';
-import { AT_HOME, cloud, type Facts, helper, io, type Job, MAX_MINUTES, parse, pickPlace, SLOWER, sessionText, slower, stop } from '../src/cloud-helper.ts';
+import { AT_HOME, cloud, collect, due, type Facts, HAND_MINUTES, helper, io, ON_ITS_OWN, type Job, MAX_MINUTES, parse, pickPlace, SLOWER, sessionText, slower, stop } from '../src/cloud-helper.ts';
 import { until } from './wait.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'cloud-helper-'));
@@ -106,7 +106,7 @@ beforeEach(() => {
     isPublic: () => false,
     heavy: fakeHeavy,
     heavyDir: () => heavyDir,
-    line: async (text: string, _: string, event: number | null) => (lines.push([text, event]), 41),
+    line: async (text: string, _: string, event: number | null) => (lines.push([text, event]), event ?? 41),
     lineMs: 200,
   });
   rmSync(join(root, 'claude.log'), { force: true });
@@ -319,4 +319,53 @@ test('the chat line: one note for the step, rewritten from its start to its exit
     lines.map(([t]) => t.replace('citadel-cloud: `echo hi` ', '')),
     ['in a cloud session · starting', 'in a cloud session · started', "in a cloud session · the cloud session didn't deliver, so it runs here", "here, in perigee's heavy-job slot · exit 0 after 0 min"],
   );
+});
+
+test('a long cloud step runs on its own once it has started: check says when, collect brings it home with its chat line', async () => {
+  io.canHand = () => true;
+  const j = job('echo long one; sleep 2; echo made > out.txt', { minutes: HAND_MINUTES + 10, files: ['out.txt'] });
+  assert.equal(await helper(j), ON_ITS_OWN);
+  const said1 = said.join('\n');
+  assert.match(said1, new RegExp(`citadel-wait cmd 'citadel-cloud check ${j.out}'[\\s\\S]*citadel-cloud collect ${j.out}`));
+  assert.match(lines.at(-1)![0], /runs on its own in the cloud; Citadel watches for its result$/);
+  assert.equal(JSON.parse(readFileSync(join(j.out, '.hand.json'), 'utf8')).event, 41, 'collect rewrites the same line');
+  assert.match(cloudBranches(), /cloud\/src-t7-/, 'its source branch stays: deleting it would stop the job');
+  await until('check says collect', () => due(j.out) !== null);
+  assert.equal(due(j.out), 'its result is pushed');
+  lines.length = 0;
+  assert.equal(await collect(j.out), 0);
+  assert.match(said.join('\n'), /long one[\s\S]*done after \d+ min/);
+  assert.equal(readFileSync(join(j.out, 'out.txt'), 'utf8'), 'made\n');
+  assert.deepEqual(
+    lines.map(([t, e]) => [t.replace(/^.*· /, ''), e]),
+    [[/exit 0 after \d+ min/.exec(lines[0][0])![0], 41]],
+  );
+  assert.equal(cloudBranches(), '');
+  const vm = readFileSync(join(root, 'vm-dir'), 'utf8');
+  await until('the VM saw DONE and ended', () => existsSync(join(vm, 'said')) && /DONE/.test(readFileSync(join(vm, 'said'), 'utf8')));
+});
+
+test('check: a step on its own that goes quiet or passes its limit is due; collect then runs it here', async () => {
+  const out = mkdtempSync(join(root, 'hand-'));
+  const beat = 'cloud/t7-quiet-beat';
+  const sha = git(work, 'commit-tree', git(work, 'write-tree'), '-m', 'beat');
+  git(work, 'push', '-q', 'origin', `${sha}:refs/heads/${beat}`);
+  const hand = { cwd: work, branch: 'cloud/t7-quiet', ref: 'cloud/src-t7-quiet', beat, url: 'https://claude.ai/code/session_q', began: Date.now(), minutes: 60, quietMs: 60_000, job: job('echo here', { out }), event: 9 };
+  writeFileSync(join(out, '.hand.json'), JSON.stringify(hand));
+  assert.equal(due(out), null, 'a fresh beat: still running');
+  assert.match(due(out, Date.now() + 5 * 60_000) ?? '', /^no progress for [45] minutes$/);
+  assert.equal(due(out, Date.now() + 76 * 60_000), 'it passed its time limit');
+  assert.equal(await collect(out), 0);
+  assert.deepEqual(
+    heavyCalls().map((c) => c.args.join(' ')),
+    ['--here bash -c echo here'],
+  );
+  assert.deepEqual(
+    lines.map(([t, e]) => [t.replace('citadel-cloud: `echo here` ', ''), e]),
+    [
+      ["in a cloud session · the cloud session didn't deliver, so it runs here", 9],
+      ["here, in perigee's heavy-job slot · exit 0 after 0 min", 9],
+    ],
+  );
+  assert.equal(cloudBranches(), '', 'its beat branch deleted');
 });

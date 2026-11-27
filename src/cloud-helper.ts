@@ -12,14 +12,18 @@
 //   citadel-cloud brief <file> [--minutes 30] [--model sonnet|opus] [--out <dir>]
 //       A brief job (research, a review): the session reads <file> and works on its own up to --minutes, then pushes its
 //       reply and files. Nobody can answer a question there: one it asks comes back as text.
+//   citadel-cloud check <out>     exit 0 once a step running on its own needs collecting (for `citadel-wait cmd`)
+//   citadel-cloud collect <out>   bring it home: its reply, exit code and files, or a run here if it didn't deliver
 //
 // Exit codes: the command's own (0 done, 1 failed or hit its limit in the cloud), 75 citadel-heavy handed it to the server,
-// 69 a brief the cloud couldn't take (run it as a Grunt), 2 a usage error, 143 stopped. Run it as a background command and
+// 76 a cloud step over HAND_MINUTES runs on on its own (wait on check, then collect: it prints both), 69 a brief the cloud
+// couldn't take (run it as a Grunt), 2 a usage error, 143 stopped. Run it as a background command and
 // wait with `citadel-wait pid`; not under citadel-job, which leaves out your Claude login (no cloud there).
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readResult, RESULT } from './cloud-turn.mjs';
 import { jsonLines } from './json-lines.ts';
 
 /** Exit code for "run it at home" (EX_UNAVAILABLE), as citadel-heavy's 75 is "the server has it". */
@@ -28,6 +32,16 @@ export const AT_HOME = 69;
 export const QUIET_MS = 8 * 60_000;
 /** A background command with a timeout runs up to 2 hours in a session (CLOUD.stepMinutes, src/cloud-pool.ts). */
 export const MAX_MINUTES = 110;
+/**
+ * A cloud command step longer than this runs on its own once it has started (Cara's "Both, by length"): the helper exits
+ * ON_ITS_OWN, the minion hands the server a wait on `citadel-cloud check` and ends its turn, and `citadel-cloud collect`
+ * brings it home when it wakes. Only a wait the turn typed itself is handed over (citadel-job's waitsAlone), so the
+ * helper can't do that last step for it. shortcut: a brief always waits in the turn (up to MAX_MINUTES); hand briefs over
+ * too if people ask.
+ */
+export const HAND_MINUTES = 20;
+/** Exit code for "it runs on in the cloud: wait on check, then collect". */
+export const ON_ITS_OWN = 76;
 /** CLOUD's start and poll (src/cloud-pool.ts), which this can't import: it reaches the database. */
 const START_MS = 180_000;
 const POLL_MS = 20_000;
@@ -57,11 +71,13 @@ export const io = {
   heavy: 'citadel-heavy',
   line: (text: string, detail: string, event: number | null) => postLine(text, detail, event),
   lineMs: 120_000,
+  /** Whether a turn is here to hand a long wait to the server (citadel-wait's own test). */
+  canHand: () => !!process.env.CLAUDE_PID && !!process.env.COORDINATOR_TOKEN,
   heavyDir: () => process.env.CITADEL_HEAVY_DIR || join(homedir(), '.local/share/claude-coordinator/projects/.heavy'),
 };
 
 /** The usage line for a bad call. */
-const USAGE = 'usage: citadel-cloud run [--minutes N] [--files a,b] [--out <dir>] -- <command> | citadel-cloud brief <file> [--minutes N] [--model sonnet|opus] [--out <dir>]';
+const USAGE = 'usage: citadel-cloud run [--minutes N] [--files a,b] [--out <dir>] -- <command> | citadel-cloud brief <file> [--minutes N] [--model sonnet|opus] [--out <dir>] | citadel-cloud check|collect <out>';
 
 /** The job a command line asks for, or a usage error. */
 export function parse(args: string[], now = Date.now()): Job | string {
@@ -211,6 +227,7 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
   let result: { is_error?: boolean; result?: string } | null = null;
   let url = '';
   let stopped = false;
+  let handed = false;
   const driver = spawn(process.execPath, [join(import.meta.dirname, 'cloud-turn.mjs'), file], { cwd, stdio: ['pipe', 'pipe', 'inherit'], detached: true });
   driver.stdin.end();
   let last = Date.now();
@@ -234,6 +251,13 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
     } else if (ev.subtype === 'cloud_progress' && ev.text) {
       say(ev.text);
       on(ev.text, `Its session: ${url}`);
+      // Running, by its own beat: a long one goes on without this process (and its driver), which the turn can't keep.
+      if (job.kind === 'run' && job.minutes > HAND_MINUTES && io.canHand() && !handed) {
+        handed = true;
+        const hand: Hand = { cwd, branch, ref, beat, url, began, minutes: job.minutes, quietMs: io.quietMs, job, event: null };
+        writeFileSync(join(job.out, '.hand.json'), JSON.stringify(hand));
+        stopping?.();
+      }
     } else if (ev.subtype === 'cloud_result' && Number.isInteger(ev.code)) code = ev.code ?? null;
     else if (ev.type === 'assistant') reply = (ev.message?.content ?? []).map((c) => c.text ?? '').join('\n') || reply;
     else if (ev.type === 'result') result = ev;
@@ -241,6 +265,13 @@ export async function cloud(job: Job, on: (state: string, detail?: string) => vo
   await new Promise((r) => driver.once('exit', r));
   clearInterval(tick);
   stopping = null;
+  if (handed) {
+    on('runs on its own in the cloud; Citadel watches for its result', `Its session: ${url}`);
+    io.log(
+      `citadel-cloud: it runs on in the cloud on its own (${url}). Hand the wait to Citadel and end your turn:\n  citadel-wait cmd 'citadel-cloud check ${job.out}'\n(in the foreground; exit 75 means Citadel has it: end your turn). When it wakes you, run:\n  citadel-cloud collect ${job.out}\nas a background command and wait for it: it brings the result home, or runs the step here if the session didn't deliver.`,
+    );
+    return ON_ITS_OWN;
+  }
   for (const b of [ref, beat, branch]) if (job.kind === 'run' || b === branch) spawnSync('git', ['-C', cwd, 'push', '-q', 'origin', '--delete', b], { stdio: 'ignore' });
   const cost = `about $${Math.max(0.4, mins() * 0.025).toFixed(2)} of your plan's usage (an estimate)`;
   if (stopped) return (say(`stopped after ${mins()} min; ${url ? 'the cloud job stops at its next beat' : 'no session had started'}`), 143);
@@ -369,6 +400,70 @@ async function heavy(place: Exclude<Place, 'cloud'>, job: Job, on: (state: strin
   return code;
 }
 
+/** What a step running on its own leaves in its out folder for `check` and `collect`. */
+interface Hand {
+  cwd: string;
+  branch: string;
+  ref: string;
+  beat: string;
+  url: string;
+  began: number;
+  minutes: number;
+  quietMs: number;
+  job: Job;
+  /** Its chat line, rewritten once more by collect. */
+  event: number | null;
+}
+const readHand = (out: string): Hand => JSON.parse(readFileSync(join(out, '.hand.json'), 'utf8')) as Hand;
+
+/** Why a step on its own needs collecting now (its result, its silence, its limit), or null while it runs. */
+export function due(out: string, now = Date.now()): string | null {
+  const h = readHand(out);
+  const git = (...a: string[]) => spawnSync('git', ['-C', h.cwd, ...a], { encoding: 'utf8', timeout: 60_000 });
+  if (git('ls-remote', '--exit-code', 'origin', `refs/heads/${h.branch}`).status === 0) return 'its result is pushed';
+  if (now - h.began > (h.minutes + 15) * 60_000) return 'it passed its time limit';
+  const fetched = git('fetch', '-q', 'origin', `+refs/heads/${h.beat}:refs/citadel-cloud/${h.beat}`);
+  const at = fetched.status === 0 ? Number(git('log', '-1', '--format=%ct', `refs/citadel-cloud/${h.beat}`).stdout.trim()) * 1000 : 0;
+  // The VM's clock writes the beat's time; a skew of minutes only moves this by as much.
+  return at && now - at > h.quietMs ? `no progress for ${Math.round((now - at) / 60_000)} minutes` : null;
+}
+
+/** Bring a step that ran on its own home: its reply, exit code and files, or a run here when it didn't deliver. */
+export async function collect(out: string): Promise<number> {
+  const h = readHand(out);
+  const git = (...a: string[]) => execFileSync('git', ['-C', h.cwd, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  const line = liveLine(h.job, h.event);
+  line.at('cloud');
+  const local = `refs/citadel-cloud/${h.branch}`;
+  let result: { reply: string; files: string[]; code?: number } | null = null;
+  try {
+    git('fetch', '-q', 'origin', `+refs/heads/${h.branch}:${local}`);
+    result = readResult(git('show', `${local}:${RESULT}`), h.branch);
+    for (const f of result.files) writeFileSync(join(out, f.split('/').at(-1)!), execFileSync('git', ['-C', h.cwd, 'cat-file', 'blob', `${local}:${f}`], { maxBuffer: 6 * 1024 * 1024 }));
+  } catch {
+    result = null;
+  }
+  spawnSync('git', ['-C', h.cwd, 'update-ref', '-d', local], { stdio: 'ignore' });
+  // The source branch going is also the Stop: a job still running there ends at its next beat.
+  for (const b of [h.ref, h.beat, h.branch]) spawnSync('git', ['-C', h.cwd, 'push', '-q', 'origin', '--delete', b], { stdio: 'ignore' });
+  const mins = Math.round((Date.now() - h.began) / 60_000);
+  if (!result || !Number.isInteger(result.code)) {
+    const why = `the session didn't deliver a result (${h.url})`;
+    io.log(`citadel-cloud: ${why}; runs ${WHERE.home} instead`);
+    line.set("the cloud session didn't deliver, so it runs here", why);
+    line.at('home');
+    const code = await heavy('home', h.job, line.set);
+    await line.done();
+    return code;
+  }
+  remember(h.job.cmd, mins * 60, result.code === 0 ? 0 : 1);
+  io.log(result.reply);
+  io.log(`citadel-cloud: done after ${mins} min. Files: ${out}`);
+  line.set(`exit ${result.code} after ${mins} min`, `${result.reply}\n\nIts session: ${h.url}.`);
+  await line.done();
+  return result.code === 0 ? 0 : 1;
+}
+
 const WHERE: Record<Place, string> = { machine: 'on a PC lending this scheme CI', github: "on GitHub's own runners", cloud: 'in a cloud session', home: "here, in perigee's heavy-job slot" };
 
 /** POST the step's chat line, or rewrite it; its event id, or null when it couldn't (a missing line, never a failed step). */
@@ -389,8 +484,8 @@ async function postLine(text: string, detail: string, event: number | null): Pro
 }
 
 /** The step's one line in the minion's chat (Cara's "Live line per step"): what runs, where, and how it stands, rewritten in place. */
-function liveLine(job: Job) {
-  let event: number | null = null;
+function liveLine(job: Job, from: number | null = null) {
+  let event: number | null = from;
   let chain: Promise<unknown> = Promise.resolve();
   const what = job.kind === 'run' ? `\`${job.cmd.length > 120 ? `${job.cmd.slice(0, 117)}...` : job.cmd}\`` : 'a brief';
   let where = '';
@@ -400,7 +495,7 @@ function liveLine(job: Job) {
       event = (await io.line(text, detail, event)) ?? event;
     });
   };
-  return { set, at: (place: Place) => (where = WHERE[place]), done: () => chain };
+  return { set, at: (place: Place) => (where = WHERE[place]), done: () => chain, event: () => event };
 }
 
 /** The helper's whole call: pick the place, run there, and bring a cloud job that didn't deliver home. */
@@ -434,6 +529,8 @@ export async function helper(job: Job): Promise<number> {
     return heavy('home', job, line.set);
   })();
   await line.done();
+  // A step on its own: collect rewrites the same line.
+  if (code === ON_ITS_OWN) writeFileSync(join(job.out, '.hand.json'), JSON.stringify({ ...readHand(job.out), event: line.event() }));
   return code;
 }
 
@@ -443,7 +540,26 @@ function home(why: string): number {
   return AT_HOME;
 }
 
-if (import.meta.main) {
+if (import.meta.main && ['check', 'collect'].includes(process.argv[2] ?? '')) {
+  const [cmd, out] = process.argv.slice(2);
+  if (!out || !existsSync(join(out, '.hand.json'))) {
+    console.error(`usage: citadel-cloud ${cmd} <the out folder citadel-cloud named>`);
+    process.exit(2);
+  }
+  if (cmd === 'check') {
+    const why = due(out);
+    if (why) console.log(`citadel-cloud: ${why}: collect it`);
+    process.exit(why ? 0 : 1);
+  }
+  process.once('SIGTERM', stop);
+  collect(out).then(
+    (c) => process.exit(c),
+    (err) => {
+      console.error(`citadel-cloud: collect failed: ${(err as Error).message}`);
+      process.exit(1);
+    },
+  );
+} else if (import.meta.main) {
   const job = parse(process.argv.slice(2));
   if (typeof job === 'string') {
     console.error(job);

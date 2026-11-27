@@ -51,7 +51,13 @@ export class TurnProgress {
       p.finished = [];
       this.progress.set(ticketId, p);
       // The full replay is paid once: an idle minion would otherwise pay it after every restart.
-      if (!usable) this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);
+      if (!usable) {
+        this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);
+        // Rebuilt by new task-list rules, so the row's stored line, kept until its next event, says what they say (#2201).
+        const t = this.d.store.getTicket(ticketId);
+        const line = t && p.tasks.length ? progressLine(p, t.status === 'running') : '';
+        if (t && line && line !== t.last_activity) this.d.store.setLastActivity(ticketId, line);
+      }
     }
     return p;
   }

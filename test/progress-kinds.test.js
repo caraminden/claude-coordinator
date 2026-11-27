@@ -24,6 +24,12 @@ function chat(steps, { kinds = true } = {}) {
     read: () => call('Read', { file_path: '/repo/src/a.ts' }),
     ship: () => call('mcp__thread__hand_off_land', { summary: 'x' }),
     over: () => ev({ type: 'result', subtype: 'success', is_error: false }),
+    // A Grunt started now (its Agent call's id), and a call it makes.
+    grunt: (input = {}) => {
+      call('Agent', { description: 'Part', ...input });
+      return `c${id}`;
+    },
+    inGrunt: (gid) => call('Read', { file_path: '/repo/src/b.ts' }, { parent_tool_use_id: gid }),
     turn: () => {
       c.over();
       ev({ type: 'system', subtype: 'init' });
@@ -69,15 +75,17 @@ test('a failed test then an edit puts the bar back on build, with no tick taken 
   assert.equal(c.bar(), 'cccip', 'fixing what a review found is still the review');
 });
 
-test('with several steps underway, the track leads with the one the readout names (#2156)', () => {
+test('with a Grunt out on another step, the track leads with the one the readout names (#2156, #2201)', () => {
   const c = chat([
     ['build', 'Build it', 30],
     ['build', 'Write docs', 2],
     ['test', 'Test', 5],
   ]);
   c.edit();
+  c.grunt({ run_in_background: true });
   c.plan([{ n: 2, status: 'doing' }]);
-  assert.equal(stepName(c.p, true), 'Write docs');
+  assert.equal(stepInfo(c.p, true).current?.subject, 'Write docs');
+  assert.equal(stepName(c.p, true), 'Building, 2 steps');
   assert.deepEqual(planTrack(c.p).slice(0, 2), [
     [2, 'i'],
     [30, 'i'],
@@ -121,21 +129,30 @@ test('each step underway says its own clock, scaled; one with no guess says none
   );
 });
 
-test('steps sharing a stage share its clock, their guesses summed (#2156)', () => {
+test('a step a Grunt is out on keeps its own clock; one passed with nothing running is held open, its clock stopped (#2156, #2201)', () => {
   const c = chat([
     ['build', 'Parser', 10],
     ['build', 'Page', 20],
     ['ship', 'Ship', 5],
   ]);
   c.edit();
-  const track = planTrack(c.p, { running: true, now: c.now() });
-  assert.deepEqual(track.slice(0, 2), [
-    [10, 'i', T0, 1800],
-    [20, 'i', T0, 1800],
+  c.inGrunt(c.grunt({ run_in_background: true }));
+  c.at(4);
+  c.plan([{ n: 2, status: 'doing' }]);
+  c.at(6);
+  assert.deepEqual(planTrack(c.p, { running: true, now: c.now() }).slice(0, 2), [
+    [20, 'i', T0 + 4 * 60_000, 1200],
+    [10, 'i', T0, 600],
   ]);
+  c.over();
+  assert.deepEqual(planTrack(c.p).slice(0, 2), [
+    [10, 'h'],
+    [20, 'i'],
+  ]);
+  assert.equal(progressLine(c.p, false), 'Paused at: Page · 0 of 3 done');
 });
 
-test('steps of one kind show as one shared stage, its guesses summed and its time split by them', () => {
+test('steps of one kind side by side: the first is underway and the next waits; the stage ends as one, its time split by guesses', () => {
   const c = chat([
     ['read', 'Read'],
     ['build', 'Parser', 10],
@@ -143,9 +160,9 @@ test('steps of one kind show as one shared stage, its guesses summed and its tim
     ['ship', 'Ship'],
   ]);
   c.edit();
-  assert.equal(c.bar(), 'ciip');
-  assert.equal(progressLine(c.p, true), 'Building, 2 steps… · 1 of 4 done');
-  assert.equal(planEstimate(c.p, true, c.now()).usual, 30 * 60);
+  assert.equal(c.bar(), 'cipp');
+  assert.equal(progressLine(c.p, true), 'Parser… · 1 of 4 done');
+  assert.equal(planEstimate(c.p, true, c.now()).usual, 10 * 60);
   c.at(15);
   c.ship();
   assert.equal(c.bar(), 'ccci');
@@ -158,7 +175,11 @@ test('steps of one kind show as one shared stage, its guesses summed and its tim
 test('build, test, build in one round is one stage; a card or ship between starts another', () => {
   const round = chat([['build'], ['test'], ['build'], ['ship']]);
   round.edit();
-  assert.equal(round.bar(), 'iiip', 'which build an edit is for cannot be told');
+  assert.equal(round.bar(), 'ippp', 'an edit is for the first build; the second waits for work that shows it');
+  round.test();
+  assert.deepEqual([round.bar(), stepName(round.p, true)], ['iipp', 'test']);
+  round.edit();
+  assert.deepEqual([round.bar(), stepName(round.p, true)], ['iipp', 'build'], 'an edit after a test is back on the build it reached');
   const cards = chat([['build'], ['ask'], ['build'], ['ship']]);
   cards.edit();
   cards.call('mcp__thread__ask_question', { questions: [] });
@@ -366,14 +387,70 @@ test("a step taken back, or named inside a shared stage, reads as the minion's w
   assert.equal(c.bar(), 'ciipp', 'and worked on again once its work shows');
   const d = chat([['read'], ['build', 'One'], ['build', 'Two'], ['build', 'Three'], ['test']]);
   d.edit();
-  assert.equal(stepName(d.p, true), 'Building, 3 steps');
+  assert.equal(stepName(d.p, true), 'One');
   d.plan([{ n: 3, status: 'doing' }]);
   d.edit();
   assert.deepEqual([d.bar(), stepName(d.p, true)], ['ciipp', 'Two']);
   d.test();
-  assert.deepEqual([d.bar(), stepName(d.p, true)], ['ciiii', 'test']);
+  assert.deepEqual([d.bar(), stepName(d.p, true)], ['ciipi', 'test'], 'the builds reached are held open under the tests; Three never was');
   d.edit();
-  assert.equal(stepName(d.p, true), 'Building, 3 steps', 'newer work than its word');
+  assert.deepEqual([d.bar(), stepName(d.p, true)], ['ciipp', 'Two'], 'back on the build it reached, not the first');
+});
+
+test('a plan whose kinds come back is one stage, but only the step its work reached is underway (#2201)', () => {
+  // #2198's plan: read, build, test, read, build, ship, idle while GitHub ran its probes.
+  const c = chat([
+    ['read', 'Confirm the runner facts'],
+    ['build', 'Write the probe workflow'],
+    ['test', 'Run the probes'],
+    ['read', 'Read the results'],
+    ['build', 'Write it up'],
+    ['ship', 'Ship'],
+  ]);
+  c.read();
+  assert.deepEqual([c.bar(), progressLine(c.p, true)], ['ipppp' + 'p', 'Confirm the runner facts… · 0 of 6 done']);
+  c.edit();
+  c.read();
+  c.over();
+  assert.equal(c.bar(), 'iipppp', 'the read is held open, the build underway; reading between edits moves nothing');
+  assert.equal(progressLine(c.p, false), 'Paused at: Write the probe workflow · 0 of 6 done');
+  assert.deepEqual(
+    planTrack(c.p).map(([, st]) => st),
+    ['h', 'i', 'p', 'p', 'p', 'p'],
+  );
+  assert.equal(stepInfo(c.p).done, 0, 'the badge, readout and line count the same steps done');
+  c.turn();
+  c.test();
+  assert.deepEqual([c.bar(), stepName(c.p, true)], ['iiippp', 'Run the probes']);
+  c.ship();
+  assert.equal(c.bar(), 'ccccci', 'shipping ends the round, the steps it never showed included');
+});
+
+test('a test never jumps a build it has not reached inside a stage (#2201)', () => {
+  const c = chat([['read'], ['build'], ['test'], ['read'], ['ship']]);
+  c.test();
+  assert.equal(c.bar(), 'ipppp', 'a baseline run while reading');
+});
+
+test('Grunts out on steps show beside the step underway until they hand back, and a background one until the turn ends (#2201)', () => {
+  const c = chat([['read', 'Look'], ['build', 'Parser'], ['build', 'Page'], ['test', 'Test'], ['read', 'Again'], ['ship']]);
+  c.read();
+  const fg = c.grunt();
+  const bg = c.grunt({ run_in_background: true });
+  c.inGrunt(fg);
+  assert.equal(stepName(c.p, true), 'Look', 'Grunts on the step underway add no step');
+  c.edit(); // the minion going on: its foreground Grunt is back, the background one still out
+  assert.deepEqual([c.bar(), stepName(c.p, true)], ['iipppp', 'Reading and building, 2 steps']);
+  c.inGrunt(bg);
+  c.read();
+  assert.deepEqual([c.bar(), stepName(c.p, true)], ['iipppp', 'Reading and building, 2 steps'], 'the background one is still out');
+  c.over();
+  assert.deepEqual(
+    planTrack(c.p).map(([, st]) => st),
+    ['h', 'i', 'p', 'p', 'p', 'p'],
+    'once the turn is over nothing holds the read',
+  );
+  assert.equal(progressLine(c.p, false), 'Paused at: Parser · 0 of 6 done');
 });
 
 test('a step with no kind set to doing is the one underway until the next stage shows', () => {

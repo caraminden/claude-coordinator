@@ -124,6 +124,7 @@ export interface ToolInput {
   prompt?: string;
   skill?: string;
   subagent_type?: string;
+  run_in_background?: boolean;
   ticket_id?: number | string;
   title?: string;
   text?: string;

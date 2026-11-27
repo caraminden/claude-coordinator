@@ -168,9 +168,13 @@ export function phaseRows(acts, running, key = null) {
   ];
 }
 
-/** One step of Claude's plan: its title, one plain line about it, and on opening, how the work went. `held`: built, and being tested (#1923). */
-/** @param {ProgressTask} t @param {ChatAction[]} acts @param {boolean} running @param {boolean} held */
-function planStep(t, acts, running, held) {
+/**
+ * One step of Claude's plan: its title, one plain line about it, and on opening, how the work went. `held`: worked on,
+ * kept open while the work goes on past it (#1923, #2201); `beside`: underway beside the step the minion is on, as a
+ * Grunt started for it is still out (#2201).
+ * @param {ProgressTask} t @param {ChatAction[]} acts @param {boolean} running @param {boolean} held @param {boolean} beside
+ */
+function planStep(t, acts, running, held, beside) {
   const now = t.status === 'in_progress';
   const live = now && running;
   const phases = workPhases(acts, live);
@@ -178,8 +182,8 @@ function planStep(t, acts, running, held) {
   /** @type {string} */
   let line;
   if (t.status === 'completed') line = t.outcome || (t.note && firstSentence(t.note)) || t.description || phases.map((ph) => ph.text).join(', ');
-  else if (held) line = 'Done so far, kept open in case a test sends it back';
-  else if (now && t.kind && t.stage !== t.id) line = 'Under way together with the step above';
+  else if (held) line = 'Done so far, kept open until the work after it is checked';
+  else if (beside) line = 'A grunt is still working on it';
   else if (now) line = live ? (phases.length ? `Now: ${phases[phases.length - 1].text.toLowerCase()}` : 'Just started') : 'Paused here when the turn ended';
   else line = t.description || 'Not started yet';
   const el = h(
@@ -340,15 +344,18 @@ export function renderProgress() {
     /** @type {Record<string, ProgressTask[]>} */
     const groups = { completed: [], in_progress: [], pending: [] };
     for (const t of p.tasks) (groups[t.status] ?? groups.pending).push(t);
+    // The step the plan is on, even at a turn's start before it moves: the others underway have a Grunt out on them.
+    const on = stepInfo(p).current;
     // A step an earlier turn left underway reads as paused until this turn moves the plan.
     /** @param {ProgressTask} t */
     const stepEl = (t) =>
       planStep(
         t,
-        // A shared stage's calls are kept under its first step.
+        // Calls are kept under the step underway when they ran.
         all.filter((a) => a.taskId === t.id),
         running && !!current,
         heldStep(p, t),
+        t !== on && t.status === 'in_progress' && !!t.kind && !heldStep(p, t),
       );
     /** @param {string} title @param {ProgressTask[]} tasks */
     const section = (title, tasks) => (tasks.length ? h('section', { class: 'plan-group' }, h('h4', {}, title), tasks.map(stepEl)) : '');

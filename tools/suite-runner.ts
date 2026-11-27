@@ -8,6 +8,8 @@
 //
 // tools/run-tests.sh calls it in place of `node --test`, through tools/citadel-node:
 //   suite-runner.ts --concurrency N --timeout MS [--global-setup FILE] [--failed-to FILE] [--] <file or folder>...
+// With CITADEL_TEST_SHARD=<index>/<total> (#2209, a ship's run on GitHub split 20 ways) it runs only that shard's files
+// and keeps only their times; `suite-runner.ts --merge-times <old> <shard times>...` prints them merged for the next split.
 // It reports as the CLI did there: spec to stdout, tools/failed-files-reporter.ts to --failed-to, and
 // tools/progress-reporter.ts when CITADEL_TEST_PROGRESS_TO is set (the CLI path got it from tools/citadel-node). It
 // exits 1 when a test failed, as the CLI does, and forces exit once the tests end (--test-force-exit).
@@ -83,6 +85,28 @@ export function mergeTimes(old: Map<string, number>, ran: Map<string, number>, c
     .join('');
 }
 
+// One shard's files (#2209): longest first (last time; a file with none counts as the median), each onto the shard with
+// the least so far, ties to the lowest. Every shard works out the same split from the same files and times. `head`: seconds
+// shard 0 has before its files (the burn-in runs there).
+export function shard(files: string[], times: Map<string, number>, index: number, total: number, head = 0, cwd = process.cwd()): string[] {
+  const known = files
+    .map((f) => times.get(relative(cwd, f)))
+    .filter((n) => n !== undefined)
+    .sort((a, b) => a - b);
+  const guess = known.length ? known[Math.floor(known.length / 2)] : 1;
+  const t = (f: string) => times.get(relative(cwd, f)) ?? guess;
+  const load = Array<number>(total).fill(0);
+  load[0] = head;
+  const mine: string[] = [];
+  for (const f of [...files].sort((a, b) => t(b) - t(a) || (a < b ? -1 : a > b ? 1 : 0))) {
+    let k = 0;
+    for (let i = 1; i < total; i++) if (load[i] < load[k]) k = i;
+    load[k] += t(f);
+    if (k === index) mine.push(f);
+  }
+  return mine;
+}
+
 function parseArgs(argv: string[]) {
   const o: { concurrency: number; timeout: number; globalSetup?: string; failedTo?: string; targets: string[] } = { concurrency: 1, timeout: Infinity, targets: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -103,13 +127,32 @@ function parseArgs(argv: string[]) {
 }
 
 async function main() {
+  if (process.argv[2] === '--merge-times') {
+    const [old, ...shards] = process.argv.slice(3);
+    const ran = new Map<string, number>();
+    for (const p of shards) for (const [f, s] of readTimes(p)) ran.set(f, s);
+    process.stdout.write(mergeTimes(readTimes(old), ran));
+    return;
+  }
   const o = parseArgs(process.argv.slice(2));
   const timesPath = process.env.CITADEL_TEST_TIMES || undefined;
   const old = readTimes(timesPath);
-  const files = order(expand(o.targets.length ? o.targets : ['test/']), old);
-  // The times file is this run's: a test that starts a run of its own must not rewrite it. (Not run()'s env option:
-  // the leak guard's global setup adds its run id to process.env after this point, and the tests must inherit it.)
+  const split = process.env.CITADEL_TEST_SHARD?.match(/^(\d+)\/(\d+)$/);
+  if (process.env.CITADEL_TEST_SHARD && !(split && Number(split[1]) < Number(split[2]))) throw new Error(`suite-runner: CITADEL_TEST_SHARD is <index>/<total> from 0, not ${process.env.CITADEL_TEST_SHARD}`);
+  let files = expand(o.targets.length ? o.targets : ['test/']);
+  if (split) {
+    const [index, total] = [Number(split[1]), Number(split[2])];
+    files = shard(files, old, index, total, Number(process.env.CITADEL_TEST_SHARD_HEAD) || 0);
+    process.stdout.write(`suite-runner: shard ${index} of ${total}: ${files.length} test file(s)\n`);
+    if (!files.length) return;
+  }
+  files = order(files, old);
+  // The times file and the shard are this run's: a test that starts a run of its own must not rewrite it or run a shard.
+  // (Not run()'s env option: the leak guard's global setup adds its run id to process.env after this point, and the
+  // tests must inherit it.)
   delete process.env.CITADEL_TEST_TIMES;
+  delete process.env.CITADEL_TEST_SHARD;
+  delete process.env.CITADEL_TEST_SHARD_HEAD;
   const stream = run({
     files,
     concurrency: o.concurrency,
@@ -176,7 +219,8 @@ async function main() {
   await Promise.all(done);
   if (timesPath && ran.size) {
     try {
-      writeFileSync(`${timesPath}.${process.pid}`, mergeTimes(old, ran));
+      // A shard keeps only its own files' times: the merge after the run puts the shards together (--merge-times).
+      writeFileSync(`${timesPath}.${process.pid}`, mergeTimes(split ? new Map() : old, ran));
       renameSync(`${timesPath}.${process.pid}`, timesPath);
     } catch {
       // Times that can't be kept only cost the next run its order.

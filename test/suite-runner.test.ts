@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { expand, mergeTimes, order, readTimes } from '../tools/suite-runner.ts';
+import { expand, mergeTimes, order, readTimes, shard } from '../tools/suite-runner.ts';
 import { tempRoot } from './helpers.ts';
 
 // tools/suite-runner.ts (#1565): run-tests.sh's `node --test`, with files started longest first.
@@ -97,4 +97,64 @@ test('a run ends once its tests do, even when a file leaves a handle open (the C
   assert.equal(r.killed, false, 'the run hung on the open handle');
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /^ℹ pass 1$/m);
+});
+
+// A ship's run on GitHub, split 20 ways (#2209, ADR 0042): each shard works out the same split and runs its own part.
+test('the shards split the files between them, each file once, longest first onto the emptiest, with no time as the median', () => {
+  const cwd = '/r';
+  const secs = [200, 190, 180, 60, 50, 40, 30, 20, 10, 5, 5, 1];
+  const files = secs.map((_, i) => `/r/test/f${String(i).padStart(2, '0')}.test.ts`);
+  const times = new Map(secs.map((s, i) => [`test/f${String(i).padStart(2, '0')}.test.ts`, s]));
+  const parts = [0, 1, 2, 3].map((i) => shard(files, times, i, 4, 0, cwd));
+  assert.deepEqual(parts.flat().sort(), files, 'every file in exactly one shard');
+  const load = parts.map((p) => p.reduce((n, f) => n + times.get(f.slice(3))!, 0));
+  assert.deepEqual(load, [200, 196, 200, 195], 'each next-longest file onto the emptiest shard, ties to the lowest');
+  // The burn-in's head start on shard 0 sends the longest file elsewhere.
+  assert.ok(!shard(files, times, 0, 4, 120, cwd).includes('/r/test/f00.test.ts'));
+  // A new file counts as the median (the 6th of 11 known: 40 s with f11 unknown), not first or last.
+  const fresh = new Map(times);
+  fresh.delete('test/f11.test.ts');
+  const withNew = [0, 1, 2, 3].map((i) => shard(files, fresh, i, 4, 0, cwd));
+  assert.deepEqual(withNew.flat().sort(), files);
+  // More shards than files: the rest are empty.
+  assert.deepEqual(shard(files.slice(0, 2), times, 3, 4, 0, cwd), []);
+});
+
+test('a shard run runs only its own files and keeps only their times; --merge-times puts the shards together', async () => {
+  const cwd = join(scratch.dir, 'shard');
+  mkdirSync(join(cwd, 'test'), { recursive: true });
+  for (const n of ['a', 'b', 'c', 'd']) writeFileSync(join(cwd, 'test', `${n}.test.mjs`), `import test from 'node:test';\nimport { appendFileSync } from 'node:fs';\ntest('${n}', () => { appendFileSync('started', '${n}' + (process.env.CITADEL_TEST_SHARD ? ' saw the shard' : '') + '\\n'); });\n`);
+  const old = join(cwd, 'old.tsv');
+  writeFileSync(old, '9\ttest/a.test.mjs\n7\ttest/b.test.mjs\n3\ttest/c.test.mjs\n1\ttest/d.test.mjs\n4\ttest/gone.test.mjs\n');
+  const runShard = (i: number) => {
+    const times = join(cwd, `times-${i}.tsv`);
+    writeFileSync(times, readFileSync(old));
+    return new Promise<{ code: number | null; out: string; times: string }>((res) =>
+      execFile(process.execPath, [runner, '--concurrency', '1', '--timeout', '30000', '--', 'test/'], { cwd, env: { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_PROGRESS_TO: undefined, CITADEL_TEST_TIMES: times, CITADEL_TEST_SHARD: `${i}/2` } }, (e, out) =>
+        res({ code: e ? (e.code as number) : 0, out, times }),
+      ),
+    );
+  };
+  const one = await runShard(1);
+  assert.equal(one.code, 0, one.out);
+  assert.match(one.out, /^suite-runner: shard 1 of 2: 2 test file\(s\)$/m);
+  assert.equal(readFileSync(join(cwd, 'started'), 'utf8'), 'b\nc\n', 'shard 1 of 2 is b (7 s) and c (3 s), and its tests never see the shard');
+  assert.deepEqual([...readTimes(one.times).keys()].sort(), ['test/b.test.mjs', 'test/c.test.mjs'], "only this shard's times");
+  const zero = await runShard(0);
+  assert.equal(zero.code, 0, zero.out);
+  const merged = await new Promise<string>((res) => execFile(process.execPath, [runner, '--merge-times', old, zero.times, one.times], { cwd }, (_e, out) => res(out)));
+  writeFileSync(join(cwd, 'merged.tsv'), merged);
+  assert.deepEqual([...readTimes(join(cwd, 'merged.tsv')).keys()], ['test/a.test.mjs', 'test/b.test.mjs', 'test/c.test.mjs', 'test/d.test.mjs'], "every shard's files, and none deleted");
+  assert.ok(
+    [...readTimes(join(cwd, 'merged.tsv')).values()].every((s) => s < 1),
+    "the shards' new times, not the old ones",
+  );
+});
+
+test('a shard setting that does not read stops the run before any test', async () => {
+  const r = await new Promise<{ code: number | null; err: string }>((res) =>
+    execFile(process.execPath, [runner, '--concurrency', '1', '--', 'test/'], { cwd: scratch.dir, env: { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_SHARD: '20/20' } }, (e, _o, err) => res({ code: e ? (e.code as number) : 0, err })),
+  );
+  assert.equal(r.code, 1);
+  assert.match(r.err, /CITADEL_TEST_SHARD is <index>\/<total> from 0, not 20\/20/);
 });

@@ -24,26 +24,7 @@ const tmp = tempRoot('land-verdicts-');
 after(() => tmp.teardown());
 
 // The functions that judge a red, and the helpers they call. A missing one fails here: rename it here too.
-const BENCHED = [
-  'cut_off',
-  'flake_only',
-  'skipped_tests',
-  'burn_lines',
-  'train_labels',
-  'train_real',
-  'train_failing',
-  'train_main_red',
-  'train_suspects_of',
-  'train_guess',
-  'train_imports',
-  'train_label',
-  'train_at',
-  'known_flakes',
-  'train_pin',
-  'train_alone',
-  'burn_new',
-  'has_case',
-];
+const BENCHED = ['cut_off', 'flake_only', 'skipped_tests', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'train_guess', 'train_imports', 'train_label', 'train_at', 'known_flakes', 'train_pin', 'train_alone', 'burn_new', 'has_case'];
 // Functions that read $failed but decide nobody's fault themselves: each says why.
 const NOT_VERDICTS: Record<string, string> = {
   train_tail: "cuts a red's log for the rider it refuses",

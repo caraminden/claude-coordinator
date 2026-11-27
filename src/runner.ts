@@ -3867,7 +3867,7 @@ export class Runner {
     if (!after || !project) {
       this.queue.done(ticketId);
       this.store.deleteSetting(savingKey(ticketId));
-      return live.end();
+      return void Promise.allSettled([lease, effort]).then(live.end);
     }
     // Messages queued during the turn wait in the queue for the save.
     // The lease and the effort are read off the server's thread (#2137); the step ends once they and the save have.

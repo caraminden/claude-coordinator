@@ -48,8 +48,11 @@ light_check() {
   # One at a time on the side runner (<state>/light-check.lock, fd 4): another ship's is waited for, up to
   # LAND_LIGHT_CHECK_LOCK_WAIT (300 s), and the wait comes off the limit.
   t1=$SECONDS
+  trap 'light_check_done; exit 143' TERM INT HUP # a stop during the wait leaves no worktree behind
   { exec 4>"$state/light-check.lock" && flock -w "${LAND_LIGHT_CHECK_LOCK_WAIT:-300}" 4; } || { exec 4>&-; light_check_done; say "light check: another ship's light check held the side runner for $((SECONDS - t1)) s, so this joins the line unchecked"; retro_log "light check · $label · skipped: another ship's light check held the side runner · $((SECONDS - t1))s"; return 0; }
+  trap - TERM INT HUP
   lockwait=$((SECONDS - t1)) limit=$((limit - SECONDS + t1))
+  [ "$limit" -ge 60 ] || limit=60
   # The queue leaves the run its time (about 150 s), so a late start is skipped as nothing ran rather than cut off.
   queue=$((limit - 150 < ${LAND_LIGHT_CHECK_QUEUE:-360} ? limit - 150 : ${LAND_LIGHT_CHECK_QUEUE:-360}))
   [ "$queue" -ge 30 ] || queue=30

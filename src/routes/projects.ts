@@ -1684,7 +1684,7 @@ export const projectRoutes: Route[] = [
       const { store } = app;
       const last = store.getSetting<SweepNight[]>(sweepsKey(ticket.project_id))?.[0];
       // A retried post of the same night would count its sightings twice.
-      if (last && last.minion === night.minion && last.sha === night.sha && JSON.stringify(last.files) === JSON.stringify(night.files)) throw new HttpError(409, 'That night is already posted');
+      if (last && last.minion === night.minion && last.sha === night.sha && last.minutes === night.minutes && last.error === night.error && JSON.stringify(last.files) === JSON.stringify(night.files)) throw new HttpError(409, 'That night is already posted');
       store.setSetting(sweepsKey(ticket.project_id), keepNights(store.getSetting<SweepNight[]>(sweepsKey(ticket.project_id)) ?? [], night));
       const seen = nightSightings(night);
       if (seen.length) store.addFlakeEvents(ticket.project_id, ticket.id, night.sha, night.at, seen);

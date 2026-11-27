@@ -165,7 +165,7 @@ test('with the cloud helpers switch off, no cloud run starts: a proof runs at ho
   const started: string[] = [];
   const homed: string[] = [];
   const saved = { ...io };
-  const env = [process.env.COORDINATOR_API, process.env.COORDINATOR_TICKET, process.env.CITADEL_CLOUD];
+  const env = [process.env.COORDINATOR_API, process.env.COORDINATOR_TICKET];
   let on = false;
   Object.assign(io, {
     noCloud: () => null, // everything else ready for the cloud
@@ -187,13 +187,12 @@ test('with the cloud helpers switch off, no cloud run starts: a proof runs at ho
     Object.assign(io, { helpersOff: () => helpersOff(async () => Promise.reject(new Error('HTTP 502'))) });
     assert.equal(await sweep(10, 10, true), 1, "a switch it couldn't read is no clean night");
     delete process.env.COORDINATOR_API;
-    assert.match((await helpersOff(async () => ({ on: true })))?.why ?? '', /CITADEL_CLOUD=1/, 'by hand outside a turn: off unless asked for');
+    assert.match((await helpersOff(async () => ({ on: true })))?.why ?? '', /outside a minion's turn/, 'by hand, outside a turn: off');
   } finally {
     Object.assign(io, saved);
     for (const [k, v] of [
       ['COORDINATOR_API', env[0]],
       ['COORDINATOR_TICKET', env[1]],
-      ['CITADEL_CLOUD', env[2]],
     ] as const)
       v === undefined ? delete process.env[k] : (process.env[k] = v);
   }

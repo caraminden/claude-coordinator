@@ -148,10 +148,10 @@ function noCloud(): string | null {
 /**
  * Why Citadel's cloud helpers switch keeps this run at home (HELPERS_SWITCH, src/cloud-flakes.ts: off unless an admin set it on;
  * Cara, 2026-11-27, "Ship dark, switch off"), or null when it's on. A minion's turn asks the server; outside one (a person by
- * hand) it's off unless CITADEL_CLOUD=1. `failed`: the switch couldn't be read, so it counts as off.
+ * hand) there's no switch to read, so it's off. `failed`: the switch couldn't be read, so it counts as off.
  */
 export async function helpersOff(read = () => api('cloud-helpers/switch')): Promise<{ why: string; failed: boolean } | null> {
-  if (!process.env.COORDINATOR_API || !process.env.COORDINATOR_TICKET) return process.env.CITADEL_CLOUD === '1' ? null : { why: "outside a minion's turn, cloud helpers need CITADEL_CLOUD=1", failed: false };
+  if (!process.env.COORDINATOR_API || !process.env.COORDINATOR_TICKET) return { why: "outside a minion's turn there's no cloud helpers switch to read", failed: false };
   try {
     return ((await read()) as { on?: unknown }).on === true ? null : { why: HELPERS_OFF, failed: false };
   } catch (err) {

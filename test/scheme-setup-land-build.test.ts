@@ -379,7 +379,8 @@ test('claims (#2234): with CLAIMS_GENERATED unset a generated file is refused as
   assert.equal(res.status, 1);
   assert.match(res.stderr, /map\.txt is unclaimed, but #2 merged it in first, so it is #2's/);
   assert.equal(b.at('build/1'), build);
-  for (const half of [{ CLAIMS_GENERATED: MAP.CLAIMS_GENERATED }, { CLAIMS_REGENERATE: MAP.CLAIMS_REGENERATE }]) {
+  const halves: Record<string, string>[] = [{ CLAIMS_GENERATED: MAP.CLAIMS_GENERATED }, { CLAIMS_REGENERATE: MAP.CLAIMS_REGENERATE }];
+  for (const half of halves) {
     b = buildSetup(half);
     const one = b.run(2, '--into', 'build/1', 'f2.txt');
     assert.equal(one.status, 1, one.stderr);

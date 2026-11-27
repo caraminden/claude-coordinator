@@ -247,7 +247,11 @@ let spent = 0;
 /** Books an eval's cost on the minion whose turn ran it (report_spend's route, #839); outside a turn (no COORDINATOR_* env) it books nothing. */
 export async function bookSpend(usd: number, env: Record<string, string | undefined> = process.env, post: typeof fetch = fetch): Promise<boolean> {
   const { COORDINATOR_API: url, COORDINATOR_TOKEN: token, COORDINATOR_TICKET: ticket } = env;
-  if (!(usd > 0) || !url || !token || !ticket) return false;
+  if (!(usd > 0)) return false;
+  if (!url || !token || !ticket) {
+    console.error(`Not booked: the eval cost $${usd.toFixed(2)}, but there is no COORDINATOR_* env (outside a turn, or run through citadel-job).`);
+    return false;
+  }
   try {
     const res = await post(`${url.replace(/\/$/, '')}/api/tickets/${ticket}/spend`, {
       method: 'POST',

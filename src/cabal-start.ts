@@ -49,7 +49,7 @@ const name = (app: App, lead: Ticket) => cabalName(app.store, lead, app.store.ge
 const rowName = (r: CabalMemberRow) => r.label || r.title || `row ${r.id}`;
 /** The scheme a row's member runs in: its own, or the lead's. */
 export const rowScheme = (lead: Pick<Ticket, 'project_id'>, r: Pick<CabalMemberRow, 'project_id'>) => r.project_id ?? lead.project_id;
-const schemeName = (app: App, id: number) => app.store.getProject(id)?.name ?? `scheme ${id}`;
+const schemeName = (app: Pick<App, 'store'>, id: number) => app.store.getProject(id)?.name ?? `scheme ${id}`;
 const money = (n: number) => `$${Math.round(n)}`;
 
 const clip = (t: string, n = 60) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
@@ -212,7 +212,7 @@ export function findRow(app: App, leadId: number, row: unknown): CabalMemberRow 
 const atWork = async (app: App, leadId: number, self: number) => ((await readBoard(app.store, leadId, { parked: (t) => app.runner.parked(t) }))?.counts.working ?? 0) + app.store.cabalRows(leadId).filter((r) => r.asked_at != null && r.ticket_id == null && r.id !== self).length; // a row asked of another scheme's Taskmaster holds its place
 
 /** What a row's `after` chains on: a #N, or another row's label whose minion is started; "H1, H2" (also "and", "&", "+") is a list, and the parts already shipped or merged drop out. */
-export function chainOf(app: App, lead: Ticket, r: CabalMemberRow): number | null {
+export function chainOf(app: Pick<App, 'store'>, lead: Ticket, r: CabalMemberRow): number | null {
   const whole = r.after.trim();
   if (!whole) return null;
   const rows = app.store.cabalRows(lead.id);

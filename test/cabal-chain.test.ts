@@ -20,7 +20,7 @@ const h2 = make('Two');
 store.ensureCabal(lead.id, p.id);
 store.addCabalRow(lead.id, { label: 'H1', title: 'One', ticket_id: h1.id });
 store.addCabalRow(lead.id, { label: 'H2', title: 'Two', ticket_id: h2.id });
-const app = { store } as unknown as App;
+const app: Pick<App, 'store'> = { store };
 const rowAfter = (text: string) => {
   const id = store.addCabalRow(lead.id, { label: `R${Math.random()}`, title: 'Row', after: text });
   return store.cabalRow(id)!;

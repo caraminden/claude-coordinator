@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { tempRoot } from './helpers.ts';
 import { answer } from '../tools/prompt-evals/stub.ts';
-import { briefProblems, events, failures, fell, holds, load, passes, problems, snapshot, type Brief, type Case } from '../tools/prompt-evals/run.ts';
+import { bookSpend, briefProblems, events, failures, fell, holds, load, passes, problems, snapshot, type Brief, type Case } from '../tools/prompt-evals/run.ts';
 
 // Prompt evals (#1117): the frozen cases stay valid, and the scoring, the stub and the snapshot do what README.md says.
 const dir = new URL('../tools/prompt-evals/', import.meta.url).pathname;
@@ -158,4 +158,21 @@ test('ablate() empties parts, removes lines and cuts tools to their first senten
   for (const bad of [{ parts: ['nope'] }, { lines: ['not there'] }, { tools: ['nope'] }]) assert.throws(() => ablate(parts, tools, bad), /drop: no/);
   assert.throws(() => ablate(parts, [{ name: 'one', description: 'Only one sentence.' }], { tools: ['one'] }), /one sentence already/, 'a cut that leaves the text whole tests nothing');
   for (const bad of [null, {}, { part: ['close'] }, { parts: 'close' }, { lines: [] }, { lines: [''] }]) assert.throws(() => ablate(parts, tools, bad as any), /drop: want/);
+});
+
+test('bookSpend books an eval run once on its own ticket, and nothing outside a turn', async () => {
+  const seen: { url: string; body: Record<string, unknown> }[] = [];
+  const post: typeof fetch = async (url, init) => {
+    url = String(url);
+    seen.push({ url, body: JSON.parse(String(init?.body)) });
+    return new Response('{}', { status: 200 });
+  };
+  const inTurn = { COORDINATOR_API: 'http://x/', COORDINATOR_TOKEN: 't', COORDINATOR_TICKET: '77' };
+  assert.equal(await bookSpend(38.5712345, inTurn, post), true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url, 'http://x/api/tickets/77/spend');
+  assert.equal(seen[0].body.usd, 38.5712);
+  assert.equal(await bookSpend(5, {}, post), false);
+  assert.equal(await bookSpend(0, inTurn, post), false);
+  assert.equal(seen.length, 1);
 });

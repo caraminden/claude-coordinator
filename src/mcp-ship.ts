@@ -219,7 +219,7 @@ export const WAKE_WHEN_RUNNERS_BACK = {
 export const REPORT_SPEND = {
   name: 'report_spend',
   description:
-    "Book what you spent on an outside API (Azure Speech, ElevenLabs, a paid data feed: not OpenRouter media or Claude, which Citadel already counts) to this scheme's month (#839). Call it right after the paid call, with the cost you worked out from the service's price list. The scheme's monthly bill shows it per service beside Claude usage, and the scheme's cap, if it has one, warns its members when crossed; nothing stops.",
+    "Book what you spent on an outside API (Azure Speech, ElevenLabs, a paid data feed: not OpenRouter media or your own turns' Claude, which Citadel already counts; a `claude -p` you run by hand, like tools/prompt-eval, books itself) to this scheme's month (#839). Call it right after the paid call, with the cost you worked out from the service's price list. The scheme's monthly bill shows it per service beside Claude usage, and the scheme's cap, if it has one, warns its members when crossed; nothing stops.",
   inputSchema: {
     type: 'object',
     properties: {

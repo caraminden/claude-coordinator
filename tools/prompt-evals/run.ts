@@ -241,6 +241,28 @@ function render(side: Side, role: Case['role'], ticket: Case['ticket'], dirs: ob
   return JSON.parse(execFileSync(process.execPath, [join(HERE, 'render.ts'), side.dir, JSON.stringify(spec)], { encoding: 'utf8', maxBuffer: 64 << 20 }));
 }
 
+/** What every claude -p run of this process cost, failed ones too: main books it once when the command ends. */
+let spent = 0;
+
+/** Books an eval's cost on the minion whose turn ran it (report_spend's route, #839); outside a turn (no COORDINATOR_* env) it books nothing. */
+export async function bookSpend(usd: number, env: Record<string, string | undefined> = process.env, post: typeof fetch = fetch): Promise<boolean> {
+  const { COORDINATOR_API: url, COORDINATOR_TOKEN: token, COORDINATOR_TICKET: ticket } = env;
+  if (!(usd > 0) || !url || !token || !ticket) return false;
+  try {
+    const res = await post(`${url.replace(/\/$/, '')}/api/tickets/${ticket}/spend`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ service: 'claude-prompt-eval', usd: Math.round(usd * 10_000) / 10_000, note: "tools/prompt-eval's claude -p runs, which no turn counts" }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) console.error(`Could not book the eval's $${usd.toFixed(2)}: the server said ${res.status}`);
+    return res.ok;
+  } catch (e) {
+    console.error(`Could not book the eval's $${usd.toFixed(2)}: ${String((e as Error)?.message ?? e)}`);
+    return false;
+  }
+}
+
 /** One claude -p turn: its transcript to `file`, and its cost or the reason it failed. */
 function claude(args: string[], input: string, cwd: string, file: string, tmp: string, timeoutMs: number): Promise<{ stream: string; cost: number; error?: string }> {
   return new Promise((done) => {
@@ -264,6 +286,7 @@ function claude(args: string[], input: string, cwd: string, file: string, tmp: s
         })
         .findLast((m) => m?.type === 'result');
       const cost = Number(result?.total_cost_usd ?? 0);
+      spent += cost;
       // A run that hit its turn or budget cap still made its moves: score it. Only no result at all is an error.
       if (!result) return done({ stream: out, cost, error: `claude exited ${code} with no result: ${err.trim().slice(-300)}` });
       done({ stream: out, cost });
@@ -610,6 +633,7 @@ async function main(argv: string[]) {
     process.exitCode = [...runs.values()].flat().some((r) => r.error) ? 1 : 0;
   } finally {
     if (!rest.includes('--keep')) rmSync(work, { recursive: true, force: true });
+    await bookSpend(spent);
   }
 }
 

@@ -2,6 +2,10 @@
 import type { SQLInputValue } from 'node:sqlite';
 import { FLAKE_KEEP_MS, type FlakeFix } from '../db-rows.ts';
 import type { Store } from '../db.ts';
+import { CLOUD_SOURCE } from '../cloud-flakes.ts';
+
+/** A cloud session's sightings (#2187) never count toward a fix minion: a 4-vCPU VM can fail timing tests nowhere else does. */
+const NOT_CLOUD = `AND source != '${CLOUD_SOURCE}'`;
 
 export const flakeQueries = {
   /** A file's most common error messages since `since` with their test, class and count, then how many sightings kept none (rows from before #1438, and runs whose log was gone: "no message kept"). */
@@ -21,13 +25,13 @@ export const flakeQueries = {
     if (flakes.length) this.db.prepare('DELETE FROM flake_events WHERE at < ?').run(at - FLAKE_KEEP_MS);
   },
 
-  /** A scheme's flakiest test files since `since`: how often, when last, and the minion whose land saw the last one. */
-  flakeCounts(this: Store, projectId: number, since: number, limit = 10): { file: string; count: number; last: number; ticketId: number | null }[] {
+  /** A scheme's flakiest test files since `since`: how often (`cloud` of them in a cloud session, #2187), when last, and the minion whose land saw the last one. `land`: count only sightings made off the cloud. */
+  flakeCounts(this: Store, projectId: number, since: number, limit = 10, land = false): { file: string; count: number; cloud: number; last: number; ticketId: number | null }[] {
     return this.db
-      .prepare(`SELECT file, COUNT(*) AS count, MAX(at) AS last,
+      .prepare(`SELECT file, COUNT(*) AS count, SUM(source = '${CLOUD_SOURCE}') AS cloud, MAX(at) AS last,
         (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
-      FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`)
-      .all(projectId, since, limit) as { file: string; count: number; last: number; ticketId: number | null }[];
+      FROM flake_events e WHERE project_id = ? AND at >= ? ${land ? NOT_CLOUD : ''} GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`)
+      .all(projectId, since, limit) as { file: string; count: number; cloud: number; last: number; ticketId: number | null }[];
   },
 
   /** Whether `file` already has a sighting within `tolMs` of `at`: a retro-log line the server already counted from the land's own output. */
@@ -35,14 +39,14 @@ export const flakeQueries = {
     return !!this.db.prepare('SELECT 1 FROM flake_events WHERE project_id = ? AND file = ? AND at BETWEEN ? AND ? LIMIT 1').get(projectId, file, at - tolMs, at + tolMs);
   },
 
-  /** Sighting times of `file` since `since`, oldest first. */
-  flakeSightings(this: Store, projectId: number, file: string, since: number): number[] {
-    return (this.db.prepare('SELECT at FROM flake_events WHERE project_id = ? AND file = ? AND at >= ? ORDER BY at').all(projectId, file, since) as { at: number }[]).map((r) => r.at);
+  /** Sighting times of `file` since `since`, oldest first; `land`: only those made off the cloud (a fix minion's count, #2187). */
+  flakeSightings(this: Store, projectId: number, file: string, since: number, land = false): number[] {
+    return (this.db.prepare(`SELECT at FROM flake_events WHERE project_id = ? AND file = ? AND at >= ? ${land ? NOT_CLOUD : ''} ORDER BY at`).all(projectId, file, since) as { at: number }[]).map((r) => r.at);
   },
 
-  /** Files with a sighting since `since`. */
-  flakeFiles(this: Store, projectId: number, since: number): string[] {
-    return (this.db.prepare('SELECT DISTINCT file FROM flake_events WHERE project_id = ? AND at >= ?').all(projectId, since) as { file: string }[]).map((r) => r.file);
+  /** Files with a sighting since `since`; `land`: one made off the cloud. */
+  flakeFiles(this: Store, projectId: number, since: number, land = false): string[] {
+    return (this.db.prepare(`SELECT DISTINCT file FROM flake_events WHERE project_id = ? AND at >= ? ${land ? NOT_CLOUD : ''}`).all(projectId, since) as { file: string }[]).map((r) => r.file);
   },
 
   /** The newest fix of a file (#1120), or undefined. */

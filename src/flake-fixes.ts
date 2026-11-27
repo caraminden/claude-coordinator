@@ -222,10 +222,11 @@ export class FlakeFixes {
   async escalate(project: Project, now: number): Promise<number> {
     const { store } = this.d;
     let started = 0;
-    for (const file of store.flakeFiles(project.id, now - FLAKE_REPEAT_MS)) {
+    // Cloud sightings (#2187) start and reopen nothing: only sightings off the cloud count here.
+    for (const file of store.flakeFiles(project.id, now - FLAKE_REPEAT_MS, true)) {
       if (started >= MAX_STARTS_PER_PASS) break; // the first pass after a deploy reads 14 days of log: the rest start on the next passes
       const fix = store.flakeFix(project.id, file);
-      const sights = store.flakeSightings(project.id, file, now - FLAKE_REPEAT_MS);
+      const sights = store.flakeSightings(project.id, file, now - FLAKE_REPEAT_MS, true);
       let id: number | null = null;
       const owner = this.owner(project, file, fix);
       if (fix && owner) continue;

@@ -30,13 +30,13 @@ card start[^e]. The effort closed at 09:59 PST Nov 26, when the Taskmaster dismi
      - Josh's pick at 22:51 started #2089 through #2050's card start.
      - Under ADR 0038, an all-started pick reaches the owner as held mail, with no turn.
      - So #2046 sat open for 11.1 hours until the Taskmaster dismissed it[^e][^h].
-   - **How often since #2050:** of the 20 minions whose card started a minion, 3 sat 9 to 11.8 hours with no turn after
+   - **How often since #2050:** of the 19 minions whose card started a minion, 3 sat 9 to 11.1 hours with no turn after
      the pick, until the Taskmaster dismissed them: #2046, #1921 and #2060[^h].
    - **Still open at 16:10 PST Nov 26:** 4 more were idle with no open card: #1778, #2115, #2117 and #2127. One of them,
      #2117, is the last effort retro[^h].
    - **Why it happens:**
-     - The retro brief, and the briefing skill's handoff card, both tell a minion to stay open in state ready until its
-       card is answered.
+     - The retro skill (step 8), `kit/schedules/architecture.md` and `kit/skills/cabal/SKILL.md` tell a minion to stay
+       open in state ready until its start card is answered.
      - #2050 made that answer arrive with no turn.
      - Nothing closes a minion whose last open card was settled by starts. ADR 0038's line "nothing is left for the
        owner to do" is true, but no code acts on it.
@@ -44,7 +44,8 @@ card start[^e]. The effort closed at 09:59 PST Nov 26, when the Taskmaster dismi
      pick dismisses the owner when nothing else is left for a person:
      - no other open card,
      - no unshipped commits on its branch,
-     - no try or pending-deploy state.
+     - no try, pending-deploy, sealed or outside state,
+     - not a build or cabal lead.
      Otherwise it keeps today's held mail. This is a check where the mistake happens (the pick), not prose. It is on
      this retro's start card.
 2. **Handoffs written before a person's pick weren't brought in line with the pick (ledger repeat: "Briefs state a
@@ -112,6 +113,6 @@ Not fixed, with the reason:
 [^k2]: `grep -hE '(train prep|land) conflict' retro-log/2026-11-26/land.md | grep README.md | tail -3`, plus `grep ticket/2104- … | grep timing` (landed 19:48:07Z), run 2026-11-26 16:15 PST. The one conflict line after 19:48Z (23:46:55Z, #1935) names `docs/retros/README.md`.
 [^l2]: `grep -h "ticket/2074-" retro-log/2026-11-26/land.md | grep timing`: landed 07:27:51Z = 23:27 PST Nov 25, run 2026-11-26 16:13 PST.
 [^e]: `host_check db`: #2046's and #2089's events by `kind` (note, user_message, question) around 22:06 to 23:01 PST Nov 25, run 2026-11-26 16:08 PST. Includes #2089's note to the Taskmaster at 23:00:48: "`tools/judge-replay.ts` can't open coordinator.db".
-[^h]: `host_check db`: each minion's last `note` starting "Citadel started #", and its `closed_at` minus that note's time, with the turns after it and the closing note, run 2026-11-26 16:09 PST. The open ones were checked for questions with no later user_message at 16:10 PST.
+[^h]: `host_check db`: each minion's last `note` starting "Citadel started #", and its `closed_at` minus that note's time, with the turns after it and the closing note, run 2026-11-26 16:09 PST, Citadel's minions only (19 with such a note; the three ran 8.97, 10.06 and 11.13 h, confirmed by the footnote re-run). The open ones were checked for questions with no later user_message at 16:10 PST.
 [^p]: `retro-log/2026-11-26/2c0523ea-3b6f-4847-b7ee-6604b2fdfd92.md` (#2048's session), the `process` line at 00:40:51Z.
 [^r]: read_minion on the seven minions, read by three Sonnet Grunts for this retro, Nov 26. Their counts are quoted, not re-derived.

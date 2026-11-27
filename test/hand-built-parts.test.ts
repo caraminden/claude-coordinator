@@ -24,6 +24,7 @@ const PATTERNS: Record<string, RegExp> = {
 const ALLOWED: Record<string, Record<string, string>> = {
   'artifacts.js': { dialog: "the file viewer fills the page with the file and its chat side by side on a grid, not a box with a head; its picture view already uses the kit's lightbox" },
   'settings.js': { loading: 'a status span beside a button that the save and load calls rewrite in place (textContent), not a block that gets replaced' },
+  'settings-cloud.js': { loading: "the switch's own state words, rewritten in place (textContent) once the setting loads: moved from settings.js (#2200), not a block that gets replaced" },
   'thread.js': { loading: "the label of the Load earlier button while it loads: a button's own text, not a line" },
   'home.js': { loading: 'an emptyCard placeholder sized like the card that replaces it' },
   'drawers.js': { dialog: "it is itself a shared part (served to apps as /apps/_citadel/drawers.js): the phone's side panels as named modal drawers" },

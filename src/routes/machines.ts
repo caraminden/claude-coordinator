@@ -343,6 +343,7 @@ export const agentRoutes: Route[] = [
         await readJson(req, 20_000),
         Date.now(),
         (id) => !!app.machineCopies?.removing(id),
+        (id) => app.machines.agentHost(id),
       );
       await ownWrites(); // the panel's next look re-reads the row
       app.broadcast({ type: 'machines', machines: app.machines.list() });

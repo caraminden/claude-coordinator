@@ -137,6 +137,10 @@ export type StatusFacts = {
   workerHere?: boolean;
   /** A CI runner host: its agent is the runner agent, or was at its last connection. */
   runners: boolean;
+  /** One PC's row (Build 7 M2b): its CI runner agents are connected beside its agent. */
+  runnersBeside?: boolean;
+  /** What is ticked to lend that its agent didn't find on that computer (#2194: an agent now on another PC). */
+  missing?: string[];
   alwaysOn: boolean;
   createdAt: number;
   lastSeenAt: number | null;
@@ -167,6 +171,10 @@ export function machineStatus(f: StatusFacts): MachineStatus {
     return s('asleep', f.alwaysOn ? 'Offline' : 'Asleep', null, seen);
   }
   if (f.runners) return s('ready', 'CI runner host, connected');
+  // A PC that runs CI may lend no tools: only something ticked that isn't there is wrong, and each line names the CI half too.
+  const ci = f.runnersBeside ? 'CI runners up · ' : '';
+  if (!f.offers.length && f.managed && f.missing?.length) return s('fix', `${ci}Ticked but not on that computer: ${f.missing.join(', ')}`, 'tick');
+  if (!f.offers.length && f.runnersBeside) return s('ready', 'CI runner host, connected');
   if (!f.offers.length && f.managed) {
     return f.finds ? s('fix', 'Lends nothing: nothing is ticked', 'tick') : s('fix', 'Found nothing to lend on that computer', 'tick');
   }
@@ -174,13 +182,13 @@ export function machineStatus(f: StatusFacts): MachineStatus {
     return f.wsOff ? s('fix', 'Lends nothing: workspace tools are off', 'workspace_tools') : s('fix', 'Lends nothing: no MCP server or folder on that computer', 'token');
   }
   const results = f.offers.map((server) => f.check?.results.find((r) => r.server === server));
-  if (results.some((r) => !r)) return s('checking', 'Checking its tools…');
+  if (results.some((r) => !r)) return s('checking', `${ci}Checking its tools…`);
   const checked = { label: 'checked', at: f.check!.at } as const;
   const failed = results.find((r) => !r!.ok);
-  if (failed) return s('fix', `Its ${failed.server === 'ws' ? 'workspace ' : ''}tools didn't start: ${failed.error}`, 'check', checked);
-  if (!f.lent) return s('fix', 'Lent to no scheme', 'lend', checked);
+  if (failed) return s('fix', `${ci}Its ${failed.server === 'ws' ? 'workspace ' : ''}tools didn't start: ${failed.error}`, 'check', checked);
+  if (!f.lent) return s('fix', `${ci}Lent to no scheme`, 'lend', checked);
   const tools = results.reduce((n, r) => n + r!.tools.length, 0);
-  return s('ready', `Ready · ${tools} tool${tools === 1 ? '' : 's'}`, null, checked);
+  return s('ready', `${ci}Ready · ${tools} tool${tools === 1 ? '' : 's'}`, null, checked);
 }
 
 export function storedCheck(m: Pick<Machine, 'last_check'>): StoredCheck | null {
@@ -357,6 +365,9 @@ function lentServers(store: Pick<Store, 'machineLend'>, m: Machine, agent: Agent
   return [...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []), ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : [])];
 }
 
+/** What is ticked that a managed agent didn't find there: its MCP server, and workspaces by name. */
+const tickedMissing = (lend: Lend | null, agent: Agent): string[] => (lend ? [...(lend.server && !agent.found.some((f) => f.name === lend.server) ? [lend.server] : []), ...lend.workspaces.filter((w) => !agent.workspaces.some((a) => a.name === w))] : []);
+
 /** The MCP server a turn gets by name, as its tools are remembered (src/pool-machine.ts): null without one, or when the agent alone knows. */
 const lentName = (store: Pick<Store, 'machineLend'>, m: Machine, agent: Agent, servers: MachineServer[]) => (agent.managed && servers.includes('mcp') ? (storedLend(store, m)?.server ?? null) : null);
 
@@ -460,6 +471,8 @@ export class MachineRelay {
       // A PC row is online by its machine agent; only a runner host's row is online by its runner agent.
       online: !!agent || (runnerRow && runnersHere.length > 0),
       runners: !agent && runnerRow,
+      runnersBeside: !!agent && runnersHere.length > 0,
+      missing: agent?.managed ? tickedMissing(storedLend(this.store, machine), agent) : [],
       alwaysOn: !!machine.always_on,
       createdAt: machine.created_at,
       lastSeenAt: worker?.seen ? Math.max(worker.seen, machine.last_seen_at ?? 0) : machine.last_seen_at,
@@ -723,6 +736,11 @@ export class MachineRelay {
   /** Its part of the balancer's plan, to a machine's CI runner agent for `os` (Build 7 M6b); one from before ignores it. */
   sendRunnerPlan(machineId: number, os: 'windows' | 'linux', plan: RunnerShare) {
     this.runnerAgents.get(`${machineId}:${os}`)?.res.write(`data: ${JSON.stringify({ plan })}\n\n`);
+  }
+
+  /** The hostname its machine agent reports, while it is connected. */
+  agentHost(machineId: number): string | null {
+    return this.agents.get(machineId)?.host ?? null;
   }
 
   /** A machine's CI runner agents connected now. */

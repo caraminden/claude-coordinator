@@ -108,6 +108,17 @@ test('a code works once, for 15 minutes, is kept only hashed, and names a new ro
     (e: Error & { status?: number }) => e.status === 409,
   );
   assert.equal(store.getMachine(got.id)!.token_hash, 'new', 'its token is as it was');
+  // An Update pasted on another PC than the one its row's agent runs on (#2194: the test box's Update, run on the desktop
+  // that hosts its VM) is refused, so the row keeps its agent and token; on that PC itself it goes through.
+  const elsewhere = makeJoin(store, { uid: josh.id, name: 'Josh' }, null, store.getMachine(got.id)!, t0);
+  const live = (id: number) => (id === got.id ? 'citadel-box' : null);
+  assert.throws(
+    () => redeemJoin(store, issue, { code: elsewhere.code, report: { ...report, host: 'DESKTOP-G248IJ8' } }, t0 + 7000, () => false, live),
+    (e: Error & { status?: number }) => e.status === 409 && /runs on citadel-box/.test(e.message) && /DESKTOP-G248IJ8/.test(e.message),
+  );
+  assert.equal(store.getMachine(got.id)!.token_hash, 'new', 'its token is as it was');
+  const here = makeJoin(store, { uid: josh.id, name: 'Josh' }, null, store.getMachine(got.id)!, t0);
+  assert.equal(redeemJoin(store, issue, { code: here.code, report: { ...report, host: 'CITADEL-BOX' } }, t0 + 8000, () => false, live).id, got.id, 'the same PC, its hostname in any case');
   store.db.close();
 });
 
@@ -246,7 +257,12 @@ test('Connect a computer end to end: the real agent joins with the code, the row
   assert.equal((await eli(`/api/machines/${machine!.id}/join`, {}, 'POST')).status, 404, 'only who manages it updates it');
   const upd = (await dana<{ id: number; code: string; name: string }>(`/api/machines/${machine!.id}/join`, {}, 'POST')).data;
   assert.equal(upd.name, machine!.name);
-  const swapped = await fetch(`${base}/api/machines/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: upd.code, report: { os: 'windows', host: 'X' } }) });
+  // Pasted on another PC than the old agent's, it is refused, the row keeps its token (#2194); a new code on that PC goes through.
+  const wrong = await fetch(`${base}/api/machines/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: upd.code, report: { os: 'windows', host: 'X' } }) });
+  assert.equal(wrong.status, 409);
+  assert.equal((await fetch(`${base}/api/machines/info`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 2, found: [] }) })).status, 202, 'the old agent still holds the row');
+  const upd2 = (await dana<{ code: string }>(`/api/machines/${machine!.id}/join`, {}, 'POST')).data;
+  const swapped = await fetch(`${base}/api/machines/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: upd2.code, report: { os: 'windows', host: 'OLD' } }) });
   const back = await json<{ id: number; name: string; token: string }>(swapped);
   assert.deepEqual([back.id, back.name], [machine!.id, machine!.name]);
   assert.notEqual(back.token, token);

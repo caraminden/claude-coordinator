@@ -216,7 +216,7 @@ async function sweep(n: number, copies: number, post: boolean): Promise<number> 
     return 0;
   }
   const id = Number(process.env.COORDINATOR_TICKET) || 0;
-  console.log(`cloud-flake: sweeping ${picks.length} files × ${copies} copies on ${process.env.CLOUD_FLAKE_REF || "main"}: ${picks.join(', ')}`);
+  console.log(`cloud-flake: sweeping ${picks.length} files × ${copies} copies on ${process.env.CLOUD_FLAKE_REF || 'main'}: ${picks.join(', ')}`);
   const ref = process.env.CLOUD_FLAKE_REF || 'main';
   const ran = await session({ ref, branch: cloudBranch(id, Date.now()), steps: picks.map((f) => batchStep(f, copies)) });
   for (const b of ran.batches ?? []) console.log(line(b));

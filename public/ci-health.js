@@ -139,7 +139,7 @@ function flakeBlock(s, flakes, refresh) {
         `last ${when(f.last)}`,
         f.cloud && f.cloud < f.count ? ` · ${f.cloud} in the cloud sweep` : '',
         f.before ? ` · ${f.before} before the file's last change` : '',
-        f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s land`)] : ' · fast mode',
+        f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s ${f.cloud === f.count ? 'sweep' : 'land'}`)] : ' · fast mode',
       ),
       ...errorLines(f),
       f.fix ? h('span', { class: 'ci-detail-line muted flake-fix' }, fixLine(f.fix)) : null,
@@ -194,7 +194,7 @@ function sweepBlock(s, sweeps) {
     .sort((a, b) => order.indexOf(a.verdict) - order.indexOf(b.verdict))
     .map((f) => {
       const [hue, why] = VERDICT[f.verdict] ?? VERDICT.red;
-      return hueRow({ hue, lead: f.verdict, meta: `${f.failed}/${f.copies} failed · ${f.seconds} s` }, h('strong', { title: f.file }, f.file), h('span', { class: 'ci-detail-line muted', title: f.detail }, why));
+      return hueRow({ hue }, h('strong', { title: f.file }, f.file), h('span', { class: 'ci-detail-line muted', title: f.detail }, `${f.verdict}: ${why} · ${f.failed} of ${f.copies} failed · ${f.seconds} s`));
     });
   const nights = sweeps.map((n) =>
     hueRow(
@@ -206,7 +206,7 @@ function sweepBlock(s, sweeps) {
   const hue = last.error ? 'danger' : flaky ? 'waiting' : 'done';
   const [row] = settingsRow(
     { key, icon: 'spark', hue, title, summary: [last.error ? toneChip('danger', 'No results') : flaky ? toneChip('warn', `${flaky} flaky`) : toneChip('ok', 'Clean'), `${when(last.at)} · ${dollars(last.costUsd)}`] },
-    statTiles([String(last.files.length), 'files swept', 'running'], [String(flaky), 'flaky in the cloud', flaky ? 'waiting' : 'done'], [`${last.sessions} × ${Math.round(last.minutes)} min`, 'sessions × minutes', 'held'], [dollars(last.costUsd), 'plan usage (est.)', 'held']),
+    statTiles([String(last.files.length), 'files swept', 'running'], [String(flaky), 'flaky in the cloud', flaky ? 'waiting' : 'done'], [`${Math.round(last.minutes)} min`, `in ${last.sessions} session${last.sessions === 1 ? '' : 's'}`, 'held'], [dollars(last.costUsd), 'plan usage (est.)', 'held']),
     files.length ? showFirst({ key: `${key}-files`, items: files, n: 5, noun: 'files' }) : null,
     h('h4', { class: 'settings-section' }, 'Last nights'),
     showFirst({ key: `${key}-nights`, items: nights, n: 5, noun: 'nights' }),

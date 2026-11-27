@@ -516,7 +516,27 @@ export function cleanPlan(raw) {
   if (!Number.isInteger(n) || n < 0 || n > 1000) return null;
   const queued = {};
   if (raw.queued && typeof raw.queued === 'object' && !Array.isArray(raw.queued)) for (const [repo, count] of Object.entries(raw.queued).slice(0, 200)) if (repo.length <= 200 && Number.isInteger(count) && count > 0) queued[repo.toLowerCase()] = Math.min(count, 1000);
-  return { runners: n, queued };
+  // want: repo -> a list of runner names for each queued job (those whose labels cover the job's). Optional: a Citadel from before sends none.
+  const want = {};
+  if (raw.want && typeof raw.want === 'object' && !Array.isArray(raw.want))
+    for (const [repo, jobs] of Object.entries(raw.want).slice(0, 200)) {
+      if (repo.length > 200 || !Array.isArray(jobs)) continue;
+      const lists = jobs
+        .slice(0, 100)
+        .flatMap((names) =>
+          Array.isArray(names)
+            ? [
+                names
+                  .filter((x) => typeof x === 'string' && x.length <= 200)
+                  .slice(0, 50)
+                  .map((x) => x.toLowerCase()),
+              ]
+            : [],
+        )
+        .filter((names) => names.length);
+      if (lists.length) want[repo.toLowerCase()] = lists;
+    }
+  return Object.keys(want).length ? { runners: n, queued, want } : { runners: n, queued };
 }
 
 /**
@@ -539,6 +559,25 @@ export function pickAwake(runners, plan) {
     return true;
   };
   const wanted = new Map(Object.entries(plan.queued).filter(([repo]) => idle.has(repo)));
+  // Queued jobs that ask for labels: a runner whose labels cover each one's, so a job isn't left waiting while a runner
+  // without them stays up. A job one kept runner (a busy or ship's, or one picked) covers needs no more; of the idle ones
+  // that cover it, one already awake goes first. It counts as the repo's queued job it answers.
+  for (const [repo, jobs] of Object.entries(plan.want ?? {})) {
+    for (const names of jobs) {
+      if (left <= 0) break;
+      const mine = runners.filter((r) => r.repo === repo && names.includes(r.name.toLowerCase()));
+      if (!mine.length || mine.some((r) => keep.has(r.key))) continue;
+      const pick = (idle.get(repo) ?? []).find((r) => names.includes(r.name.toLowerCase()));
+      if (!pick) continue;
+      idle.set(
+        repo,
+        idle.get(repo).filter((r) => r !== pick),
+      );
+      keep.add(pick.key);
+      left--;
+      if (wanted.get(repo) > 0) wanted.set(repo, wanted.get(repo) - 1);
+    }
+  }
   // Queued jobs: one runner for each, the repos taking turns from the one with most waiting.
   for (let more = true; left > 0 && more; ) {
     more = false;

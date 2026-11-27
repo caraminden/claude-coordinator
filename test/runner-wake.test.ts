@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import { cleanPlan, PLAN_HOLD_MS, pickAwake, RunnerWake } from '../public/runner-agent.mjs';
 import { cleanSample } from '../src/ci-load.ts';
 import { Store } from '../src/db.ts';
-import { balance, runnerOrder, runnerShares } from '../src/machine-balancer.ts';
+import { balance, runnerOrder, runnerShares, runnersFor } from '../src/machine-balancer.ts';
 import { MachineRelay } from '../src/machines.ts';
 
 type R = { key: string; repo: string; name: string; busy: boolean; ship: boolean; awake: boolean };
@@ -54,6 +54,34 @@ test("Citadel's plan is checked: a count from 0, queued jobs by repo kept to who
   assert.deepEqual(cleanPlan({ runners: 2, queued: { 'Cara/Repo': 3, bad: -1, worse: 'x' } }), { runners: 2, queued: { 'cara/repo': 3 } });
   assert.deepEqual(cleanPlan({ runners: 0 }), { runners: 0, queued: {} });
   for (const bad of [null, {}, { runners: -1 }, { runners: 1.5 }, { runners: '2' }]) assert.equal(cleanPlan(bad), null, JSON.stringify(bad));
+});
+
+// #2241: Citadel's four Linux runners carry different labels; a job asking for one only a sleeping runner has must wake it.
+const fleet = [runner('linux', 'c', { awake: true }), runner('linux-2', 'c', { awake: false }), runner('linux-3', 'c', { awake: false }), runner('linux-4', 'c', { awake: false })];
+const labelled = [
+  { name: 'linux', labels: ['self-hosted', 'ci-linux'] },
+  { name: 'linux-2', labels: ['self-hosted', 'ci-linux', 'ci-linux-side'] },
+  { name: 'linux-3', labels: ['self-hosted', 'ci-linux', 'ci-linux-side', 'ci-linux-long'] },
+  { name: 'linux-4', labels: ['self-hosted', 'ci-linux-check'] },
+];
+
+test('runnersFor: each queued job gets the runners whose labels cover all of its; a job nobody covers is left out', () => {
+  const want = runnersFor(new Map([['C', [['ci-linux-check'], ['ci-linux', 'ci-linux-long'], ['nobody-has-this']]]]), new Map([['C', labelled]]));
+  assert.deepEqual(want, { c: [['linux-4'], ['linux-3']] });
+});
+
+test('a job asking for a label only a sleeping runner has wakes that runner, though a repo-mate stays up (the gap before #2241)', () => {
+  const plan = { runners: 1, queued: { c: 1 } };
+  assert.deepEqual([...pickAwake(fleet, plan)].sort(), ['linux'], 'by repo alone the awake -linux serves the queued job');
+  assert.deepEqual([...pickAwake(fleet, { ...plan, want: { c: [['linux-4']] } })].sort(), ['linux-4'], 'with labels the runner that covers the job is the one up');
+  assert.deepEqual([...pickAwake(fleet, { runners: 2, queued: { c: 2 }, want: { c: [['linux-4'], ['linux-2', 'linux-3']] } })].sort(), ['linux-2', 'linux-4']);
+  // A runner already up that covers the job is kept, and wakes nothing more.
+  assert.deepEqual([...pickAwake(fleet, { runners: 1, queued: { c: 1 }, want: { c: [['linux', 'linux-2']] } })].sort(), ['linux']);
+});
+
+test("the plan's want is checked, and left off when there is none (an old Citadel's plan is as before)", () => {
+  assert.deepEqual(cleanPlan({ runners: 1, want: { 'C/R': [['A-1', 7], 'x', []], bad: 3 } }), { runners: 1, queued: {}, want: { 'c/r': [['a-1']] } });
+  assert.deepEqual(cleanPlan({ runners: 1, want: {} }), { runners: 1, queued: {} });
 });
 
 /** Linux runner units in a scratch folder, systemctl a recorder answering is-active from `up`. */

@@ -67,7 +67,7 @@ export interface ShipWatchDeps {
   /** owner/name, lowercase, of the repo whose ships go first (Citadel's own); null when unknown. */
   first?: () => string | null;
   /** Each repo's CI jobs queued for self-hosted runners (Build 7 M6: waiting CI shrinks the workers), and the labels those jobs ask for (#2064: a label no runner has gets one); left out, they aren't read. */
-  queued?: (byRepo: Map<string, number>, labels: Map<string, Set<string>>) => void;
+  queued?: (byRepo: Map<string, number>, labels: Map<string, Set<string>>, jobs?: Map<string, string[][]>) => void;
   /** The queued jobs asking for a heavy label (src/heavy-place.ts, #2120), and the repos whose queued runs were read; read only with `queued`. */
   heavy?: (jobs: QueuedHeavy[], read: Set<string>) => void;
   get?: GhGet;
@@ -123,6 +123,7 @@ export class ShipWatch {
       if (this.deps.queued) {
         const queued = new Map<string, number>();
         const labels = new Map<string, Set<string>>();
+        const jobs = new Map<string, string[][]>();
         const heavy: QueuedHeavy[] = [];
         for (const repo of repos) {
           const as = this.deps.as(repo);
@@ -131,13 +132,14 @@ export class ShipWatch {
             const w = await this.waiting(repo, as, used);
             queued.set(repo, w.n);
             if (w.labels.size) labels.set(repo, w.labels);
+            if (w.jobs.length) jobs.set(repo, w.jobs);
             heavy.push(...w.heavy);
           } catch (err) {
             if (err instanceof RateLimited) throw err;
             this.say(`Ship watch: ${repo}'s queued jobs: ${thrown(err).message ?? err}`);
           }
         }
-        this.deps.queued(queued, labels);
+        this.deps.queued(queued, labels, jobs);
         this.deps.heavy?.(heavy, new Set(queued.keys()));
       }
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
@@ -179,10 +181,11 @@ export class ShipWatch {
 
   /** Jobs waiting for a self-hosted runner in the repo's queued runs. shortcut: a queued job inside a run already going isn't counted; read in_progress runs' jobs too if workers grow over waiting CI. */
   // Heavy jobs (src/heavy-place.ts, #2120) come back on their own: they wait for Citadel to place them, so they count as heavy, not as waiting CI.
-  private async waiting(repo: string, as: GithubEnv, used: Set<string>): Promise<{ n: number; labels: Set<string>; heavy: QueuedHeavy[] }> {
+  private async waiting(repo: string, as: GithubEnv, used: Set<string>): Promise<{ n: number; labels: Set<string>; jobs: string[][]; heavy: QueuedHeavy[] }> {
     const runs = ((await this.read(`repos/${repo}/actions/runs?status=queued&per_page=20`, as, used)) as GhRunsBody | null)?.workflow_runs ?? [];
     let n = 0;
     const labels = new Set<string>();
+    const jobLabels: string[][] = [];
     const heavy: QueuedHeavy[] = [];
     for (const r of runs.filter((r) => Number.isInteger(r?.id)).slice(0, QUEUED_RUNS)) {
       const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
@@ -197,9 +200,11 @@ export class ShipWatch {
           continue;
         }
         n++;
+        // What this job asks of a runner, by label, so a runner that has them can be woken for it.
+        jobLabels.push(asks.map((l) => l.toLowerCase()).filter((l) => l !== 'self-hosted'));
       }
     }
-    return { n, labels, heavy };
+    return { n, labels, jobs: jobLabels, heavy };
   }
 
   private async read(path: string, as: GithubEnv, used: Set<string>): Promise<unknown> {

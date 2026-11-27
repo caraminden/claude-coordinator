@@ -63,7 +63,7 @@ import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
 import { CiAuto, lendsCi, noMachineCard, PASS_MS as CI_AUTO_PASS_MS } from './src/ci-auto.ts';
 import { MachineBalancer } from './src/machine-balancer.ts';
-import { runnerOrder, runnerShares } from './src/machine-balancer.ts';
+import { runnerOrder, runnerShares, runnersFor } from './src/machine-balancer.ts';
 import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs } from './src/long-jobs.ts';
@@ -724,6 +724,20 @@ function settleCard(card: { ticket: number; question: string }, by: string, line
 // One balancer per machine (Build 7 M6, src/machine-balancer.ts): each connected machine's threads split across its ships,
 // waiting CI, heavy jobs and minion workers. Perigee is never one of them (Josh, "Machines only for now").
 let ciQueued = new Map<string, number>();
+// Each repo's queued jobs' labels, one list a job, and its runners' labels (looked up by GitHub at most once a minute), so the runners a job needs are woken.
+let ciQueuedJobs = new Map<string, string[][]>();
+const runnerLabels = new Map<string, { at: number; list: { name: string; labels: string[] }[] }>();
+const readRunnerLabels = (repo: string) => {
+  const had = runnerLabels.get(repo);
+  if (had && Date.now() - had.at < 60_000) return;
+  runnerLabels.set(repo, { at: Date.now(), list: had?.list ?? [] });
+  const p = schemeOf(repo);
+  if (p)
+    void runnerTokens.listed(p).then(
+      (l) => runnerLabels.set(repo, { at: Date.now(), list: l.map((x) => ({ name: x.name, labels: x.labels })) }),
+      () => {},
+    );
+};
 // Heavy jobs Citadel holds (#2120) keep their repo's runners awake on the owner's later PCs, so one can move there; they
 // stay out of ciQueued, which shrinks workers: their room is the balancer's ask.
 let ciHeavy = new Map<string, number>();
@@ -771,10 +785,12 @@ const sendRunnerPlans = () => {
     const caps = agents.map((a) => a.cap ?? Infinity).reduce((a, n) => a + n, 0);
     return [{ id: m.id, owner: m.owner_id, priority: m.priority ?? null, runners: Math.min(plan.runners, caps), repos: new Set(agents.flatMap((a) => [...a.repos])), agents }];
   });
-  const order = runnerOrder(pcs, new Map([...new Set([...ciQueued.keys(), ...ciHeavy.keys()])].map((r) => [r, (ciQueued.get(r) ?? 0) + (ciHeavy.get(r) ?? 0)])));
+  for (const repo of ciQueuedJobs.keys()) readRunnerLabels(repo);
+  const want = runnersFor(ciQueuedJobs, new Map([...runnerLabels].map(([repo, v]) => [repo, v.list])));
+  const order = runnerOrder(pcs, new Map([...new Set([...ciQueued.keys(), ...ciHeavy.keys()])].map((r) => [r, (ciQueued.get(r) ?? 0) + (ciHeavy.get(r) ?? 0)])), want);
   for (const pc of pcs) {
     const part = order.get(pc.id)!;
-    for (const [os, share] of runnerShares(part.runners, pc.agents, part.queued)) machines.sendRunnerPlan(pc.id, os as 'windows' | 'linux', share);
+    for (const [os, share] of runnerShares(part.runners, pc.agents, part.queued, part.want)) machines.sendRunnerPlan(pc.id, os as 'windows' | 'linux', share);
   }
 };
 if (!BOOT_CHECK) every('runner plans', MachineBalancer.TICK_MS, sendRunnerPlans);
@@ -2288,9 +2304,10 @@ const shipWatch = new ShipWatch({
     for (const j of jobs) ciHeavy.set(j.repo, (ciHeavy.get(j.repo) ?? 0) + 1);
     void heavyPlacer.pass(jobs, read);
   },
-  queued: (byRepo, labels) => {
+  queued: (byRepo, labels, jobs) => {
     ciQueued = byRepo;
     ciQueuedLabels = labels;
+    ciQueuedJobs = jobs ?? new Map();
   },
 });
 if (!BOOT_CHECK) shipWatch.start();

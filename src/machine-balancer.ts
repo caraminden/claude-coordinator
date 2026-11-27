@@ -271,6 +271,26 @@ export interface RunnerShare {
   runners: number;
   /** Repo -> how many runners it wants up first: the jobs waiting for it, plus one on a later machine for a repo only it has. */
   queued: Record<string, number>;
+  /**
+   * Repo -> for each queued job, the names of its runners whose labels cover the job's (an old agent ignores this and
+   * wakes by repo alone). The agent keeps one of each list awake, so a job asking for a label only a sleeping runner has
+   * isn't served by a runner without it.
+   */
+  want?: Record<string, string[][]>;
+}
+
+/**
+ * For each repo's queued jobs (their labels, `self-hosted` left out), the runners that could take it: those whose labels
+ * include every one of the job's. A job no runner covers is left out: nothing to wake for it.
+ */
+export function runnersFor(jobs: ReadonlyMap<string, string[][]>, runners: ReadonlyMap<string, { name: string; labels: string[] }[]>): Record<string, string[][]> {
+  const out: Record<string, string[][]> = {};
+  for (const [repo, list] of jobs) {
+    const have = (runners.get(repo) ?? []).map((r) => ({ name: r.name, labels: new Set(r.labels.map((l) => l.toLowerCase())) }));
+    const wants = list.map((asks) => have.filter((r) => asks.every((l) => r.labels.has(l.toLowerCase()))).map((r) => r.name)).filter((names) => names.length);
+    if (wants.length) out[repo.toLowerCase()] = wants.slice(0, 100);
+  }
+  return out;
 }
 
 /** A PC with CI runner agents, as the runners' order sees it. */
@@ -291,13 +311,13 @@ export interface RunnerPc {
  * it), and one for each repo only it has. A machine with no order stands after every one with an order; machines of
  * the same order keep their whole plan. Busy runners stay up whatever this says.
  */
-export function runnerOrder(pcs: readonly RunnerPc[], queued: ReadonlyMap<string, number>): Map<number, RunnerShare> {
+export function runnerOrder(pcs: readonly RunnerPc[], queued: ReadonlyMap<string, number>, want?: Record<string, string[][]>): Map<number, RunnerShare> {
   const waiting = Object.fromEntries([...queued].filter(([, n]) => n > 0).map(([repo, n]) => [repo.toLowerCase(), n]));
   const key = (pc: RunnerPc) => pc.priority ?? Infinity;
   return new Map(
     pcs.map((pc) => {
       const before = pcs.filter((o) => o.owner === pc.owner && key(o) < key(pc) && o.runners > 0);
-      if (!before.length) return [pc.id, { runners: pc.runners, queued: waiting }];
+      if (!before.length) return [pc.id, { runners: pc.runners, queued: waiting, ...(want && Object.keys(want).length ? { want } : {}) }];
       const covered = new Set(before.flatMap((o) => [...o.repos]));
       const wanted: Record<string, number> = {};
       for (const repo of pc.repos) {
@@ -312,6 +332,7 @@ export function runnerOrder(pcs: readonly RunnerPc[], queued: ReadonlyMap<string
             Object.values(wanted).reduce((a, n) => a + n, 0),
           ),
           queued: wanted,
+          ...(want && Object.keys(want).length ? { want } : {}),
         },
       ];
     }),
@@ -325,7 +346,7 @@ export function runnerOrder(pcs: readonly RunnerPc[], queued: ReadonlyMap<string
  * can wake (`cap`, from its samples; null: it doesn't say): the rest goes to the others. Each hears every repo wanted
  * and wakes its own runners for them first.
  */
-export function runnerShares(runners: number, agents: { key: string; repos: ReadonlySet<string>; cap?: number | null }[], queued: Readonly<Record<string, number>>): Map<string, RunnerShare> {
+export function runnerShares(runners: number, agents: { key: string; repos: ReadonlySet<string>; cap?: number | null }[], queued: Readonly<Record<string, number>>, want?: Record<string, string[][]>): Map<string, RunnerShare> {
   const weights = agents.map((a) => 1 + Object.entries(queued).reduce((s, [repo, n]) => s + (a.repos.has(repo) ? n : 0), 0));
   const total = weights.reduce((s, w) => s + w, 0);
   const exact = weights.map((w) => (runners * w) / total);
@@ -345,5 +366,5 @@ export function runnerShares(runners: number, agents: { key: string; repos: Read
       left--;
     }
   }
-  return new Map(agents.map((a, i) => [a.key, { runners: parts[i], queued }]));
+  return new Map(agents.map((a, i) => [a.key, { runners: parts[i], queued, ...(want && Object.keys(want).length ? { want } : {}) }]));
 }

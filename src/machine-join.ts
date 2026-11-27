@@ -9,11 +9,11 @@ import type { MachineJoin } from './db/machines.ts';
 import { HttpError } from './http.ts';
 import { RESERVED_NAMES, WS_SUFFIX } from './machines.ts';
 
-/** How long a code works (the spec: 15 minutes, one use). */
 /** The newest agent version (public/machine-agent.mjs AGENT_VERSION, which test/machine-join.test.ts pins this to): a row whose agent reports less, or nothing, offers Update. */
 export const LATEST_AGENT = 5;
 /** Whether a connected agent's report says it is from before: none, or an older version. */
 export const agentIsOld = (report: Pick<MachineReport, 'agent'> | null | undefined): boolean => !report || report.agent < LATEST_AGENT;
+/** How long a code works (the spec: 15 minutes, one use). */
 export const JOIN_MS = 15 * 60_000;
 
 // No 0, 1, I or O: a code read off a screen and typed has nothing to mix up.

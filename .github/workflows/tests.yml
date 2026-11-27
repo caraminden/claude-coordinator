@@ -1,4 +1,4 @@
-# The full suite. A ship's run goes to GitHub's own runners, split 20 ways (the shard job; #2209, ADR 0042: Cara, 2026-11-27,
+# The full suite. A ship's run goes to GitHub's own runners, split 20 ways (the shard job; #2209, ADR 0043: Cara, 2026-11-27,
 # "github should actually be the main CI? with my desktop as the fallback", "if they give us 20, take 20"), and to Cara's
 # desktop (the Linux runner in WSL: tools/ci-runner/README.md; the test job) when GitHub can't: tools/land.sh pushes the
 # rebased commit to land/<branch>, which starts the shards, and waits for this run on that exact commit; when GitHub hasn't
@@ -260,7 +260,7 @@ jobs:
         continue-on-error: true
         run: node test/ci-leftovers.ts end
 
-  # A ship's run on GitHub's own runners (#2209, ADR 0042): free and unlimited on this public repo, at most 20 jobs at once
+  # A ship's run on GitHub's own runners (#2209, ADR 0043): free and unlimited on this public repo, at most 20 jobs at once
   # across the account (Free plan), so 20 shards (Cara, 2026-11-27, "if they give us 20, take 20"). Each works out the same
   # split from main's cached file times (tools/suite-runner.ts's CITADEL_TEST_SHARD: longest first onto the emptiest) and
   # runs its part as the desktop job runs the whole: the same run-tests.sh, skip check and reruns alone. The run is red when

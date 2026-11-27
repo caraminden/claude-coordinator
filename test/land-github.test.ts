@@ -1,4 +1,4 @@
-// A ship's run on GitHub's runners and its desktop fallback (#2209, ADR 0042), beside the land tests' parts (#2208).
+// A ship's run on GitHub's runners and its desktop fallback (#2209, ADR 0043), beside the land tests' parts (#2208).
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';

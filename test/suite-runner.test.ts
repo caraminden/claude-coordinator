@@ -99,7 +99,7 @@ test('a run ends once its tests do, even when a file leaves a handle open (the C
   assert.match(r.out, /^ℹ pass 1$/m);
 });
 
-// A ship's run on GitHub, split 20 ways (#2209, ADR 0042): each shard works out the same split and runs its own part.
+// A ship's run on GitHub, split 20 ways (#2209, ADR 0043): each shard works out the same split and runs its own part.
 test('the shards split the files between them, each file once, longest first onto the emptiest, with no time as the median', () => {
   const cwd = '/r';
   const secs = [200, 190, 180, 60, 50, 40, 30, 20, 10, 5, 5, 1];

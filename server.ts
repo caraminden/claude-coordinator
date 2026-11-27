@@ -817,8 +817,8 @@ const workFlow = new WorkFlow(store, { dir: join(DATA_DIR, 'work-flow'), read: r
 const codeCounts = new CodeCounts(store, { dir: join(DATA_DIR, 'code-counts'), count: countApart });
 // One scheme's git a tick, each once a day, after the boot's rush (#1988).
 if (!BOOT_CHECK && !PREVIEW) every('code counts', 5 * 60_000, () => codeCounts.tick(), 10 * 60_000);
-// A machine whose Windows screen role is lent comes too, for the pooled mcp__windows__ tools (Build 7 M5): its named tools only with its Tools role.
 if (serverTools) runner.serverTools = (projectId, kind) => serverToolsFor(projectId, kind);
+// A machine whose Windows screen role is lent comes too, for the pooled mcp__windows__ tools (Build 7 M5): its named tools only with its Tools role.
 // A machine named like a tool the server runs (src/server-tools.ts) is left out: perigee-godot's old row (#2179).
 runner.machines = (project, askers) =>
   machines.online().flatMap((m) => {

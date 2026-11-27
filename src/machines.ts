@@ -11,6 +11,7 @@
 // workspaces it found on that computer, by name, and serves only the ticked ones. An agent set up
 // before that (it posts no version) lends the MCP server on its own command line, and its workspace
 // tools while a person has the machine's workspace tools switched on.
+import { SERVER_TOOLS } from './server-tools.ts';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -36,8 +37,8 @@ import { POOLED_WINDOWS, WindowsPool } from './machine-pick.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
-/** Names the app's own MCP servers already use. */
-export const RESERVED_NAMES = new Set(['thread', 'coordinator', POOLED_WINDOWS]);
+/** Names the app's own MCP servers already use, the tools the server runs (src/server-tools.ts) among them. */
+export const RESERVED_NAMES = new Set(['thread', 'coordinator', POOLED_WINDOWS, ...SERVER_TOOLS.map((t) => t.name)]);
 /** A machine's workspace tools are the MCP server <name>-ws, so no machine may be named that way. */
 export const WS_SUFFIX = '-ws';
 

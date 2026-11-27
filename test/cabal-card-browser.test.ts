@@ -22,6 +22,7 @@ const STUB = pageStub(
   const member = (label, state, word) => ({ id: null, number: null, label, title: label + ' work', state, word });
   const cabals = [{ lead: 101, number: 7, title: lead.title, overseer: "Build 10's Overseer", name: 'Build 10', build: 10, members: [member('H1', 'merged', 'merged'), member('H2', 'running', 'building')], finished: 1, done: 'merged', next: 0, spend: 12 }];
   cabals[0].members.forEach((m, i) => { m.id = 200 + i; m.number = 20 + i; });
+  window.stubCabals = cabals;
   function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [lead, other], seen: {}, person_notes: {}, pins: [], cabals: location.search === '?late' && !window.formed ? [] : cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
@@ -93,4 +94,17 @@ test('a resync brings the card of a cabal formed while the stream was down', { s
   await waitFor(page, 'the plain build group to draw', `document.querySelector('.g-build .thread-row') && !document.querySelector('.cabal-card')`);
   await page.eval(`(async () => { window.formed = true; await (await import('./resync.js')).resync(); })()`);
   assert.equal(await page.eval(`!!document.querySelector('.cabal-card .thread-row') && !document.querySelector('.g-build')`), true, "the build's section is its cabal's card");
+});
+
+// The answer was read before the stream's news of the cabal, and lands after it: the news is the newer of the two.
+test("a resync's answer doesn't take back a card the stream brought meanwhile", { skip }, async () => {
+  const page = await browser.page(`${base}?late#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the plain build group to draw', `document.querySelector('.g-build .thread-row') && !document.querySelector('.cabal-card')`);
+  await page.eval(`(async () => {
+    const asked = (await import('./resync.js')).resync();
+    window.es.onmessage({ data: JSON.stringify({ type: 'cabals', projectId: 1, cabals: window.stubCabals }) });
+    await asked;
+  })()`);
+  await waitFor(page, 'the list to redraw', `document.querySelector('.cabal-card .thread-row') || document.querySelector('.g-build .thread-row')`);
+  assert.equal(await page.eval(`!!document.querySelector('.cabal-card .thread-row') && !document.querySelector('.g-build')`), true, 'the card the stream brought stays');
 });

@@ -524,9 +524,11 @@ async function refreshScheme(/** @type {number} */ projectId) {
   const panel = document.querySelector('#app .sidebar');
   panel?.setAttribute('aria-busy', 'true');
   let got = null,
-    before;
+    before,
+    had;
   for (let wait = 1000; !got; wait = Math.min(30_000, wait * 2)) {
     before = new Map(list); // what the stream changes meanwhile is newer than the answer
+    had = { builds: openView().builds, cabals: openView().cabals };
     got = await Promise.all([api(`api/projects/${projectId}?tickets=open`), api(`api/projects/${projectId}/artifacts`).catch(() => openView().artifacts), api(`api/projects/${projectId}/shared`).catch(() => openView().shared), api('api/machines').catch(() => openView().machines)]).catch(() => null);
     if (view?.kind !== 'project' || view.projectId !== projectId) return void panel?.removeAttribute('aria-busy'); // left the scheme; its page is gone
     list = openView().tickets; // a reconnect's resync may have swapped the list meanwhile: the answer goes onto the one shown
@@ -553,8 +555,8 @@ async function refreshScheme(/** @type {number} */ projectId) {
     seen: seen ?? openView().seen,
     personNotes: person_notes ?? openView().personNotes,
     pins: pins ?? openView().pins,
-    builds: builds ?? openView().builds,
-    cabals: cabals ?? openView().cabals,
+    builds: openView().builds === had?.builds ? (builds ?? openView().builds) : openView().builds,
+    cabals: openView().cabals === had?.cabals ? (cabals ?? openView().cabals) : openView().cabals,
     buildPreviews: build_previews ?? openView().buildPreviews,
     machines,
   });

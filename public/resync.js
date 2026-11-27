@@ -85,7 +85,7 @@ export async function resync() {
 
 /** @param {View} v */
 async function refreshLists(v) {
-  const was = { rows: new Map(v.tickets), coordinator: v.coordinator, ticket: v.ticket };
+  const was = { rows: new Map(v.tickets), coordinator: v.coordinator, ticket: v.ticket, builds: v.builds, cabals: v.cabals };
   const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds, build_previews, cabals }, artifacts, chat] = await Promise.all([api(`api/projects/${v.projectId}?tickets=open`), api(`api/projects/${v.projectId}/artifacts`), v.id ? api(`api/tickets/${v.id}`) : null]);
   if (view !== v) return; // you went to another view meanwhile; its own load is fresh
   cur().coordinator = freshest(cur().coordinator, was.coordinator, coordinator);
@@ -94,8 +94,9 @@ async function refreshLists(v) {
   cur().seen = seen ?? cur().seen;
   cur().personNotes = person_notes ?? cur().personNotes;
   cur().pins = pins ?? cur().pins;
-  cur().builds = builds ?? cur().builds;
-  cur().cabals = cabals ?? cur().cabals; // a cabal formed or closed while the stream was down (#2240)
+  // A cabal formed or closed while the stream was down (#2240); a list the stream replaced meanwhile is newer than the answer.
+  if (cur().builds === was.builds) cur().builds = builds ?? was.builds;
+  if (cur().cabals === was.cabals) cur().cabals = cabals ?? was.cabals;
   cur().buildPreviews = build_previews ?? cur().buildPreviews;
   if (cur().id) markSeen(/** @type {number} */ (cur().id));
   renderSidebar();

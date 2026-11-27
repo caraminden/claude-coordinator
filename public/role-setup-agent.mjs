@@ -428,26 +428,11 @@ export function elevateScript({ platform, appUrl, token, needs, caps = {}, at = 
         "if ($LASTEXITCODE) { Write-Host 'elevate: the CI runner agent did not install: the lines above say why.' -ForegroundColor Red; exit 1 }",
       );
     if (needs.includes('wsl'))
-      lines.push(
-        "Write-Host 'elevate: installing WSL 2'",
-        '& wsl.exe --install --no-distribution',
-        "if ($LASTEXITCODE) { Write-Host 'elevate: WSL did not install: the lines above say why.' -ForegroundColor Red; exit 1 }",
-        "Write-Host 'elevate: restart this PC, then press Set up again on the Machines page.'",
-      );
+      lines.push("Write-Host 'elevate: installing WSL 2'", '& wsl.exe --install --no-distribution', "if ($LASTEXITCODE) { Write-Host 'elevate: WSL did not install: the lines above say why.' -ForegroundColor Red; exit 1 }", "Write-Host 'elevate: restart this PC, then press Set up again on the Machines page.'");
     lines.push("Write-Host 'elevate: done.'");
     return `${lines.join('\r\n')}\r\n`;
   }
-  const lines = [
-    '#!/usr/bin/env bash',
-    `# ${head}`,
-    '# Run it with sudo; running it again updates what it installed.',
-    'set -euo pipefail',
-    `[[ $(id -u) == 0 ]] || { echo 'elevate: run it with sudo' >&2; exit 1; }`,
-    `u='${u}'`,
-    `export CC_MACHINE_TOKEN='${token}'`,
-    'f=$(mktemp)',
-    "trap 'rm -f \"$f\"' EXIT",
-  ];
+  const lines = ['#!/usr/bin/env bash', `# ${head}`, '# Run it with sudo; running it again updates what it installed.', 'set -euo pipefail', `[[ $(id -u) == 0 ]] || { echo 'elevate: run it with sudo' >&2; exit 1; }`, `u='${u}'`, `export CC_MACHINE_TOKEN='${token}'`, 'f=$(mktemp)', 'trap \'rm -f "$f"\' EXIT'];
   if (needs.includes('worker')) lines.push("echo 'elevate: installing the minion worker'", `curl -fsSL "$u/worker-setup/install-worker.sh" -o "$f"`, `bash "$f" "$u"${flags.length ? ` ${flags.join(' ')}` : ''}`);
   if (needs.includes('runner-linux')) lines.push("echo 'elevate: installing the CI runner agent'", `curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f"`, 'bash "$f" "$u"');
   lines.push("echo 'elevate: done.'");

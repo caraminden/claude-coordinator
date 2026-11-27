@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { exec, runSetup } from '../public/role-setup-agent.mjs';
+import { elevateScript, exec, runSetup } from '../public/role-setup-agent.mjs';
 
 // The agent's side of a role's Set up and Test (Build 7 M4): what it runs, what it writes and what it says back.
 const dir = mkdtempSync(join(tmpdir(), 'role-setup-agent-'));
@@ -11,11 +11,12 @@ const dir = mkdtempSync(join(tmpdir(), 'role-setup-agent-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 let n = 0;
 
-type Said = { id: string; step?: { n: number; text: string; state: string }; admin?: { needs: string[]; pm: string | null }; done?: { ok: boolean; report?: string; why?: string } };
+type Said = { id: string; step?: { n: number; text: string; state: string }; admin?: { needs: string[]; pm?: string | null; script?: true }; done?: { ok: boolean; report?: string; why?: string } };
 type Out = { code: number; out: string };
+const TOKEN = `ccm_1_${'a'.repeat(43)}`;
 
 /** A fake PC: `answers` says what each program prints (by "program arg"), anything missing isn't installed. */
-function pc(o: { platform?: string; role: string; kind?: string; ask?: Record<string, unknown>; answers?: Record<string, Out>; config?: unknown; capture?: (file: string, window: string) => Promise<string>; busy?: boolean }) {
+function pc(o: { platform?: string; role: string; kind?: string; ask?: Record<string, unknown>; answers?: Record<string, Out>; config?: unknown; capture?: (file: string, window: string) => Promise<string>; busy?: boolean; root?: boolean }) {
   const home = join(dir, `pc-${n++}`);
   const configFile = join(home, 'machine-agent.json');
   rmSync(home, { recursive: true, force: true });
@@ -29,7 +30,9 @@ function pc(o: { platform?: string; role: string; kind?: string; ask?: Record<st
     platform: o.platform ?? 'linux',
     configFile,
     appUrl: 'http://citadel.test',
-    token: 'ccm_1_x',
+    token: TOKEN,
+    home,
+    root: !!o.root,
     exec: async (cmd: string, args: string[]) => {
       const line = [cmd, ...args].join(' ');
       ran.push(line);
@@ -193,7 +196,8 @@ test('Builds on Windows runs podman in citadel-workers as its worker user, and s
   assert.ok(!missing.ran.some((r) => r.includes('pull')));
   const noWsl = pc({ platform: 'win32', role: 'builds', ask: BUILDS, answers: {} });
   await noWsl.run();
-  assert.deepEqual(noWsl.said.find((s) => s.admin)?.admin, { needs: ['wsl'] });
+  assert.deepEqual(noWsl.said.find((s) => s.admin)?.admin, { needs: ['wsl'], script: true }, 'WSL goes in the one elevate script');
+  assert.match(readFileSync(join(noWsl.ctx.home, 'coordinator-agent', 'elevate.ps1'), 'utf8'), /wsl\.exe --install --no-distribution/);
 });
 
 test('Builds with no podman on Linux asks for it as fixed words; Test pulls nothing and says to press Set up', async () => {
@@ -208,4 +212,60 @@ test('Builds with no podman on Linux asks for it as fixed words; Test pulls noth
   const none = pc({ role: 'builds', ask: { builds: { images: {}, volumes: [] } }, answers: BUILDS_OK });
   await none.run();
   assert.match(none.done().why!, /no Android build image/);
+});
+
+// One agent per computer (One kind of machine H2): the elevate script the agent writes, and the roles that use it.
+test('CI Set up on Windows writes elevate.ps1 with the runner agent and, when Minion turns waits on it, WSL; the card gets the needs only', async () => {
+  const p = pc({ platform: 'win32', role: 'ci', ask: { also: ['turns'] }, answers: {} });
+  await p.run();
+  assert.deepEqual(p.said.find((s) => s.admin)?.admin, { needs: ['runner', 'wsl'], script: true });
+  assert.equal(p.done().ok, true, 'Citadel waits for the runner agent from here');
+  const text = readFileSync(join(p.ctx.home, 'coordinator-agent', 'elevate.ps1'), 'utf8');
+  assert.match(text, /IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/, 'it stops unless elevated');
+  assert.match(text, /iwr|Invoke-WebRequest "\$u\/ci-runner\/install-runner-agent\.ps1"/);
+  assert.ok(text.includes(`-CitadelUrl $u -MachineToken '${TOKEN}'`));
+  assert.ok(text.indexOf('install-runner-agent') < text.indexOf('wsl.exe --install'), 'WSL last: it asks for a restart');
+  // WSL already there: not in the script.
+  const has = pc({ platform: 'win32', role: 'ci', ask: { also: ['builds'] }, answers: { 'wsl.exe --version': ok('WSL version: 2.3.26.0') } });
+  await has.run();
+  assert.deepEqual(has.said.find((s) => s.admin)?.admin, { needs: ['runner'], script: true });
+});
+
+test("Linux: CI and Minion turns write one elevate.sh, root's only, with the worker's caps; as root the agent runs it itself", async () => {
+  const p = pc({ role: 'turns', ask: { also: ['ci'], caps: { workers: 4, threads: 8, memory_gb: 'lots' } } });
+  await p.run();
+  assert.deepEqual(p.said.find((s) => s.admin)?.admin, { needs: ['runner-linux', 'worker'], script: true });
+  assert.equal(p.done().ok, true);
+  const file = join(p.ctx.home, 'coordinator-agent', 'elevate.sh');
+  const text = readFileSync(file, 'utf8');
+  assert.equal(statSync(file).mode & 0o777, 0o600, 'it holds the token');
+  assert.match(text, /^#!\/usr\/bin\/env bash\n/);
+  assert.match(text, /\[\[ \$\(id -u\) == 0 \]\]/);
+  assert.match(text, /bash "\$f" "\$u" --workers 4 --threads 8\n/, 'whole-number caps only');
+  assert.match(text, /install-runner-agent\.sh/);
+  const root = pc({ role: 'ci', root: true, answers: { bash: ok('elevate: done.') } });
+  await root.run();
+  assert.ok(root.ran.includes(`bash ${join(root.ctx.home, 'coordinator-agent', 'elevate.sh')}`));
+  assert.equal(
+    root.said.find((s) => s.admin),
+    undefined,
+    'nothing to paste',
+  );
+  assert.equal(root.done().ok, true);
+  const broke = pc({ role: 'ci', root: true, answers: { bash: { code: 1, out: 'E: Unable to locate package nodejs' } } });
+  await broke.run();
+  assert.match(broke.done().why!, /install stopped: E: Unable to locate package nodejs/);
+});
+
+test("the script holds only the agent's own address and a real token; a Mac's CI ends with why", async () => {
+  assert.throws(() => elevateScript({ platform: 'linux', appUrl: 'http://citadel.test', token: "x'; rm -rf / #", needs: ['worker'] }), /isn't a machine token/);
+  const text = elevateScript({ platform: 'linux', appUrl: 'http://citadel.test:8574/some/path?q=1', token: TOKEN, needs: ['worker'] });
+  assert.match(text, /^u='http:\/\/citadel\.test:8574'$/m);
+  const bad = pc({ role: 'ci' });
+  bad.ctx.token = 'ccm_nope';
+  await bad.run();
+  assert.match(bad.done().why!, /Could not write the administrator script/);
+  const mac = pc({ platform: 'darwin', role: 'ci' });
+  await mac.run();
+  assert.match(mac.done().why!, /Windows or Linux/);
 });

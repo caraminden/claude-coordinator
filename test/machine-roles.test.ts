@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 import { adminOwned, lendsRole, ownerAsked } from '../src/access.ts';
 import { mayFetch } from '../src/ci-runner.ts';
 import { type Machine, type Project, Store } from '../src/db.ts';
-import { legacyFromRoles, parseLegacyLend, rolesFromLegacy, sameLend } from '../src/machine-roles.ts';
+import { legacyFromRoles, parseLegacyLend, roleCannot, rolesCannot, rolesFromLegacy, sameLend } from '../src/machine-roles.ts';
 import { patchRoles } from '../src/routes/machines.ts';
 
 // A machine's roles (Build 7 M1, specs/machine-connections.md section 8): today's rows move over with nothing granted differently.
@@ -186,6 +186,16 @@ test('the one list saves only its change: one more scheme for Tools leaves CI an
   s.db.close();
 });
 
+/** The app patchRoles reads, with only what it uses; `calls` hears its told and pump. */
+const patchApp = (s: Store, calls: string[] = []) =>
+  ({
+    store: s,
+    machines: { rolesChanged: () => calls.push('told'), endSessionsWhere: () => {}, list: () => [], view: () => ({}), gpuFound: () => false },
+    runner: { turnLine: { pump: () => calls.push('pump') } },
+    jobs: { drop: () => {} },
+    broadcast: () => {},
+  }) as unknown as Parameters<typeof patchRoles>[0];
+
 test('PATCH roles: owner and admins only; on with no list is every scheme its owner is in; caps checked', async () => {
   const s = new Store(join(dir, 'patch.db'));
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
@@ -198,13 +208,7 @@ test('PATCH roles: owner and admins only; on with no list is every scheme its ow
   const other = s.createProject('other', null, cara.id);
   const m = s.createMachine('josh-pc', '', 'Josh', josh.id);
   const calls: string[] = [];
-  const app = {
-    store: s,
-    machines: { rolesChanged: () => calls.push('told'), endSessionsWhere: () => {}, list: () => [], view: () => ({}) },
-    runner: { turnLine: { pump: () => calls.push('pump') } },
-    jobs: { drop: () => {} },
-    broadcast: () => {},
-  } as unknown as Parameters<typeof patchRoles>[0];
+  const app = patchApp(s, calls);
   const as = (u: { id: number; admin?: number | boolean }) => ({ uid: u.id, admin: !!u.admin }) as Parameters<typeof patchRoles>[1];
   await assert.rejects(patchRoles(app, as(dana), m, { role: 'turns', on: true }), /No such machine/);
   await assert.rejects(patchRoles(app, as(josh), m, { role: 'wifi', on: true }), /role must be one of/);
@@ -257,7 +261,7 @@ test('each role decides alone: Tools for sessions, GPU jobs for machine jobs, CI
   let dropped: (j: { state: string; project_id: number }) => boolean = () => false;
   const app = {
     store: s,
-    machines: { rolesChanged: () => {}, endSessionsWhere: (_: number, gone: typeof ended) => (ended = gone), list: () => [], view: () => ({}) },
+    machines: { rolesChanged: () => {}, endSessionsWhere: (_: number, gone: typeof ended) => (ended = gone), list: () => [], view: () => ({}), gpuFound: () => false },
     runner: { turnLine: { pump: () => {} } },
     jobs: { drop: (_: number, __: string, gone: typeof dropped) => (dropped = gone) },
     broadcast: () => {},
@@ -292,4 +296,27 @@ test('rolesFromLegacy and legacyFromRoles round-trip every lend shape', () => {
     assert.ok(sameLend(back.lend, lend as never), JSON.stringify(lend));
     assert.deepEqual(back.projects, [1, 3]);
   }
+});
+
+// Capabilities decide the roles (One kind of machine H2): what the agent reported rules a role out, with why.
+test("a PC's report rules out what it can't do, with why; no report rules out nothing", async () => {
+  const mac = { os: 'macos' as const, os_name: 'macOS 14.5', gpu: null };
+  assert.deepEqual(Object.keys(rolesCannot(mac)).sort(), ['builds', 'ci', 'gpu', 'screen', 'turns']);
+  assert.equal(roleCannot(mac, 'screen'), 'Windows only, and this PC runs macOS 14.5.');
+  const linux = { os: 'linux' as const, os_name: 'Ubuntu 24.04', gpu: null };
+  assert.deepEqual(rolesCannot(linux), { screen: 'Windows only, and this PC runs Ubuntu 24.04.', gpu: 'No GPU found on this PC.' });
+  assert.equal(roleCannot(linux, 'gpu', true), null, "its jobs block's GPU outranks a report that found none");
+  assert.deepEqual(rolesCannot({ os: 'windows', gpu: 'RTX 4080' }), {});
+  assert.deepEqual(rolesCannot(null), {}, 'an agent from before reports nothing: nothing is ruled out');
+  // The roles PATCH refuses to switch on what the report rules out, and still switches it off.
+  const s = new Store(join(dir, 'cannot.db'));
+  const josh = s.createUser({ name: 'Josh', login: 'josh' });
+  const m = s.createMachine('josh-mac', '', 'Josh', josh.id);
+  s.updateMachine(m.id, { report: JSON.stringify({ host: 'mac', os: 'macos', os_name: 'macOS 14.5', threads: 8, memory_gb: 16, agent: 5 }) });
+  const app = patchApp(s);
+  const as = { uid: josh.id, admin: false } as Parameters<typeof patchRoles>[1];
+  await assert.rejects(patchRoles(app, as, s.getMachine(m.id)!, { role: 'ci', on: true }), /CI runners can't go on for josh-mac: CI runners need Windows or Linux/);
+  const tools = await patchRoles(app, as, s.getMachine(m.id)!, { role: 'tools', on: true });
+  assert.equal(tools.roles.find((r) => r.role === 'tools')?.on, true);
+  s.db.close();
 });

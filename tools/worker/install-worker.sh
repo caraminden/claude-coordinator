@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Sets up this Linux PC, or a WSL distro made for it on a Windows one (install-worker.ps1 does that part and calls this),
-# to run its owner's Citadel minions (Build 7). The Machines page shows the whole command. Run it as root; running it
+# to run its owner's Citadel minions (Build 7). On Linux the machine agent's elevate.sh runs it (One kind of machine H2: the
+# one sudo paste the Machines page shows); an agent from before shows the whole command. Run it as root; running it
 # again updates what it installed and keeps every sign-in.
 #
 #   bash install-worker.sh <citadel machines url> [--workers 6] [--threads 8] [--memory 24] [--disk 60]

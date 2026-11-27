@@ -2,7 +2,8 @@
 # Installs Citadel's CI runner agent on a Linux PC, or in a WSL distro on a Windows one, once (Citadel #510, #1933): it
 # then adds, lists and removes schemes' Linux runners when someone asks `ci_runners` with os linux. The Linux twin of
 # install-runner-agent.ps1; tools/ci-runner/README.md ("Linux runners on plain Linux", "Linux runners in WSL") says
-# where it fits. Run it as root; running it again updates the agent and its scripts to Citadel's current ones.
+# where it fits. On a Linux PC the machine agent's elevate.sh runs it (One kind of machine H2: the one sudo paste the
+# Machines page shows, on Set up for CI runners). Run it as root; running it again updates the agent and its scripts.
 #
 #   bash install-runner-agent.sh <citadel machines url>        # asks for the machine token, or reads CC_MACHINE_TOKEN
 #

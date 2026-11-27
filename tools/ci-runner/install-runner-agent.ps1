@@ -3,8 +3,11 @@
   Installs Citadel's CI runner agent on this PC, once: it then adds, lists and removes schemes' runners when Citadel asks.
 
 .DESCRIPTION
-  Citadel #328 (Josh, 2026-11-05: "Citadel installs it itself"). Run it once, in an elevated PowerShell (Run as
-  administrator); running it again updates the agent and its scripts to Citadel's current ones. It:
+  Citadel #328 (Josh, 2026-11-05: "Citadel installs it itself"). Nobody runs it by hand any more (One kind of machine H2,
+  Cara 2026-11-26, "One agent, helpers hidden"): pressing Set up on CI runners makes the PC's machine agent write its
+  elevate.ps1, which runs this, as administrator, with that PC's own token, in the one Admin PowerShell paste the
+  Machines page shows. A runner agent installed the old way keeps working. Running it again updates the agent and its
+  scripts to Citadel's current ones. It:
     1. checks it's elevated and that Node 18+ and Git for Windows are here;
     2. makes C:\ProgramData\citadel-runner-agent, readable and writable only by Administrators and SYSTEM, so no
        unelevated program can change what the agent runs;

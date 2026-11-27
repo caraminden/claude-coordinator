@@ -7,7 +7,7 @@ import { bootServer, ok, stopProcs, tempRoot, until, type Booted } from './helpe
 import { json } from './typed.ts';
 import { Store } from '../src/db.ts';
 import { cleanReport, hashJoinCode, JOIN_CODE, JOIN_MS, joinState, makeJoin, nameFromHost, newJoinCode, redeemJoin } from '../src/machine-join.ts';
-import { AGENT_VERSION, joinWithCode, machineReport } from '../public/machine-agent.mjs';
+import { AGENT_VERSION, hypervFrom, joinWithCode, machineReport } from '../public/machine-agent.mjs';
 import { machineJoinPosix, machineJoinWindows, machineSetupWindows } from '../public/machine-setup.js';
 import { guessJoinOs, reportLine } from '../public/machine-connect.js';
 
@@ -51,7 +51,10 @@ test("a report keeps only what it knows, bounded, and isn't one without its os",
   assert.equal(cleanReport({ threads: 8 }), null);
   assert.equal(cleanReport('windows'), null);
   const r = cleanReport({ os: 'windows', os_name: 'Windows 11\u0007', host: 'DESK', threads: 32, memory_gb: 63.94, disk_free_gb: -1, gpu: 'RTX 4080', wsl: { present: true, version: '2.3.26' }, screen: true, admin: 'yes', agent: 3, extra: 'x' });
-  assert.deepEqual(r, { host: 'DESK', os: 'windows', os_name: 'Windows 11', wsl: { present: true, version: '2.3.26' }, in_wsl: false, threads: 32, memory_gb: 63.9, disk_free_gb: null, gpu: 'RTX 4080', screen: true, admin: null, agent: 3 });
+  assert.deepEqual(r, { host: 'DESK', os: 'windows', os_name: 'Windows 11', wsl: { present: true, version: '2.3.26' }, in_wsl: false, threads: 32, memory_gb: 63.9, disk_free_gb: null, gpu: 'RTX 4080', screen: true, admin: null, hyperv: null, agent: 3 });
+  const vm = cleanReport({ os: 'windows', hyperv: { present: true, vms: ['citadel-test-box', 'citadel-test-box', 'x\u0007', 7] } });
+  assert.deepEqual(vm?.hyperv, { present: true, vms: ['citadel-test-box', 'x'] }, 'VM names deduped and cleaned; a non-name dropped');
+  assert.deepEqual(cleanReport({ os: 'windows', hyperv: { present: true, vms: null } })?.hyperv, { present: true, vms: null }, "Hyper-V there, VMs it can't list");
   assert.equal(reportLine(r), 'Windows 11, 32 threads, 64 GB, RTX 4080, WSL 2.3.26 ready, admin available'.replace(', admin available', ''));
   assert.equal(reportLine({ ...r!, wsl: { present: false, version: null }, screen: false, admin: true, disk_free_gb: 120 }), 'Windows 11, 32 threads, 64 GB, 120 GB free, RTX 4080, no WSL, no one signed in, admin available');
 });
@@ -128,6 +131,11 @@ test('the report reads a Windows PC: its version, WSL (whose tools write UTF-16)
   // No nvidia-smi: Windows' own list, without the remote and basic adapters; no WSL --version: an inbox WSL with distros.
   const r2 = await machineReport({ platform: 'win32', env: {}, home: tmp.dir, run: async (c: string, a: string[]) => (c === 'powershell.exe' ? 'Microsoft Remote Display Adapter\r\nAMD Radeon RX 7900\r\n' : c === 'wsl.exe' && a[0] === '--list' ? 'Ubuntu' : null) });
   assert.deepEqual([r2.gpu, r2.wsl, r2.screen, r2.admin], ['AMD Radeon RX 7900', { present: true, version: null }, null, null]);
+  // Hyper-V (H2, "a VM is a capability"): its VMs by name, or there but not listable without Hyper-V Administrators.
+  const vms = await machineReport({ platform: 'win32', env: {}, home: tmp.dir, run: async (c: string, a: string[]) => (c === 'powershell.exe' && a.join(' ').includes('Get-VM') ? 'vm\r\ncitadel-test-box\r\n' : null) });
+  assert.deepEqual(vms.hyperv, { present: true, vms: ['citadel-test-box'] });
+  assert.equal(r.hyperv, null, "no answer: it can't tell");
+  assert.deepEqual([hypervFrom('none'), hypervFrom('?'), hypervFrom('vm'), hypervFrom('Access denied')], [{ present: false, vms: [] }, { present: true, vms: null }, { present: true, vms: [] }, null]);
   // Linux inside WSL: no screen of its own.
   const r3 = await machineReport({ platform: 'linux', env: { DISPLAY: ':0' }, home: tmp.dir, run: async () => null, read: (f: string) => (f === '/proc/version' ? 'Linux version 5.15 (microsoft-standard-WSL2)' : 'PRETTY_NAME="Ubuntu 24.04 LTS"\n') });
   assert.deepEqual([r3.os, r3.os_name, r3.in_wsl, r3.wsl, r3.screen, r3.gpu], ['linux', 'Ubuntu 24.04 LTS', true, null, false, null]);

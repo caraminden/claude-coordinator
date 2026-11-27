@@ -169,8 +169,8 @@ test('a run cut off by a restart shows as failed', () => {
   assert.match(t.run('gpu')!.why!, /restarted/);
 });
 
-test('Minion turns on Linux: the card shows the install command, then T5 self-test runs once the worker is here', () => {
-  const t = world({ os: 'linux' });
+test('Minion turns on Linux with an agent from before Set up: the card shows the install command, then T5 self-test runs once the worker is here', () => {
+  const t = world({ os: 'linux', agent: 3 });
   const run = t.setups.start(t.machine(), 'turns', 'setup', t.josh);
   assert.equal(run.worker_install, true);
   assert.deepEqual(t.sent, []);
@@ -356,4 +356,76 @@ test("Builds refuses a Mac, and images that aren't published or aren't pinned by
   for (const [kind, image] of Object.entries(shipped.images)) assert.match(image, new RegExp(`^ghcr\\.io/caraminden/citadel-build-${kind}@sha256:[a-f0-9]{64}$`));
   assert.deepEqual(shipped.volumes, ['citadel-gradle', 'citadel-cargo', 'citadel-npm']);
   assert.ok(JSON.parse(readFileSync(BUILD_IMAGES_FILE, 'utf8')).images.android);
+});
+
+// One agent per computer (One kind of machine H2; Cara, 2026-11-26, "One agent, helpers hidden").
+test("the admin command for the agent's elevate script is the same fixed line whatever it holds", () => {
+  const win = adminCommand({ needs: ['wsl', 'runner'], pm: null, script: true })!;
+  assert.equal(win.tag, 'powershell-admin');
+  assert.equal(win.command, 'powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\\coordinator-agent\\elevate.ps1"');
+  assert.equal(win.what, 'WSL 2 and the CI runner agent');
+  assert.match(win.after, /restart the PC/);
+  assert.match(adminCommand({ needs: ['runner'], pm: null, script: true })!.after, /waits for it to connect/);
+  const linux = adminCommand({ needs: ['podman', 'worker', 'runner-linux'], pm: 'apt', script: true })!;
+  assert.equal(linux.tag, 'bash');
+  assert.equal(linux.command, 'sudo apt-get install -y podman && \\\nsudo bash ~/coordinator-agent/elevate.sh', 'packages first, then the script, in one paste');
+  assert.equal(adminCommand({ needs: ['worker'], pm: null, script: true })!.command, 'sudo bash ~/coordinator-agent/elevate.sh');
+  // A helper's install never gets a page-made command: from an agent with no script it is dropped.
+  assert.deepEqual(cleanAdmin({ needs: ['runner', 'wsl'] }), { needs: ['wsl'], pm: null });
+  assert.equal(cleanAdmin({ needs: ['worker'], pm: 'apt' }), null);
+  assert.equal(cleanAdmin({ needs: ['podman'], pm: 'apt', script: true })?.script, undefined, 'script only with a need the script holds');
+});
+
+test('CI runners with an agent that does Set up: it writes the elevate script, then Citadel waits for the runner agent and tests it', async () => {
+  const t = world();
+  t.store.setMachineRole(t.machine().id, 'turns', { on: true });
+  t.store.setMachineRole(t.machine().id, 'ci', { on: true });
+  const run = t.setups.start(t.machine(), 'ci', 'setup', t.josh);
+  assert.equal(run.worker_install, false, 'no install lines to paste by hand');
+  assert.deepEqual(t.sent, [{ setup: { id: run.id, role: 'ci', kind: 'setup', also: ['turns'] } }], 'Minion turns is on with no worker yet: its needs go in the same script');
+  t.setups.heard(t.machine(), { id: run.id, admin: { needs: ['runner', 'wsl'], script: true }, step: { n: 0, text: 'Run the administrator command below on this PC', state: 'running' } });
+  t.setups.heard(t.machine(), { id: run.id, done: { ok: true } });
+  let kept = t.run('ci')!;
+  assert.equal(kept.done, null, 'it waits for the runner agent');
+  assert.deepEqual(kept.admin, { needs: ['wsl', 'runner'], pm: null, script: true });
+  assert.match(kept.steps.at(-1)!.text, /runner agent connects/);
+  t.tick(WORKER_WAIT_MS - 1000);
+  assert.equal(t.run('ci')!.done, null, 'its 30 minutes count from when the agent finished');
+  t.ci.agents = [{ os: 'windows', host: 'pc' }];
+  t.tick(1000);
+  await settle();
+  kept = t.run('ci')!;
+  assert.deepEqual(
+    kept.steps.slice(0, 2).map((s) => [s.text, s.state]),
+    [
+      ['Run the administrator command below on this PC', 'ok'],
+      ['The runner agent connected to Citadel', 'ok'],
+    ],
+  );
+});
+
+test('CI runners whose agent ends without writing the script fail with its words; Builds waiting counts as on until it passes', () => {
+  const t = world({ os: 'linux' });
+  t.store.setMachineRole(t.machine().id, 'builds', { on: true });
+  const run = t.setups.start(t.machine(), 'ci', 'setup', t.josh);
+  assert.deepEqual((t.sent[0] as { setup: { also?: string[] } }).setup.also, ['builds']);
+  t.setups.heard(t.machine(), { id: run.id, done: { ok: false, why: "Could not write the administrator script: this agent's token isn't a machine token" } });
+  assert.match(t.run('ci')!.why!, /administrator script/);
+});
+
+test('Minion turns on Linux: the agent writes the elevate script, then T5 self-test runs once the worker is here', () => {
+  const t = world({ os: 'linux' });
+  t.store.setMachineRole(t.machine().id, 'turns', { on: true, caps: { workers: 4 } });
+  const run = t.setups.start(t.machine(), 'turns', 'setup', t.josh);
+  assert.equal(run.worker_install, false);
+  assert.deepEqual(t.sent, [{ setup: { id: run.id, role: 'turns', kind: 'setup', caps: { workers: 4 } } }]);
+  t.setups.heard(t.machine(), { id: run.id, admin: { needs: ['worker'], script: true }, step: { n: 0, text: 'Run the administrator command below on this PC', state: 'running' }, done: { ok: true } });
+  t.w.here = true;
+  t.tick(5000);
+  const kept = t.run('turns')!;
+  assert.deepEqual(
+    kept.steps.slice(0, 2).map((s) => s.state),
+    ['ok', 'ok'],
+  );
+  assert.match(kept.steps[2].text, /Self-test/);
 });

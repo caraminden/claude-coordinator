@@ -3,8 +3,9 @@
   Makes this Windows PC run its owner's Citadel minions, in a WSL distro of its own (citadel-workers).
 
 .DESCRIPTION
-  Citadel Build 7. The Machines page shows the whole command, with this PC's token in CC_MACHINE_TOKEN. Run it in a
-  normal PowerShell, as the person whose PC it is: WSL distros and the task below are each person's own. Running it
+  Citadel Build 7. The PC's machine agent runs it when its owner presses Set up on Minion turns (public/role-setup-agent.mjs),
+  with this PC's token in CC_MACHINE_TOKEN; an agent from before shows the whole command to paste. It runs in a normal
+  PowerShell, as the person whose PC it is: WSL distros and the task below are each person's own. Running it
   again updates the worker and keeps its sign-ins. It:
     1. installs the distro citadel-workers (Ubuntu 24.04), if it isn't there;
     2. turns systemd-timesyncd off in it before anything else: one distro's timesyncd skews the clock every distro on

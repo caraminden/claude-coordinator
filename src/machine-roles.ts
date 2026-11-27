@@ -54,10 +54,12 @@ export function roleCannot(report: Capable | null, role: Role, gpuFound = false)
 
 /** Each role a PC can't do, with why (roleCannot); the roles it can do are left out. */
 export function rolesCannot(report: Capable | null, gpuFound = false): Partial<Record<Role, string>> {
-  return Object.fromEntries(ROLES.flatMap((r) => {
-    const why = roleCannot(report, r, gpuFound);
-    return why ? [[r, why]] : [];
-  }));
+  return Object.fromEntries(
+    ROLES.flatMap((r) => {
+      const why = roleCannot(report, r, gpuFound);
+      return why ? [[r, why]] : [];
+    }),
+  );
 }
 
 export const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as readonly string[]).includes(v);

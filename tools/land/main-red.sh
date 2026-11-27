@@ -39,7 +39,7 @@ train_main_red() {
   # Passed-alone files go by #1419's rule: a known flake no ship changed is excused; a new one may be the train's own, and
   # the leak guard's red is never a flake. Either counts as another red: no ship through.
   flakes=$(train_labels | sed -n 's/^failed in the full run, passed alone //p' | paste -sd, - | sed 's/,/, /g') || true
-  if [ -n "$main_red_other$main_red_mine" ] || [ ${#touched[@]} -gt 0 ]; then
+  if [ -n "$main_red_other" ]; then
     :
   elif grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed"; then
     main_red_other='the leak guard (the tests left processes running)'
@@ -47,6 +47,11 @@ train_main_red() {
     main_red_other='a skipped test'
   elif [ -n "$flakes" ] && ! known_flakes "$flakes"; then
     main_red_other="$flakes (passed alone, but no known flake)"
+  fi
+  if [ -z "$main_red_other" ] && { [ -n "$main_red_mine" ] || [ ${#touched[@]} -gt 0 ]; }; then
+    r=0
+    main_red_hold || r=$?
+    [ "$r" = 2 ] || return "$r"
   fi
   if [ -z "$main_red_other" ] && [ -z "$main_red_mine" ] && [ ${#touched[@]} = 0 ]; then
     through_by[$tip]=$main_red rc=0
@@ -69,6 +74,43 @@ train_main_red() {
   retro_log "red on main too: not $who · $label · $main_red · $ci_url${main_red_other:+ · also red: $main_red_other}"
   train_drop
   return 0
+}
+
+# Hold only the suspects (#2212; Cara, 2026-11-27, "Hold only that ship"): main's red is the run's only real failure, but ships
+# on the train changed the red test or what it imports (train_main_red's mine and touched), so they can't ship through it.
+# Only they leave, refused for nothing: a rider goes back in line and the rest run CI again here (train_again), then are judged
+# again; a front steps aside, keeping its place, and the next ship runs the rest (pull_say), as train_suspects pulls a front.
+# 2 (today's whole-train drop) when nobody would be left, or the front has stepped aside three times already.
+main_red_hold() {
+  local i t x sus='' keep=() was=() front=''
+  [ -z "$main_red_mine" ] || { front=1 && [ "$aside" -lt 3 ]; } || return 2
+  for ((i = 0; i < ${#train_n[@]}; i++)); do
+    if [[ " ${touched[*]} " == *" ${train_br[$i]} "* ]]; then
+      sus+="${sus:+, }${train_br[$i]}" train_held_tips+=" ${train_was[$i]}"
+    else keep+=("$i"); fi
+  done
+  [ ${#keep[@]} -gt 0 ] || [ -z "$front" ] || return 2
+  [ -n "$front" ] || [ -n "$sus" ] || return 2
+  x="red on main too: not $who: $main_red fails run alone on main's tip $(git rev-parse --short "$old") here too, and it is the only real failure of $who CI run ($ci_url), but"
+  if [ -n "$front" ]; then
+    say "$x $branch, at the front, changed $main_red_mine or what it imports, so it can't ship through main's red: it steps aside, keeping its place in line and refused for nothing, and the next ship runs the train without it${sus:+, nor $sus, which changed $main_red or what it imports too: back in line}"
+    retro_log "red on main too: not $who · $label · $main_red · $ci_url · held off: $branch${sus:+, $sus}"
+    was=("${keep[@]}") keep=()
+    for i in "${was[@]}"; do # the next front would bring a held ship's commits along with one built on it
+      for t in "$pre" "$own" $train_held_tips; do
+        ! sits_on "${train_was[$i]}" "$t" || { say "${train_br[$i]} goes back in line: it sits on a ship held off this train"; continue 2; }
+      done
+      keep+=("$i")
+    done
+    pull_say "${keep[@]}"
+    aside=$((aside + 1))
+    say "$branch steps aside: the next ship in line runs the train with what is left of it"
+    requeue "back at the front after it stepped aside from its train for main's red: starting over from the rebase"
+  fi
+  say "$x $sus changed $main_red or what it imports, so it can't ship through main's red: back in line, refused for nothing, and the train runs again without it"
+  retro_log "red on main too: not $who · $label · $main_red · $ci_url · held off: $sus"
+  train_again "testing the train again without the ships that changed main's red test" "${keep[@]}"
+  [ "$rc" != 1 ] || train_main_red
 }
 
 # Known flakes (#1419, ADR 0006). <files, comma-separated>, each of which passed alone: whether every one is a known flake

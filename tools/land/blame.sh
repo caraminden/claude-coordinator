@@ -269,25 +269,31 @@ train_suspects() {
       say "$branch steps aside: the next ship in line runs the train with what is left of it"
       requeue "back at the front after it was pulled off its train: starting over from the rebase"
     fi
-    queue_phase "testing the train again without its likely causes"
-    was=("${train_n[@]}")
-    for ((i = 0; i < ${#keep[@]}; i++)); do keep[$i]=${train_n[${keep[$i]}]}; done
-    train_tip=() train_br=() train_n=() train_was=()
-    tip=$own short=$(git rev-parse --short "$own")
-    train_only=" ${keep[*]} " train_left=1
-    train_build "${keep[@]}"
-    [ ${#train_n[@]} -gt 0 ] || [ ${#keep[@]} = 0 ] || train_release # as for a pulled front's kept ships: this one's own run says nothing of the held
-    train_guards
-    top_say
-    for t in "${was[@]}"; do # a rider the train no longer takes (it no longer rebases onto it, say): back in line
-      [[ " ${train_n[*]} " != *" $t "* ]] && [[ " ${held_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
-    done
-    rc=0
-    top_gate || rc=$?
-    busy_gate
+    train_again "testing the train again without its likely causes" "${keep[@]}"
     [ "$rc" != 1 ] || train_main_red || [ ${#train_n[@]} = 0 ] || continue
     return 0
   done
+}
+
+# <what it is doing> <rider index>...: the train rebuilt from those riders only, nobody else from the line (train_only), and
+# gated again: rc is CI's answer on its new top. A rider it no longer takes goes back in line.
+train_again() {
+  local i t v was=("${train_n[@]}") keep=("${@:2}")
+  queue_phase "$1"
+  for ((i = 0; i < ${#keep[@]}; i++)); do keep[$i]=${train_n[${keep[$i]}]}; done
+  train_tip=() train_br=() train_n=() train_was=()
+  tip=$own short=$(git rev-parse --short "$own")
+  train_only=" ${keep[*]} " train_left=1
+  train_build "${keep[@]}"
+  [ ${#train_n[@]} -gt 0 ] || [ ${#keep[@]} = 0 ] || train_release # as for a pulled front's kept ships: this one's own run says nothing of the held
+  train_guards
+  top_say
+  for t in "${was[@]}"; do # a rider the train no longer takes (it no longer rebases onto it, say): back in line
+    [[ " ${train_n[*]} " != *" $t "* ]] && [[ " ${held_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
+  done
+  rc=0
+  top_gate || rc=$?
+  busy_gate
 }
 
 # A red train whose failing tests name no ship to pull (train_suspects, #1918), and only that (#1899). The part at its front

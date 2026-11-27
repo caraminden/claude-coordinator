@@ -107,7 +107,10 @@ test("a train with a rider that changed main's red test ships through without it
   );
   const done = await l.go();
   assert.equal(done[0].status, 0, done[0].stderr);
-  assert.match(done[1].stderr, /red on main too: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here too, and it is the only real failure of this train's CI run, but ticket\/3-x changed test\/real\.test\.ts or what it imports, so it can't ship through main's red: back in line, refused for nothing, and the train runs again without it/);
+  assert.match(
+    done[1].stderr,
+    /red on main too: not this train's: test\/real\.test\.ts fails run alone on main's tip [0-9a-f]{7,} here too, and it is the only real failure of this train's CI run \(https:\/\/ci\/\d+\), but ticket\/3-x changed test\/real\.test\.ts or what it imports, so it can't ship through main's red: back in line, refused for nothing, and the train runs again without it/,
+  );
   assert.doesNotMatch(done[1].stderr, /keeping its place in line and riding the next train/, 'the front takes no retry in place');
   assert.equal(done[1].status, 0, done[1].stderr);
   assert.match(done[1].stderr, /SHIPPING THROUGH MAIN'S RED: test\/real\.test\.ts .* of this ship's CI run/, 'the front, without it, ships through');

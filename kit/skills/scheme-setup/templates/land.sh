@@ -274,7 +274,7 @@ park() { say "$*"; exit 75; }
 #                                 run alone on the members' commits to confirm). The red batch's bisect then runs CI
 #                                 on the member just below it, then on it, before halving (header at suspect_of).
 #                                 Nothing printed, a failure or a commit not given: the bisect halves as always.
-#   land_merge <side> <base> <ours> <theirs> <path>  the "hook" rule of MERGES: merges the file, leaving the result in
+#   land_merge <side> <base> <ours> <theirs> <path> [<marker size>]  the "hook" rule of MERGES: merges the file, leaving the result in
 #                                 <ours>; <side> names which of ours and theirs is $BRANCH's. Exit 0 clean, else
 #                                 it stops the rebase as a clash does. With LAND_MERGE_DIFF3=1 (the path has append, sum
 #                                 or count lines too) it leaves its clashes in <ours> as this script's diff3 markers and
@@ -329,7 +329,7 @@ fi
 # exits non-zero; the path's other rules then take those clashes, as they would git's.
 # Anything a rule isn't sure of stops the rebase, as a clash in any other file does, with git's own conflict markers
 # in the file (but a hook's), so a fix recorded ahead of time with git rerere still replays. <path> is a repo path. git runs
-# this script as the merge driver (tools/land.sh --merge <side> <base> <ours> <theirs> <path>; a copy made as the
+# this script as the merge driver (tools/land.sh --merge <side> <base> <ours> <theirs> <path> [<marker size>: git's %L]; a copy made as the
 # landing starts, since the rebase changes the worktree's own) for the rebase onto $BRANCH, the merge-tree of the smoke
 # check and --check, --build's merge and --into's rebase, so every batch member's rebase takes it too.
 # shortcut: a merged file always ends in a newline, upgrade if a scheme merges one that mustn't.
@@ -338,7 +338,7 @@ MARK_B=$(printf '>%.0s' {1..31})' branch'
 merge3() { git merge-file -p --diff3 --marker-size=31 -L main -L base -L branch "$@"; } # <main's> <base> <branch's>
 # A diff3 merge on stdin, its clashes resolved by merge_hunk <rule> <regex>; fails on one it can't.
 merge_hunks() { # <rule> <regex> [<rule> <regex>...], on a merge with conflicts on stdin
-  local line part=out head='' sect='' prev='' fence=''
+  local line part=out head='' sect='' prev='' fence='' run=''
   local -a M O B
   while IFS= read -r line || [ -n "$line" ]; do
     case $part in
@@ -347,8 +347,10 @@ merge_hunks() { # <rule> <regex> [<rule> <regex>...], on a merge with conflicts 
         printf '%s\n' "$line"
         prev=$line
         # A fenced code block's lines are code, not a heading or a table: its pipes are never rows.
-        if [[ $line =~ ^\ {0,3}(\`{3,}|~{3,}) ]]; then
-          if [ -z "$fence" ]; then fence=${BASH_REMATCH[1]:0:1}; elif [ "${BASH_REMATCH[1]:0:1}" = "$fence" ]; then fence=''; fi
+        if [[ $line =~ ^\ {0,3}(\`{3,}|~{3,})(.*)$ ]]; then
+          run=${BASH_REMATCH[1]}
+          if [ -z "$fence" ]; then fence=$run
+          elif [ "${run:0:1}" = "${fence:0:1}" ] && [ ${#run} -ge ${#fence} ] && [[ ${BASH_REMATCH[2]} =~ ^[[:space:]]*$ ]]; then fence=''; fi
           continue
         fi
         [ -z "$fence" ] || continue

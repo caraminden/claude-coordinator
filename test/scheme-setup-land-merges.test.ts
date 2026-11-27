@@ -212,6 +212,14 @@ for (const [what, main, branch, base] of [
 /** A Layout section whose fenced example has pipe lines, as a table would: <lines> inside the fence. */
 const fenced = (lines: string[]) => `# R\n\n## Layout\n\nExample:\n\n\`\`\`\n| \`a\` | A |\n${lines.map((l) => `${l}\n`).join('')}\`\`\`\n\nEnd.\n`;
 
+test('the rows rule: a shorter fence line inside a longer fenced block does not end it', () => {
+  const nest = (lines: string[]) => `# R\n\n## Layout\n\n\`\`\`\`\n\`\`\`\n| \`a\` | A |\n${lines.map((l) => `${l}\n`).join('')}\`\`\`\n| \`z\` | Z |\n\`\`\`\`\n`;
+  const [main, branch] = [nest([row('b')]), nest([row('c')])];
+  const { out, shown } = readmeLanding(main, branch, nest([]));
+  assert.equal(out.status, 1, out.stderr);
+  assert.equal(shown, main, 'main stays');
+});
+
 test('the rows rule leaves pipe lines inside a fenced code example to a person: refused, main stays', () => {
   const [main, branch] = [fenced([row('b')]), fenced([row('c')])];
   const { out, shown } = readmeLanding(main, branch, fenced([]));

@@ -57,6 +57,10 @@ const rows: [string, Partial<StatusFacts>, string, string, string | null][] = [
   ['one PC: runners up, its tools passed', { runnersBeside: true }, 'ready', 'CI runners up · Ready · 47 tools', null],
   ["one PC: runners up, its tools didn't start", { runnersBeside: true, check: { at: now, results: [{ server: 'mcp', ok: false, tools: [], error: 'x', ms: 1 }] } }, 'fix', "CI runners up · Its tools didn't start: x", 'check'],
   ["one PC: runners up, what is ticked isn't on that computer", { runnersBeside: true, offers: [], managed: true, finds: true, missing: ['peek-auras', 'cantrips'], check: null }, 'fix', 'CI runners up · Ticked but not on that computer: peek-auras, cantrips', 'tick'],
+  ["one PC: some of what is ticked isn't there, the rest passed", { runnersBeside: true, managed: true, missing: ['zzz'] }, 'fix', 'CI runners up · Ticked but not on that computer: zzz', 'tick'],
+  ['one PC: its runner agents gone, its tools passed', { ciDown: true }, 'fix', 'CI runners not connected · 47 tools ready', null],
+  ['one PC: its runner agents gone, it lends nothing', { ciDown: true, offers: [], managed: true, finds: true, check: null }, 'fix', 'CI runners not connected', null],
+  ["one PC: its runner agents gone, its tools didn't start", { ciDown: true, check: { at: now, results: [{ server: 'mcp', ok: false, tools: [], error: 'x', ms: 1 }] } }, 'fix', "CI runners not connected · Its tools didn't start: x", 'check'],
   ["ticked workspaces aren't on that computer (an agent moved PCs)", { offers: [], managed: true, finds: true, missing: ['peek-auras'], check: null }, 'fix', 'Ticked but not on that computer: peek-auras', 'tick'],
 ];
 

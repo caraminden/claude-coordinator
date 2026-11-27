@@ -139,6 +139,8 @@ export type StatusFacts = {
   runners: boolean;
   /** One PC's row (Build 7 M2b): its CI runner agents are connected beside its agent. */
   runnersBeside?: boolean;
+  /** One PC's row that runs CI (its CI role came from runner agents), none of them connected now. */
+  ciDown?: boolean;
   /** What is ticked to lend that its agent didn't find on that computer (#2194: an agent now on another PC). */
   missing?: string[];
   alwaysOn: boolean;
@@ -172,8 +174,9 @@ export function machineStatus(f: StatusFacts): MachineStatus {
   }
   if (f.runners) return s('ready', 'CI runner host, connected');
   // A PC that runs CI may lend no tools: only something ticked that isn't there is wrong, and each line names the CI half too.
-  const ci = f.runnersBeside ? 'CI runners up · ' : '';
-  if (!f.offers.length && f.managed && f.missing?.length) return s('fix', `${ci}Ticked but not on that computer: ${f.missing.join(', ')}`, 'tick');
+  const ci = f.runnersBeside ? 'CI runners up · ' : f.ciDown ? 'CI runners not connected · ' : '';
+  if (f.managed && f.missing?.length) return s('fix', `${ci}Ticked but not on that computer: ${f.missing.join(', ')}`, 'tick');
+  if (!f.offers.length && f.ciDown) return s('fix', 'CI runners not connected');
   if (!f.offers.length && f.runnersBeside) return s('ready', 'CI runner host, connected');
   if (!f.offers.length && f.managed) {
     return f.finds ? s('fix', 'Lends nothing: nothing is ticked', 'tick') : s('fix', 'Found nothing to lend on that computer', 'tick');
@@ -188,7 +191,8 @@ export function machineStatus(f: StatusFacts): MachineStatus {
   if (failed) return s('fix', `${ci}Its ${failed.server === 'ws' ? 'workspace ' : ''}tools didn't start: ${failed.error}`, 'check', checked);
   if (!f.lent) return s('fix', `${ci}Lent to no scheme`, 'lend', checked);
   const tools = results.reduce((n, r) => n + r!.tools.length, 0);
-  return s('ready', `${ci}Ready · ${tools} tool${tools === 1 ? '' : 's'}`, null, checked);
+  const count = `${tools} tool${tools === 1 ? '' : 's'}`;
+  return f.ciDown ? s('fix', `${ci}${count} ready`, null, checked) : s('ready', `${ci}Ready · ${count}`, null, checked);
 }
 
 export function storedCheck(m: Pick<Machine, 'last_check'>): StoredCheck | null {
@@ -472,6 +476,7 @@ export class MachineRelay {
       online: !!agent || (runnerRow && runnersHere.length > 0),
       runners: !agent && runnerRow,
       runnersBeside: !!agent && runnersHere.length > 0,
+      ciDown: !!agent && !runnersHere.length && this.store.machineRoles(machine.id).some((r) => r.role === 'ci' && r.on && r.setup?.runner_agent),
       missing: agent?.managed ? tickedMissing(storedLend(this.store, machine), agent) : [],
       alwaysOn: !!machine.always_on,
       createdAt: machine.created_at,

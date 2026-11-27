@@ -117,6 +117,12 @@ test('a code works once, for 15 minutes, is kept only hashed, and names a new ro
     (e: Error & { status?: number }) => e.status === 409 && /runs on citadel-box/.test(e.message) && /DESKTOP-G248IJ8/.test(e.message),
   );
   assert.equal(store.getMachine(got.id)!.token_hash, 'new', 'its token is as it was');
+  const nameless = makeJoin(store, { uid: josh.id, name: 'Josh' }, null, store.getMachine(got.id)!, t0);
+  assert.throws(
+    () => redeemJoin(store, issue, { code: nameless.code }, t0 + 7500, () => false, live),
+    (e: Error & { status?: number }) => e.status === 409,
+    'naming no PC, it cannot show it is the same one',
+  );
   const here = makeJoin(store, { uid: josh.id, name: 'Josh' }, null, store.getMachine(got.id)!, t0);
   assert.equal(redeemJoin(store, issue, { code: here.code, report: { ...report, host: 'CITADEL-BOX' } }, t0 + 8000, () => false, live).id, got.id, 'the same PC, its hostname in any case');
   store.db.close();

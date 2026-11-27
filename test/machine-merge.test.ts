@@ -225,6 +225,8 @@ test('end to end: the runner agent joins the PC row beside its agent, and two ro
     await until('the old row to go', async () => !(await row(old.machine.id)));
     const kept = (await row(pc.machine.id))!;
     assert.deepEqual([kept.runner_agents.map((r) => r.os).sort(), kept.merging, kept.same_pc], [['linux', 'windows'], null, []]);
+    // Its line names the CI half, never "nothing is ticked" for want of tools (#2194).
+    assert.match(kept.reason, /^CI runner/);
     assert.equal((await fetch(`${srv.base}/api/machines/connect?kind=runners`, { headers: { Authorization: `Bearer ${old.token}` } })).status, 401);
     // Both runner agents still act for the scheme, from one row.
     assert.equal((await srv.call(`/api/projects/${project.id}/ci-runners`, { op: 'list' })).status, 202);

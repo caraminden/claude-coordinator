@@ -137,10 +137,10 @@ export function redeemJoin(store: Store, issueToken: (machineId: number) => stri
     if (!machine) throw new HttpError(410, 'The machine this code updates was removed: press Connect a computer for a new one');
     // As the token route: a new token would cut the draining agent off before its copies are home.
     if (removing(machine.id)) throw new HttpError(409, `${machine.name} is being removed: it gets no new token until its copies are cleared`);
-    // Pasted on another PC, it would take the row (and its new token cuts the right PC off): #2194, a VM's Update run on its host.
+    // Pasted on another PC, its agent would replace the live one there (#2194: a VM's Update, run on its host); an agent that names no PC can't show it's the same one.
     const live = liveHost(machine.id);
     const here = report?.host || text(body.host, 100);
-    if (live && here && live.toLowerCase() !== here.toLowerCase()) throw new HttpError(409, `This code updates ${machine.name}, whose agent runs on ${live}, but this PC is ${here}. Press Update for a new code and run it on ${live} itself (for a VM, inside it); to add this PC, press Connect a computer instead`);
+    if (live && here.toLowerCase() !== live.toLowerCase()) throw new HttpError(409, `This code updates ${machine.name}, whose agent runs on ${live}, but this PC is ${here || 'unnamed'}. Press Update for a new code and run it on ${live} itself (for a VM, inside it); to add this PC, press Connect a computer instead`);
   } else {
     const host = report?.host || text(body.host, 100);
     const names = new Set(store.listMachines().map((m) => m.name));

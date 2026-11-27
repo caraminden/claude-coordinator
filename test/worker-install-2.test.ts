@@ -41,15 +41,15 @@ test("citadel-worker: caps are whole numbers, and a sign-in is Claude Code's and
   ])
     assert.match((await p.run(helper, ['caps', flag, low])).out, /a whole number from/);
   const caps = await p.run(helper, ['caps', '--threads', '2', '--disk', '30']);
-  assert.match(caps.out, /Caps: 4 minions at once, 2 threads, 23 GB of memory, 30 GB of disk/, 'install sized the rest from this PC (16 threads, 31 GB), and caps keeps them');
+  assert.match(caps.out, /Caps: 5 minions at once, 2 threads, 23 GB of memory, 30 GB of disk/, 'install sized the rest from this PC (16 threads, 31 GB), and caps keeps them');
   assert.match(p.logged(), /CPUQuota=200%[^]*systemctl --user restart citadel-worker\n$/);
 });
 
-test("a new install with no caps given is sized from the PC (#2250): a quarter of its threads and memory kept, at least 2 and 4 GB, a minion per 3; the page's rule is the same", async () => {
+test("a new install with no caps given is sized from the PC (#2250): a quarter of its threads and memory kept, at least 2 and 4 GB, a minion per 3 of its threads and 3 GB kept; the page's rule is the same", async () => {
   const sizes: [number, number, Record<string, number>][] = [
     [4, 8, { workers: 1, threads: 2, memory_gb: 4, disk_gb: 60 }],
-    [16, 32, { workers: 4, threads: 12, memory_gb: 24, disk_gb: 60 }],
-    [64, 128, { workers: 16, threads: 48, memory_gb: 96, disk_gb: 60 }],
+    [16, 32, { workers: 5, threads: 12, memory_gb: 24, disk_gb: 60 }],
+    [64, 128, { workers: 21, threads: 48, memory_gb: 96, disk_gb: 60 }],
   ];
   // Three PCs at once: an install takes some seconds.
   await Promise.all(

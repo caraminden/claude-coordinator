@@ -130,7 +130,7 @@ const plainPress = (why) => {
 export function poolHeld(p) {
   if (p.size >= p.cap || p.block) return null;
   const lead = `${p.size} now, of its ${p.cap}`;
-  if (p.pool.fixed) return `${lead}: set to ${p.pool.fixed.size} by ${p.pool.fixed.by} on the Workers tile`;
+  if (p.pool.fixed && !(p.balanced && p.size < p.pool.fixed.size)) return `${lead}: set to ${p.pool.fixed.size} by ${p.pool.fixed.by} on the Workers tile`;
   if (p.balanced) return `${lead}: ${p.balanced}`;
   if (p.max < p.cap && p.size >= p.max) return `${lead}: its most is set to ${p.max} on the Workers tile`;
   const now = p.pressed && plainPress(p.pressed);
@@ -182,6 +182,7 @@ function meTile(m, live, redraw) {
   const pool = live?.pool.find((p) => p.id === m.id);
   const caps = heldCaps(m);
   let big;
+  const held = r?.on && !gone && installed && st?.word === 'Ready' && pool ? poolHeld(pool) : null;
   let sub = 'Your own minion turns, on your own Claude sign-in here. Nobody else’s.';
   if (why && !r?.on) [big, sub] = ['Can’t run turns here', why];
   else if (!r?.on && !installed) big = 'Not set up';
@@ -189,7 +190,7 @@ function meTile(m, live, redraw) {
   else if (!r?.on) big = 'Off';
   else if (!installed) [big, sub] = ['Not set up', 'Set it up once on that PC: the worker, then your Claude sign-in there.'];
   else if (need) [big, sub] = ['Sign in to Claude here', 'The login stays on this PC; only your turns use it.'];
-  else if (st?.word === 'Ready') [big, sub] = [pool ? `My worker pool: ${pool.used} of ${pool.size} busy` : `My worker pool: up to ${caps?.workers ?? '?'} at once`, (pool && poolHeld(pool)) || sub];
+  else if (st?.word === 'Ready') [big, sub] = [pool ? `My worker pool: ${pool.used} of ${pool.size} busy` : `My worker pool: up to ${caps?.workers ?? '?'} at once`, held || sub];
   else [big, sub] = [st?.word ?? 'Off', st?.why ?? sub];
   // Not set up and off: Set up in the switch's place (spec section 4) switches it on and opens its steps.
   const control =
@@ -201,7 +202,7 @@ function meTile(m, live, redraw) {
     'div',
     { class: `mcard-tile me ${tone}`.trim() },
     h('div', { class: 'mcard-tile-head' }, h('span', { class: 'mcard-ttl' }, 'For me'), h('span', { class: 'spacer' }), control),
-    h('div', { class: 'mcard-big' }, big),
+    h('div', { class: 'mcard-big' }, big, held && pool ? h('span', {}, ' ', toneChip('warn', `Held at ${pool.size} of ${pool.cap}`)) : null),
     h('div', { class: 'muted small' }, sub),
     r?.on && !gone ? sizeOfferPart(m, redraw) : null,
     need && w?.here && !gone ? signInPart(m) : null,

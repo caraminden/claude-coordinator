@@ -136,9 +136,10 @@ case ${1:-} in
       for (const p of process.env.GIVEN.split(" ").filter(Boolean)) c[p.split("=")[0]] = Number(p.split("=")[1]);
       const [T, M] = [Number(process.env.T), Number(process.env.M)];
       const keep = (n, least) => n - Math.max(least, Math.ceil(n / 4));
+      const whole = c.threads ?? (T >= 1 ? T : 8);
       c.threads ??= T >= 1 ? Math.min(1024, Math.max(1, keep(T, 2))) : 8;
       c.memory_gb ??= M >= 1 ? Math.min(4096, Math.max(2, keep(M, 4))) : 24;
-      c.workers ??= Math.min(64, Math.max(1, Math.floor(Math.min(c.threads, c.memory_gb) / 3)));
+      c.workers ??= Math.min(64, Math.max(1, Math.floor(Math.min(whole, c.memory_gb) / 3)));
       c.disk_gb ??= 60;
       console.log(JSON.stringify({ workers: c.workers, threads: c.threads, memory_gb: c.memory_gb, disk_gb: c.disk_gb, ...c }, null, 2));')
     num() { CFG="$cfg" node -p "JSON.parse(process.env.CFG).$1"; }

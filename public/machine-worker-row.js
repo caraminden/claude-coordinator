@@ -195,7 +195,7 @@ function installBlock(m, k, redraw) {
     { class: 'worker-install' },
     /** @type {MachineWorker} */ (m.worker).host ? null : h('div', { class: 'row worker-os', role: 'group', 'aria-label': 'That PC runs' }, tab('windows', 'Windows'), tab('linux', 'Linux')),
     capsInputs(m, k, draw, true),
-    h('p', { class: 'muted small' }, 'Left on auto, a cap is sized from that PC: about three quarters of its CPU threads and memory (the rest stays free for you and CI), and a minion per 3 threads.'),
+    h('p', { class: 'muted small' }, 'Left on auto, a cap is sized from that PC: about three quarters of its CPU threads and memory (the rest stays free for you and CI), and a minion per 3 of its threads, with 3 GB of memory for each.'),
     h('p', { class: 'small' }, win ? 'On that PC, open PowerShell as yourself (not as administrator) and run:' : 'On that PC, open a terminal and run (it asks for your password):'),
     box,
     h(

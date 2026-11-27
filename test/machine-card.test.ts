@@ -102,6 +102,7 @@ test("the For me tile says in plain words why a PC's pool runs fewer minions tha
   assert.equal(poolHeld(poolOf({ why: '1.5 GB free there' })), '1 now, of its 6: had only 1.5 GB of memory free there; it grows back one at a time while turns wait');
   assert.equal(poolHeld(poolOf({ balanced: '2 CI jobs waiting' })), '1 now, of its 6: 2 CI jobs waiting');
   assert.equal(poolHeld(poolOf({ size: 2, pool: { size: 2, at: 1, fixed: { size: 2, by: 'Josh' } } })), '2 now, of its 6: set to 2 by Josh on the Workers tile');
+  assert.equal(poolHeld(poolOf({ size: 2, balanced: '1 CI job waiting', pool: { size: 4, at: 1, fixed: { size: 4, by: 'Josh' } } })), '2 now, of its 6: 1 CI job waiting', 'what holds it under the fixed size wins');
   assert.equal(poolHeld(poolOf({ size: 3, max: 3 })), '3 now, of its 6: its most is set to 3 on the Workers tile');
   assert.equal(poolHeld(poolOf({ size: 2, why: 'desk is calm and turns wait' })), '2 now, of its 6: it grows one at a time while turns wait and that PC is calm');
 });
@@ -114,11 +115,12 @@ test("a worker still on the old fixed caps, none set on the page, is offered its
   type Row = Parameters<typeof sizeOffer>[0];
   // Only the fields the offer reads; the rest of a row doesn't matter to it.
   const row = (caps: Record<string, number>, page: Record<string, number> = {}, over: Record<string, unknown> = {}): Row => JSON.parse(JSON.stringify({ id: 7, owner_id: 1, roles: [{ role: 'turns', on: true, caps: page }], worker: { here: true, caps, pc: { threads: 32, memory_gb: 31 }, ...over } }));
-  assert.deepEqual(sizeOffer(row(old)), { workers: 7, threads: 24, memory_gb: 23 });
+  assert.deepEqual(sizeOffer(row(old)), { workers: 7, threads: 24, memory_gb: 24 });
   assert.equal(sizeOffer(row({ ...old, threads: 12 })), null, 'its owner changed them on that PC');
   assert.equal(sizeOffer(row(old, { threads: 16 })), null, 'its owner set them on the page');
-  assert.deepEqual(sizeOffer(row(old, { disk_gb: 80 })), { workers: 7, threads: 24, memory_gb: 23 }, 'a disk cap alone on the page leaves the rest to offer');
+  assert.deepEqual(sizeOffer(row(old, { disk_gb: 80 })), { workers: 7, threads: 24, memory_gb: 24 }, 'a disk cap alone on the page leaves the rest to offer');
   assert.equal(sizeOffer(row(old, {}, { pc: { threads: 8, memory_gb: 16 } })), null, 'a PC no bigger than the old caps has nothing better to offer');
+  assert.deepEqual(sizeOffer(row(old, {}, { pc: { threads: 16, memory_gb: 32 } })), { workers: 6, threads: 12, memory_gb: 24 }, 'it never offers less than a cap has: 16 threads size to 5 minions, so it keeps 6');
   assert.equal(sizeOffer(row(old, {}, { pc: null })), null, 'an older worker that does not say its size');
   assert.equal(sizeOffer(row(old, {}, { here: false })), null, 'away');
   assert.equal(sizeOffer({ ...row(old), owner_id: 2 }), null, "someone else's PC");

@@ -69,14 +69,20 @@ test('switched on, the card shows the command at once, and it follows the caps a
   assert.equal(await page.eval(`${turnsSwitch()}.getAttribute('aria-label')`), 'Minion turns on my-pc');
   await wait('the command', `!!${worker('.worker-command pre')}`);
   const command = () => page.eval<string>(`${worker('.worker-command pre')}.textContent`);
-  assert.match(await command(), new RegExp(`CC_MACHINE_TOKEN='${token}'.*--workers 6 --threads 8 --memory 24 --disk 60`));
+  // Caps left on auto are left out: the install sizes them from that PC (#2250).
+  assert.match(await command(), new RegExp(`CC_MACHINE_TOKEN='${token}'`));
+  assert.doesNotMatch(await command(), /--workers|--threads|--memory|--disk/);
   await page.eval(`(() => { const i = ${worker(`#worker-cap-${id}-workers`)}; i.focus(); i.value = '4'; i.dispatchEvent(new Event('input')); })()`);
-  assert.match(await command(), /--workers 4 --threads 8/);
+  assert.match(await command(), /--workers 4/);
+  assert.doesNotMatch(await command(), /--threads/);
   await page.eval(`(() => { const i = document.activeElement; i.value = 'x'; i.dispatchEvent(new Event('input')); })()`);
-  assert.match(await command(), /--workers 4 --threads 8/, 'half-typed, it keeps the last whole number');
+  assert.match(await command(), /--workers 4/, 'half-typed, it keeps the last whole number');
   assert.equal(await page.eval(`document.activeElement.getAttribute('aria-invalid')`), 'true');
   await page.eval(`[...${worker()}.querySelectorAll('.worker-os .chip')].find((b) => b.textContent === 'Windows').click()`);
-  assert.match(await command(), /-Workers 4 -Threads 8 -MemoryGB 24 -DiskGB 60/);
+  assert.match(await command(), /-Workers 4/);
+  assert.doesNotMatch(await command(), /-Threads|-MemoryGB|-DiskGB/);
+  await page.eval(`(() => { const i = ${worker(`#worker-cap-${id}-workers`)}; i.focus(); i.value = ''; i.dispatchEvent(new Event('input')); })()`);
+  assert.doesNotMatch(await command(), /-Workers/, 'cleared, it goes back to auto');
   assert.equal(await page.eval(`!!${worker('.worker-command pre.cui-shell[data-tone=powershell]')}`), true, 'the block says where it runs');
 });
 

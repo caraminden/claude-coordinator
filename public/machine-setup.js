@@ -162,7 +162,8 @@ export function workerSize(pc) {
   const keep = (/** @type {number} */ n, /** @type {number} */ least) => n - Math.max(least, Math.ceil(n / 4));
   const threads = Math.min(1024, Math.max(1, keep(pc.threads, 2)));
   const memory_gb = Math.min(4096, Math.max(2, keep(pc.memory_gb, 4)));
-  return { workers: Math.min(64, Math.max(1, Math.floor(Math.min(threads, memory_gb) / 3))), threads, memory_gb, disk_gb: WORKER_CAPS.disk_gb };
+  // A minion per 3 of the PC's threads, the balancer's own cost of a turn (src/machine-balancer.ts COST), and 3 GB each.
+  return { workers: Math.min(64, Math.max(1, Math.floor(Math.min(pc.threads, memory_gb) / 3))), threads, memory_gb, disk_gb: WORKER_CAPS.disk_gb };
 }
 export const WORKER_LIMITS = { workers: [1, 64], threads: [1, 1024], memory_gb: [2, 4096], disk_gb: [20, 99999] };
 

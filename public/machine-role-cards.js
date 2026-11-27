@@ -268,7 +268,7 @@ function capsEditor(m, r, redraw) {
 
 /**
  * "Use this PC's size" (#2250): a worker still on the old fixed starting caps (6 minions, 8 threads, 24 GB), with none set
- * on the page, gets its PC's own size offered as page caps. One its owner set by hand is left alone. Null: no offer.
+ * on the page, gets its PC's own size offered as page caps, each at least the old one. One its owner set by hand is left alone. Null: no offer.
  * @param {MachineRow} m @returns {{ workers: number, threads: number, memory_gb: number } | null}
  */
 export function sizeOffer(m) {
@@ -277,8 +277,10 @@ export function sizeOffer(m) {
   if (!w?.here || !w.pc || !w.caps || !setsCaps(m)) return null;
   if (Object.entries(WORKER_CAPS).some(([k, v]) => w.caps?.[/** @type {keyof typeof WORKER_CAPS} */ (k)] !== v)) return null;
   if (page.workers != null || page.threads != null || page.memory_gb != null) return null;
-  const { workers, threads, memory_gb } = workerSize(w.pc);
-  return workers > WORKER_CAPS.workers || threads > WORKER_CAPS.threads || memory_gb > WORKER_CAPS.memory_gb ? { workers, threads, memory_gb } : null;
+  // Never lower: a cap its PC's size would cut stays at the old value.
+  const pc = workerSize(w.pc);
+  const size = { workers: Math.max(pc.workers, WORKER_CAPS.workers), threads: Math.max(pc.threads, WORKER_CAPS.threads), memory_gb: Math.max(pc.memory_gb, WORKER_CAPS.memory_gb) };
+  return size.workers > WORKER_CAPS.workers || size.threads > WORKER_CAPS.threads || size.memory_gb > WORKER_CAPS.memory_gb ? size : null;
 }
 
 /** The offer's notice and its one button, which sets those page caps at once with the request behind. @param {MachineRow} m @param {Redraw} redraw */
@@ -311,9 +313,9 @@ export function sizeOfferPart(m, redraw) {
     h(
       'p',
       { class: 'small' },
-      `Still on the old starting caps (${WORKER_CAPS.workers} minions, ${WORKER_CAPS.threads} threads, ${WORKER_CAPS.memory_gb} GB). This PC has ${pc.threads} threads and ${pc.memory_gb} GB: its size is ${size.workers} minions, ${size.threads} threads, ${size.memory_gb} GB, keeping the rest for you and CI.`,
+      `Still on the old starting caps (${WORKER_CAPS.workers} minions, ${WORKER_CAPS.threads} threads, ${WORKER_CAPS.memory_gb} GB). Its worker sees ${pc.threads} threads and ${pc.memory_gb} GB there: sized to it, that's ${size.workers} minions, ${size.threads} threads, ${size.memory_gb} GB, keeping the rest for you and CI.`,
     ),
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', onclick: use }, "Use this PC's size")),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'secondary small', onclick: use }, "Use this PC's size")),
   );
 }
 

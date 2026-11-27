@@ -43,8 +43,11 @@ const all = (id: string, over: Record<string, string> = {}, done = true) => ({ i
 
 test('a worker is here by its syncs; away, the row keeps its host and caps and nothing that may have changed', async () => {
   const { join, machine, at, say } = joined();
-  await say();
+  await say({ pc: { threads: 32.9, memory_gb: 31 } });
   assert.deepEqual([join.view(machine).here, join.view(machine).signed_in, join.view(machine).github], [true, true, true]);
+  assert.deepEqual(join.view(machine).pc, { threads: 32, memory_gb: 31 }, 'the PC size it reports reaches the row (#2250)');
+  await say({ pc: { threads: 'lots', memory_gb: -1 } });
+  assert.equal(join.view(machine).pc, null, 'a size that is not a count is dropped');
   at.now += 10_001;
   const away = join.view(machine);
   assert.deepEqual([away.here, away.seen, away.host, away.wsl], [false, at.sync, 'PC', true]);

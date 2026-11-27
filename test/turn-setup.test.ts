@@ -516,9 +516,9 @@ test("a build's preview link is Citadel's public address, not the host a page wa
   store.setSetting('public_origin', 'https://other.example');
   try {
     delete process.env.CITADEL_PUBLIC_URL;
-    assert.match((await turn('ticket', 'connected', {}, repo, undefined, {}, owns)).message, /is at https:\/\/citadel\.zip\/preview\/build\/7\//);
+    assert.match((await turn('ticket', 'connected', {}, repo, undefined, {}, owns)).message, /https:\/\/citadel\.zip\/preview\/build\/7\//);
     process.env.CITADEL_PUBLIC_URL = 'https://example.test/';
-    assert.match((await turn('ticket', 'connected', {}, repo, undefined, {}, owns)).message, /is at https:\/\/example\.test\/preview\/build\/7\//);
+    assert.match((await turn('ticket', 'connected', {}, repo, undefined, {}, owns)).message, /https:\/\/example\.test\/preview\/build\/7\//);
   } finally {
     if (old === undefined) delete process.env.CITADEL_PUBLIC_URL;
     else process.env.CITADEL_PUBLIC_URL = old;

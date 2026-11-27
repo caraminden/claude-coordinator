@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { copyData, Previews } from '../src/previews.ts';
+import { ticketRoutes } from '../src/routes/tickets.ts';
 import { agentToken, listeningPort, PASSWORD, SECRET, tempRoot, TEST_ZONE } from './helpers.ts';
 import { json } from './typed.ts';
 import { until } from './wait.ts';
@@ -128,6 +129,23 @@ test('start_preview boots the worktree and returns the full link; the view offer
   assert.equal(body.url, `https://citadel.zip/preview/${ticket.id}/`);
   const view = await json<{ ticket: { preview: boolean } }>(await fetch(`${base}/api/tickets/${ticket.id}`, { headers: { Cookie: cookie } }));
   assert.equal(view.ticket.preview, true);
+});
+
+// The route alone, in this process: the server above runs without CITADEL_PUBLIC_URL (#2155).
+test("start_preview's link starts with CITADEL_PUBLIC_URL when it is set", async () => {
+  const route = ticketRoutes.find((r) => r.method === 'POST' && r.path === '/api/tickets/:ticket/preview')!;
+  let body = '';
+  const res = { req: { headers: {} }, writeHead: () => res, end: (b: unknown) => (body = String(b)) };
+  const ctx = { req: { headers: {} }, res, ticket: { id: 7 }, app: { previews: { start: async () => {} }, preview: false } };
+  const old = process.env.CITADEL_PUBLIC_URL;
+  process.env.CITADEL_PUBLIC_URL = 'https://example.test/';
+  try {
+    await route.handler(ctx as never);
+  } finally {
+    if (old === undefined) delete process.env.CITADEL_PUBLIC_URL;
+    else process.env.CITADEL_PUBLIC_URL = old;
+  }
+  assert.equal(JSON.parse(body).url, 'https://example.test/preview/7/');
 });
 
 test('a minion may only start its own preview', async () => {

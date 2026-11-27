@@ -30,7 +30,7 @@ import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs } from '../land.ts';
 import { checkHandoff, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
 import { laneHandoff, triggerHandoff } from '../armed-handoff.ts';
-import { cleanStart, startPicked, type CardStart } from '../card-starts.ts';
+import { cleanStart, leftForPeople, startPicked, type CardStart } from '../card-starts.ts';
 import { reviewRefusal } from '../review-gate.ts';
 import { criticRefusal } from '../critic-gate.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
@@ -1231,8 +1231,11 @@ export const ticketRoutes: Route[] = [
           const images = await saveImages(app, ticket, body.images);
           // A pick of an option carrying a start (#2050) starts that minion with no turn; held mail for the owner when that was all.
           const starts = (questions as CardQuestion[]).some((q) => q.options.some((o) => o.start)) ? await startPicked(app, store.getTicket(id)!, questions, answers, session, images.length + files.length > 0 || answers.some((a) => a.other)) : null;
-          if (starts?.held) runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: `${mine}\n\n${starts.text}` });
-          else if (starts) deliverAnswer(app, id, session.name, `${mine}\n\n${starts.text}`, answer, images, files);
+          if (starts?.held) {
+            runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: `${mine}\n\n${starts.text}` });
+            // Nothing left for people after it (#2175): dismissed now, not hours later by a Taskmaster.
+            if (!(await leftForPeople(app, id))) await runner.close(id, `Every pick on its card started, so the server dismissed this minion: ${starts.started.join('; ')}.`);
+          } else if (starts) deliverAnswer(app, id, session.name, `${mine}\n\n${starts.text}`, answer, images, files);
           const why = starts
             ? null
             : await shipOnClick(

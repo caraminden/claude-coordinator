@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
+import { leftForPeople } from '../src/card-starts.ts';
+import type { Project, Ticket } from '../src/db.ts';
+import type { CabalRow } from '../src/db/cabals.ts';
 import { agentToken, bootServer, mintedAgentToken, until } from './helpers.ts';
 import { json } from './typed.ts';
 
@@ -58,7 +63,9 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
     assert.equal((await card([opt('a', { handoff: '/etc/passwd' }, true), none])).status, 400, 'only a file in the shared folder');
     assert.equal((await card([opt('my e', {}, true), none])).status, 400, 'no spaces in the path');
 
-    // A plain pick, by Josh: both picked options start; the owner and the Taskmaster hear it as held mail.
+    // A plain pick, by Josh: both picked options start; the owner and the Taskmaster hear it as held mail. Its state try
+    // (a person trying something) keeps it open (#2175).
+    assert.equal((await s.call(`/api/tickets/${owner.id}`, { state: 'try' }, 'PATCH')).status, 200);
     const ok = await posted([opt('a', { model: 'claude-sonnet-5-5', effort: 'medium' }, true), opt('b', { handoff: 'handoffs/b.md' }), none]);
     assert.equal(await asJosh(`/api/tickets/${owner.id}/answer`, { questionId: ok, answers: [{ selected: ['Start a', 'Start b'] }] }), 202);
     const db = new DatabaseSync(join(s.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
@@ -80,6 +87,7 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
         (await held(owner.id)).some((m) => m.text.includes(`Citadel started #${a.number} Do a`)),
         'the owner hears it as held mail',
       );
+      assert.notEqual((await s.call(`/api/tickets/${owner.id}`)).data.ticket.status, 'closed', 'state try keeps it open');
       const events = (await s.call(`/api/tickets/${owner.id}/events?after=0`)).data as Ev[];
       assert.ok(
         events.some((e) => e.kind === 'note' && JSON.parse(e.data).text.includes(`#${a.number} Do a`)),
@@ -114,5 +122,96 @@ test("a plain pick of a start option starts that minion as the picker's; a typed
     }
   } finally {
     await s.stop();
+  }
+});
+
+test('an all-started pick dismisses its owner when nothing is left for people, and not while another card waits (#2175)', async () => {
+  const s = await bootServer();
+  try {
+    const { data: p } = await s.call('/api/projects', { name: 'Delve' });
+    const { data: owner } = await s.call(`/api/projects/${p.id}/tickets`, { title: 'Ideas', message: 'Find ideas.', model: 'claude-sonnet-5-5', effort: 'medium' });
+    await mintedAgentToken(s.data, owner.id);
+    const asOwner = async (path: string, body: object) => {
+      await until(`#${owner.number} idle`, async () => (await s.call(`/api/tickets/${owner.id}`)).data.ticket.status !== 'running');
+      const r = await fetch(`${s.base}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(s.data, owner.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return json<{ id: string }>(r);
+    };
+    const handoffs = join(s.data, 'projects', String(p.id), 'shared', 'project', 'handoffs');
+    mkdirSync(handoffs, { recursive: true });
+    for (const n of ['a', 'b']) writeFileSync(join(handoffs, `${n}.md`), `# Handoff ${n}\n\n## Goal\nDo ${n}.\n`);
+    const card = async (n: string) => (await asOwner(`/api/tickets/${owner.id}/questions`, { questions: [{ question: `Start ${n}?`, options: [{ label: `Start ${n}`, recommended: true, start: { handoff: join(handoffs, `${n}.md`), title: `Do ${n}`, type: 'feature' } }, { label: 'No' }] }], not_duplicate: true })).id;
+    const pick = (q: string, label: string) => s.call(`/api/tickets/${owner.id}/answer`, { questionId: q, answers: [{ selected: [label] }] });
+    const view = async () => (await s.call(`/api/tickets/${owner.id}`)).data.ticket as { status: string; held_mail: Held };
+    const notes = async () => ((await s.call(`/api/tickets/${owner.id}/events?after=0`)).data as Ev[]).filter((e) => e.kind === 'note').map((e) => String(JSON.parse(e.data).text));
+
+    const first = await card('a');
+    const second = await card('b');
+    assert.equal((await s.call(`/api/tickets/${owner.id}`, { state: 'ready', note: 'pick one' }, 'PATCH')).status, 200);
+    // Another card still waits: kept open, with today's held mail.
+    assert.equal((await pick(first, 'Start a')).status, 202);
+    assert.notEqual((await view()).status, 'closed', 'another card still waits on people');
+    assert.ok(
+      (await view()).held_mail?.items.some((m) => m.text.includes('Citadel started #')),
+      'held mail as before',
+    );
+    // The last card's pick starts everything, and nothing else is left: dismissed, with a note naming what started.
+    assert.equal((await pick(second, 'Start b')).status, 202);
+    await until('the owner dismissed', async () => (await view()).status === 'closed');
+    const db = new DatabaseSync(join(s.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
+    const b = db.prepare('SELECT number FROM tickets WHERE title = ? AND project_id = ?').get('Do b', p.id) as { number: number };
+    db.close();
+    const closing = (await notes()).find((t) => t.includes('so the server dismissed this minion'));
+    assert.match(closing ?? '', /^Every pick on its card started, so the server dismissed this minion: #\d+ Do b \(/);
+    assert.ok(closing?.includes(`#${b.number} Do b`), 'it names what started');
+  } finally {
+    await s.stop();
+  }
+});
+
+test('leftForPeople keeps an owner open for its state, a turn, a card, a lead, and work on its branch not on main (#2175)', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'left-'));
+  try {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base');
+    git('worktree', 'add', '-q', '-b', 'ticket/1', join(repo, 'wt'));
+    const wt = join(repo, 'wt');
+    const base = { id: 1, kind: 'ticket', status: 'idle', state: 'ready', project_id: 1, build: null, branch: 'ticket/1', cwd: wt, created_at: Date.now() - 60_000 } as Ticket;
+    let t: Ticket = { ...base };
+    const seen = { running: false, kept: null as string | null, cabal: false, owner: null as number | null };
+    const app: Parameters<typeof leftForPeople>[0] = {
+      store: { getTicket: () => t, getProject: () => ({ repo_dir: repo }) as Project, getCabal: () => (seen.cabal ? ({} as CabalRow) : undefined), getSetting: <T>() => seen.owner as T | null },
+      runner: { isRunning: () => seen.running, keptOpen: () => seen.kept },
+    };
+    assert.equal(await leftForPeople(app, 1), null, 'ready, idle, no card, a branch with nothing of its own: nothing left');
+    for (const state of ['try', 'pending-deploy', 'parked', 'outside']) {
+      t = { ...base, state: state as Ticket['state'] };
+      assert.match((await leftForPeople(app, 1)) ?? '', new RegExp(`state is ${state}`), state);
+    }
+    t = { ...base, state: null };
+    assert.equal(await leftForPeople(app, 1), null, 'no state is fine too');
+    seen.running = true;
+    assert.ok(await leftForPeople(app, 1), 'a turn running');
+    seen.running = false;
+    seen.kept = 'a question card is still waiting on people';
+    assert.equal(await leftForPeople(app, 1), seen.kept, 'another card');
+    seen.kept = null;
+    seen.cabal = true;
+    assert.match((await leftForPeople(app, 1)) ?? '', /leads/, 'a cabal lead');
+    seen.cabal = false;
+    t = { ...base, build: 7 };
+    seen.owner = 1;
+    assert.match((await leftForPeople(app, 1)) ?? '', /leads/, "a build's own minion");
+    seen.owner = null;
+    t = { ...base };
+    writeFileSync(join(wt, 'x.txt'), 'x');
+    execFileSync('git', ['add', 'x.txt'], { cwd: wt });
+    assert.match((await leftForPeople(app, 1)) ?? '', /not committed/, 'uncommitted work');
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'work'], { cwd: wt });
+    assert.match((await leftForPeople(app, 1)) ?? '', /commits main lacks/, 'commits not on main');
+    git('merge', '-q', '--ff-only', 'ticket/1');
+    assert.equal(await leftForPeople(app, 1), null, 'once main has them, nothing is left');
+  } finally {
+    rmSync(repo, { recursive: true, force: true }); // timing-ok: own temp dir
   }
 });

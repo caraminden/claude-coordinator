@@ -7,8 +7,9 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import type { Session } from './auth.ts';
+import { branchStatus } from './branch.ts';
 import { tellTaskmaster } from './ci-armed.ts';
-import { EFFORTS, MODELS, type Ticket } from './db.ts';
+import { buildOwnerKey, EFFORTS, MODELS, type Ticket } from './db.ts';
 import { buildNumber, HttpError, oneOf, str, type App } from './http.ts';
 import { money, START_CARD_USD, startHoldKey } from './minion-budget.ts';
 import { createMinion } from './routes/projects.ts';
@@ -89,12 +90,12 @@ interface Question {
  * `held` says the card's owner hears it as held mail (every pick started, nothing else picked); else it is woken, with `text`
  * (what started, what didn't and why) after the answer.
  */
-export async function startPicked(app: App, owner: Ticket, questions: Question[], answers: Answer[], session: Session, added: boolean): Promise<{ held: boolean; text: string } | null> {
+export async function startPicked(app: App, owner: Ticket, questions: Question[], answers: Answer[], session: Session, added: boolean): Promise<{ held: boolean; text: string; started: string[] } | null> {
   const { store } = app;
   const picks = questions.flatMap((q, i) => (answers[i]?.selected ?? []).map((label) => q.options.find((o) => o.label === label)));
   const starts = [...new Map(picks.flatMap((o) => (o?.start ? [[o.start.handoff, o.start] as const] : []))).values()];
   if (!starts.length) return null;
-  if (added) return { held: false, text: `(Citadel started nothing by itself: words or a picture came with the pick, and they may change a brief. Act on them, and have your Taskmaster start what they picked, as before.)` };
+  if (added) return { held: false, started: [], text: `(Citadel started nothing by itself: words or a picture came with the pick, and they may change a brief. Act on them, and have your Taskmaster start what they picked, as before.)` };
   const project = store.getProject(owner.project_id)!;
   const started: string[] = [];
   const refused: string[] = [];
@@ -140,5 +141,29 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
   // Held only when the pick was all starts and all of them went: anything else is the owner's to act on.
   const held = !refused.length && picks.every((o) => o?.start);
   const tail = refused.length ? ' Fix what refused them, or have your Taskmaster start them.' : held ? '' : ' Act on the rest of the answer.';
-  return { held, text: `${lines.join(' ')}${tail}` };
+  return { held, started, text: `${lines.join(' ')}${tail}` };
+}
+
+/**
+ * Why the owner of a card whose pick started everything still has something left for people, or null when nothing is (#2175):
+ * then the server dismisses it, as the Closing rule asks. Kept open by another card, a state other than ready (try,
+ * pending-deploy, sealed, outside, complete, blocked), a turn running or waiting, a build or cabal lead, and a branch with work
+ * main doesn't have (commits, or files not committed yet).
+ */
+export async function leftForPeople(app: { store: Pick<App['store'], 'getTicket' | 'getProject' | 'getCabal' | 'getSetting'>; runner: Pick<App['runner'], 'isRunning' | 'keptOpen'> }, id: number): Promise<string | null> {
+  const { store, runner } = app;
+  const t = store.getTicket(id);
+  if (!t || t.status === 'closed') return 'it is closed already';
+  if (t.kind !== 'ticket') return 'it is a Taskmaster';
+  if (t.state && t.state !== 'ready') return `its state is ${t.state}`;
+  if (runner.isRunning(id)) return 'a turn of its own is running';
+  const kept = runner.keptOpen(id, true);
+  if (kept) return kept;
+  if (store.getCabal(id) || (t.build != null && store.getSetting<number>(buildOwnerKey(t.project_id, t.build)) === id)) return 'it leads a build or cabal';
+  const repo = store.getProject(t.project_id)?.repo_dir;
+  if (!repo || !t.branch) return null;
+  const s = await branchStatus(repo, t.branch, t.created_at, false, null, null, t.cwd);
+  if (s && !s.empty && !s.merged) return 'its branch has commits main lacks';
+  if (s?.uncommitted) return 'its worktree has work not committed';
+  return null;
 }

@@ -51,6 +51,11 @@
 .ci-figure i.key.step { display: inline-block; width: 2px; height: 10px; background: var(--waiting); flex: none; }
 .ci-figure i.key.own, .ci-figure i.key.gh { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--held); flex: none; }
 .ci-figure i.key.gh { background: var(--running); }
+/* #2231: a series only the desktop sends (nightly and fallbacks) in the desktop's hue, so blue keeps meaning GitHub. */
+.ci-figure.desk .ci-chart .line.running { stroke: var(--held); }
+.ci-figure.desk .ci-pt::after { background: var(--held); }
+.ci-legend { flex-wrap: wrap; row-gap: 0.2rem; }
+.ci-legend > span { white-space: nowrap; }
 .ci-pools-wrap { overflow-x: auto; }
 .ci-pools { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .ci-pools th { font-size: var(--size-meta); font-weight: 600; color: var(--muted); text-align: left; white-space: nowrap; }

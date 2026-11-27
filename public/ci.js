@@ -506,7 +506,7 @@ function shipBlock(s, now) {
     const sh = /** @type {import('./types/ci.js').CiShards} */ (r.shards);
     const since = now - Date.parse(r.at);
     const waitingSlots = sh.n - sh.started;
-    const [tone, word, hue] = sh.red ? ['danger', `${sh.red} red`, 'danger'] : waitingSlots ? ['warn', `${waitingSlots} waiting for a slot`, 'waiting'] : ['info', 'Running', 'running'];
+    const [tone, word, hue] = sh.red ? ['danger', `${sh.red} red`, 'danger'] : waitingSlots ? (since > 60_000 ? ['violet', 'Moving to the desktop', 'held'] : ['info', `${waitingSlots} waiting for a slot`, 'running']) : ['info', 'Running', 'running'];
     const [row] = settingsRow(
       { key: `ci-ship-${s.id}`, icon: 'branch', hue, title: 'Ship CI on GitHub', summary: [toneChip(tone, word), whoText(r), ` · ${shortSpan(since)}`] },
       statTiles([`${sh.started}/${sh.n}`, 'shards started', 'running'], [String(sh.done), 'green', 'done'], [String(sh.red), 'red', sh.red ? 'danger' : 'done'], [shortSpan(since), 'since the push', 'running']),
@@ -645,7 +645,7 @@ function historyTab(s) {
       'section',
       { class: 'ci-block ci-history' },
       h('h3', { class: 'settings-section', 'data-hue': reds ? 'danger' : 'running' }, 'Ships'),
-      statTiles([String(shown.length), 'ship runs, last day', 'running'], med != null && [mmss(med), 'median push to verdict on GitHub', 'running'], [String(moved), moved === 1 ? 'fallback' : 'fallbacks', moved ? 'held' : 'done'], [String(reds), `red of ${done.length}`, reds ? 'danger' : 'done']),
+      statTiles([String(shown.length), 'ship runs, last day', 'running'], med != null && [mmss(med), 'median push to verdict on GitHub', 'running'], [String(moved), 'to the desktop', moved ? 'held' : 'done'], [String(reds), `red of ${done.length}`, reds ? 'danger' : 'done']),
       showFirst({ key: `ci-ships-${s.id}`, items: shown.map(shipItem), n: 6, noun: 'ship runs', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows.flat()) }),
     ),
     block(null, otherReds ? 'danger' : 'held', 'ci-other', otherRow),

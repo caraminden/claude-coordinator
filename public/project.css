@@ -534,6 +534,7 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
 .ci-ship-meta:empty { display: none; }
 .ci-ship-meta .meter { flex: 1 1 7rem; max-width: 11rem; }
 .ci-history .hue-row-lead { min-width: 4.2rem; }
+@media (max-width: 800px) { .ci-history .hue-row-lead { min-width: 0; } }
 .ci-took-over { display: block; margin-top: 0.2rem; }
 .ci-history .hue-rows { margin-top: var(--space-2); }
 .ci-history .hue-rows > *, .ci-history .queue-sub .hue-row { min-width: 0; }

@@ -175,7 +175,7 @@ function seriesRow(s, view, rules, ships = false) {
       String(pts.length),
       `runs, kept ${rules.keepDays} days`,
     ]),
-    chart(view, commit),
+    deskOnly ? Object.assign(chart(view, commit), { className: 'ci-figure desk' }) : chart(view, commit),
     view.steps.length
       ? h(
           'div',
@@ -200,7 +200,7 @@ function seriesRow(s, view, rules, ships = false) {
         .reverse()
         .map((p) =>
           hueRow(
-            { hue: view.steps.some((st) => st.run_id === p.run_id) ? 'waiting' : 'running', lead: fmt(p.value, unit), meta: pacificStamp(p.at) },
+            { hue: view.steps.some((st) => st.run_id === p.run_id) ? 'waiting' : deskOnly || OWN.test(p.workflow) ? 'held' : 'running', lead: fmt(p.value, unit), meta: pacificStamp(p.at) },
             h('a', { href: commit(p.sha), target: '_blank', rel: 'noopener', title: `${p.workflow} run ${p.run_id}` }, p.sha.slice(0, 9)),
             h('span', { class: 'muted' }, ` run ${p.run_id}`),
           ),

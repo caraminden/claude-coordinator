@@ -55,6 +55,8 @@ export const io = {
   place: () => readPlace(),
   isPublic: (cwd: string) => isPublic(cwd),
   heavy: 'citadel-heavy',
+  line: (text: string, detail: string, event: number | null) => postLine(text, detail, event),
+  lineMs: 120_000,
   heavyDir: () => process.env.CITADEL_HEAVY_DIR || join(homedir(), '.local/share/claude-coordinator/projects/.heavy'),
 };
 
@@ -160,7 +162,7 @@ let stopping: (() => void) | null = null;
 export const stop = () => stopping?.();
 
 /** Run one job to its end; the exit code. */
-export async function cloud(job: Job): Promise<number> {
+export async function cloud(job: Job, on: (state: string, detail?: string) => void = () => {}): Promise<number> {
   const off = await io.helpersOff();
   const cwd = io.cwd();
   const why = off ?? noCloud(cwd, io.claude);
@@ -226,9 +228,13 @@ export async function cloud(job: Job): Promise<number> {
     } catch {}
   };
   jsonLines<{ type?: string; subtype?: string; session?: string; url?: string; text?: string; code?: number; is_error?: boolean; result?: string; message?: { content?: { text?: string }[] } }>(driver.stdout, (ev) => {
-    if (ev.type === 'system' && ev.subtype === 'cloud' && ev.url && !url) say(`session ${(url = ev.url)}, its result on ${branch}`);
-    else if (ev.subtype === 'cloud_progress' && ev.text) say(ev.text);
-    else if (ev.subtype === 'cloud_result' && Number.isInteger(ev.code)) code = ev.code ?? null;
+    if (ev.type === 'system' && ev.subtype === 'cloud' && ev.url && !url) {
+      say(`session ${(url = ev.url)}, its result on ${branch}`);
+      on('started', `Its session: ${url}`);
+    } else if (ev.subtype === 'cloud_progress' && ev.text) {
+      say(ev.text);
+      on(ev.text, `Its session: ${url}`);
+    } else if (ev.subtype === 'cloud_result' && Number.isInteger(ev.code)) code = ev.code ?? null;
     else if (ev.type === 'assistant') reply = (ev.message?.content ?? []).map((c) => c.text ?? '').join('\n') || reply;
     else if (ev.type === 'result') result = ev;
   });
@@ -243,6 +249,7 @@ export async function cloud(job: Job): Promise<number> {
   if (job.kind === 'run' && code === null) return home(`the session's result has no exit code, so the command didn't run through Citadel's runner${url ? ` (${url})` : ''}`);
   io.log(reply);
   io.log(`citadel-cloud: done after ${mins()} min, ${cost}. Files: ${job.out}`);
+  on(job.kind === 'run' ? `exit ${code} after ${mins()} min` : `done after ${mins()} min`, `${reply}\n\nIts session: ${url}; ${cost}.`);
   return job.kind === 'brief' || code === 0 ? 0 : 1;
 }
 
@@ -335,20 +342,66 @@ function remember(cmd: string, seconds: number, code: number): void {
 }
 
 /** A command through citadel-heavy: a PC's CI, GitHub's runners or perigee's slot. Its exit code (75: the server has it). */
-async function heavy(place: Exclude<Place, 'cloud'>, job: Job): Promise<number> {
+async function heavy(place: Exclude<Place, 'cloud'>, job: Job, on: (state: string, detail?: string) => void): Promise<number> {
   const args = place === 'home' ? ['--here', 'bash', '-c', job.cmd] : ['bash', '-c', job.cmd];
   const env = { ...process.env, CITADEL_HEAVY_WHAT: whatOf(job.cmd), ...(place === 'github' ? { CITADEL_HEAVY_GITHUB: '1' } : {}) };
-  const child = spawn(io.heavy, args, { cwd: io.cwd(), stdio: 'inherit', env });
+  const child = spawn(io.heavy, args, { cwd: io.cwd(), stdio: ['inherit', 'pipe', 'pipe'], env });
+  // The output still streams to the turn; its end is kept for the chat line.
+  let out = '';
+  const keep = (to: NodeJS.WriteStream) => (b: Buffer) => {
+    to.write(b);
+    out = (out + b.toString()).slice(-16_384);
+  };
+  child.stdout.on('data', keep(process.stdout));
+  child.stderr.on('data', keep(process.stderr));
+  const tail = (n: number) => out.trimEnd().split('\n').slice(-n).join('\n');
+  const began = Date.now();
+  const mins = () => Math.round((Date.now() - began) / 60_000);
+  const timer = setInterval(() => on(`${mins()} min: ${tail(1).slice(0, 200)}`, tail(30)), io.lineMs);
   stopping = () => child.kill('SIGTERM');
   const code = await new Promise<number>((r) => {
     child.once('error', () => r(127));
-    child.once('exit', (c, sig) => r(c ?? (sig === 'SIGTERM' ? 143 : 1)));
+    child.once('close', (c, sig) => r(c ?? (sig === 'SIGTERM' ? 143 : 1)));
   });
+  clearInterval(timer);
   stopping = null;
+  on(code === 75 ? 'handed to Citadel to finish as a minion job' : code === 143 ? `stopped after ${mins()} min` : `exit ${code} after ${mins()} min`, tail(30));
   return code;
 }
 
 const WHERE: Record<Place, string> = { machine: 'on a PC lending this scheme CI', github: "on GitHub's own runners", cloud: 'in a cloud session', home: "here, in perigee's heavy-job slot" };
+
+/** POST the step's chat line, or rewrite it; its event id, or null when it couldn't (a missing line, never a failed step). */
+async function postLine(text: string, detail: string, event: number | null): Promise<number | null> {
+  const base = process.env.COORDINATOR_API;
+  const ticket = process.env.COORDINATOR_TICKET;
+  if (!base || !ticket) return null;
+  try {
+    const r = await fetch(`${base}/api/tickets/${ticket}/cloud-helpers/line`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.COORDINATOR_TOKEN ?? ''}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, detail: detail.slice(-8000), ...(event === null ? {} : { event }) }),
+    });
+    return r.ok ? (((await r.json()) as { event?: number }).event ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The step's one line in the minion's chat (Cara's "Live line per step"): what runs, where, and how it stands, rewritten in place. */
+function liveLine(job: Job) {
+  let event: number | null = null;
+  let chain: Promise<unknown> = Promise.resolve();
+  const what = job.kind === 'run' ? `\`${job.cmd.length > 120 ? `${job.cmd.slice(0, 117)}...` : job.cmd}\`` : 'a brief';
+  let where = '';
+  const set = (state: string, detail = '') => {
+    const text = `citadel-cloud: ${what} ${where} · ${state}`.replace(/\s+/g, ' ').slice(0, 400);
+    chain = chain.then(async () => {
+      event = (await io.line(text, detail, event)) ?? event;
+    });
+  };
+  return { set, at: (place: Place) => (where = WHERE[place]), done: () => chain };
+}
 
 /** The helper's whole call: pick the place, run there, and bring a cloud job that didn't deliver home. */
 export async function helper(job: Job): Promise<number> {
@@ -358,15 +411,30 @@ export async function helper(job: Job): Promise<number> {
   const facts: Facts = { ...server, workflow, public: job.kind === 'run' && workflow && !server.machine && !job.files.length && io.isPublic(cwd), slower: job.kind === 'run' ? slower(job.cmd) : null };
   const { place, why } = pickPlace(facts, job);
   io.log(`citadel-cloud: runs ${WHERE[place]}: ${why}`);
-  if (place !== 'cloud') return job.kind === 'brief' ? home(why) : heavy(place, job);
-  const began = Date.now();
-  const code = await cloud(job);
-  if (job.kind === 'brief' || code !== AT_HOME) {
-    if (job.kind === 'run' && (code === 0 || code === 1)) remember(job.cmd, Math.round((Date.now() - began) / 1000), code);
-    return code;
-  }
-  io.log(`citadel-cloud: runs ${WHERE.home} instead`);
-  return heavy('home', job);
+  const line = liveLine(job);
+  line.at(place);
+  const code = await (async () => {
+    if (place === 'home' && job.kind === 'brief') {
+      line.set('not run: a Grunt takes it', why);
+      return home(why);
+    }
+    line.set('starting', `Why here: ${why}.`);
+    if (place !== 'cloud') return heavy(place, job, line.set);
+    const began = Date.now();
+    const c = await cloud(job, line.set);
+    if (c === 143) line.set(`stopped after ${Math.round((Date.now() - began) / 60_000)} min`);
+    if (job.kind === 'brief' || c !== AT_HOME) {
+      if (job.kind === 'run' && (c === 0 || c === 1)) remember(job.cmd, Math.round((Date.now() - began) / 1000), c);
+      if (c === AT_HOME) line.set("didn't deliver: a Grunt takes it");
+      return c;
+    }
+    io.log(`citadel-cloud: runs ${WHERE.home} instead`);
+    line.set("the cloud session didn't deliver, so it runs here");
+    line.at('home');
+    return heavy('home', job, line.set);
+  })();
+  await line.done();
+  return code;
 }
 
 /** The cloud can't take this step: say why, and that it runs at home. */

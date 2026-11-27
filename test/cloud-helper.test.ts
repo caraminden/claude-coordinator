@@ -89,10 +89,26 @@ function heavyCalls(): { args: string[]; github: string | null; what: string }[]
 const heavyDir = join(root, 'heavy');
 
 const said: string[] = [];
+/** The chat line's posts: [text, the event it rewrites]. */
+const lines: [string, number | null][] = [];
 const kept = { ...io };
 beforeEach(() => {
   said.length = 0;
-  Object.assign(io, kept, { claude: fake, cwd: () => work, helpersOff: async () => null, log: (l: string) => said.push(l), pollMs: 100, everyMs: 500, place: async () => ({ on: true, machine: false }), isPublic: () => false, heavy: fakeHeavy, heavyDir: () => heavyDir });
+  lines.length = 0;
+  Object.assign(io, kept, {
+    claude: fake,
+    cwd: () => work,
+    helpersOff: async () => null,
+    log: (l: string) => said.push(l),
+    pollMs: 100,
+    everyMs: 500,
+    place: async () => ({ on: true, machine: false }),
+    isPublic: () => false,
+    heavy: fakeHeavy,
+    heavyDir: () => heavyDir,
+    line: async (text: string, _: string, event: number | null) => (lines.push([text, event]), 41),
+    lineMs: 200,
+  });
   rmSync(join(root, 'claude.log'), { force: true });
   rmSync(join(root, 'heavy.log'), { force: true });
   rmSync(heavyDir, { recursive: true, force: true }); // timing-ok: own temp dir
@@ -280,4 +296,27 @@ test('a cloud run is remembered for the next pick\'s "WAY slower" check', async 
   assert.equal(heavyCalls().length, 0);
   const vm = readFileSync(join(root, 'vm-dir'), 'utf8');
   await until('the VM saw DONE and ended', () => existsSync(join(vm, 'said')) && /DONE/.test(readFileSync(join(vm, 'said'), 'utf8')));
+});
+
+test('the chat line: one note for the step, rewritten from its start to its exit, and through a fallback home', async () => {
+  assert.equal(await helper(job('echo lined; sleep 1')), 0);
+  const texts = lines.map(([t]) => t);
+  assert.equal(texts[0], 'citadel-cloud: `echo lined; sleep 1` in a cloud session · starting');
+  assert.ok(texts.includes('citadel-cloud: `echo lined; sleep 1` in a cloud session · started'), texts.join('\n'));
+  assert.match(texts.at(-1)!, /in a cloud session · exit 0 after 0 min$/);
+  assert.deepEqual(
+    lines.map(([, e]) => e),
+    [null, ...lines.slice(1).map(() => 41)],
+    'posted once, then rewritten',
+  );
+  const vm = readFileSync(join(root, 'vm-dir'), 'utf8');
+  await until('the VM saw DONE and ended', () => existsSync(join(vm, 'said')) && /DONE/.test(readFileSync(join(vm, 'said'), 'utf8')));
+  lines.length = 0;
+  process.env.FAKE_MODE = 'quiet';
+  io.quietMs = 1500;
+  assert.equal(await helper(job('echo hi', { minutes: 60 })), 0);
+  assert.deepEqual(
+    lines.map(([t]) => t.replace('citadel-cloud: `echo hi` ', '')),
+    ['in a cloud session · starting', 'in a cloud session · started', "in a cloud session · the cloud session didn't deliver, so it runs here", "here, in perigee's heavy-job slot · exit 0 after 0 min"],
+  );
 });

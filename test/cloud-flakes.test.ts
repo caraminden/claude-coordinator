@@ -123,7 +123,7 @@ async function call(method: string, path: string, ctx: Record<string, unknown>) 
     on() {},
   };
   try {
-    await route.handler({ res, app: { store, dataDir: root, ciHealth: null, fastMode: null }, ...ctx } as never);
+    await route.handler({ res, app: { store, dataDir: root, ciHealth: null, fastMode: null, runner: { emit: (id: number, kind: string, data: unknown) => store.addEvent(id, kind, data) } }, ...ctx } as never);
   } catch (err) {
     return { status: (err as { status?: number }).status ?? 500, body: { error: (err as Error).message } };
   }
@@ -263,4 +263,30 @@ esac
   const result = JSON.parse(git(origin, 'show', 'cloud/t1-z:.citadel/result.json'));
   assert.deepEqual(result.files, ['.citadel/out/flake.jsonl']);
   assert.match(result.reply, /Cloud flake run at [0-9a-f]{40}:\n- test\/clean.test.ts: clean/);
+});
+
+test("citadel-cloud's live line: one note per step, rewritten in place, and only this minion's own", async () => {
+  const { PassThrough } = await import('node:stream');
+  const body = (b: unknown) => Object.assign(new PassThrough(), { headers: { 'content-type': 'application/json' } }).end(JSON.stringify(b));
+  const project = store.createProject('Line scheme', null);
+  const t = store.createTicket({ project_id: project.id, title: 'Uses a helper', permission_mode: 'x', created_by: 'T' });
+  const other = store.createTicket({ project_id: project.id, title: 'Another', permission_mode: 'x', created_by: 'T' });
+  const post = (b: unknown, ticket = t.id) => call('POST', '/api/tickets/:ticket/cloud-helpers/line', { req: body(b), ticket: store.getTicket(ticket) });
+  const first = await post({ text: 'citadel-cloud: `npm test` in a cloud session · starting', detail: 'Why here: …' });
+  assert.equal(first.status, 200);
+  const id = first.body.event;
+  assert.equal((await post({ text: 'citadel-cloud: `npm test` in a cloud session · 4 min: tests 40/120', detail: 'out', event: id })).body.event, id);
+  const note = store.getEvent(id)!;
+  assert.deepEqual([note.kind, JSON.parse(note.data)], ['note', { text: 'citadel-cloud: `npm test` in a cloud session · 4 min: tests 40/120', detail: 'out', helper: true }]);
+  const edit = store.listEvents(t.id, id);
+  assert.deepEqual(
+    edit.map((e) => [e.kind, JSON.parse(e.data)]),
+    [['note_edit', { event: id, text: 'citadel-cloud: `npm test` in a cloud session · 4 min: tests 40/120', detail: 'out' }]],
+    'the open chats rewrite it',
+  );
+  assert.equal((await post({ text: 'x', event: id }, other.id)).status, 404, "another minion's line");
+  const plain = store.addEvent(t.id, 'note', { text: 'a note of its own' });
+  assert.equal((await post({ text: 'x', event: plain.id })).status, 404, 'a note the helper did not write');
+  assert.equal((await post({ text: '' })).status, 400);
+  assert.equal((await post({ text: 'x'.repeat(401) })).status, 400);
 });

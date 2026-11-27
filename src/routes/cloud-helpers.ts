@@ -30,6 +30,27 @@ export const cloudHelperRoutes: Route[] = [
     },
   },
   {
+    // citadel-cloud's live line in the minion's chat (#2200, Cara's "Live line per step"): one note per step, with its
+    // output's end behind the toggle, rewritten in place (note_edit, as #1055's daily note) as the step goes.
+    method: 'POST',
+    path: '/api/tickets/:ticket/cloud-helpers/line',
+    who: ['minion'],
+    refuse: "Only a minion's turn hands work to a cloud helper",
+    async handler({ req, res, app, ticket }) {
+      const body = await readJson(req);
+      const { text, detail, event } = body as { text?: unknown; detail?: unknown; event?: unknown };
+      if (typeof text !== 'string' || !text.trim() || text.length > 400) throw new HttpError(400, 'text is a line of at most 400 characters');
+      if (detail !== undefined && (typeof detail !== 'string' || detail.length > 8000)) throw new HttpError(400, 'detail is at most 8000 characters');
+      const data = { text, detail: detail || '…', helper: true };
+      if (event === undefined) return json(res, 200, { event: app.runner.emit(ticket.id, 'note', data).id });
+      const row = Number.isInteger(event) ? app.store.getEvent(event as number) : undefined;
+      if (!row || row.ticket_id !== ticket.id || row.kind !== 'note' || JSON.parse(row.data).helper !== true) throw new HttpError(404, "No such cloud helper line in this minion's chat");
+      app.store.setEventData(row.id, data);
+      app.runner.emit(ticket.id, 'note_edit', { event: row.id, text, detail: data.detail });
+      json(res, 200, { event: row.id });
+    },
+  },
+  {
     method: 'GET',
     path: '/api/tickets/:ticket/cloud-sweep/picks',
     who: ['minion'],

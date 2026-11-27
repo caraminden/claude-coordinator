@@ -3412,6 +3412,16 @@
   "m1": "409 The minion is not mid-turn",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/cloud-helpers/line": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn hands work to a cloud helper",
+  "member": "403 Only a minion's turn hands work to a cloud helper",
+  "outsider": "403 Only a minion's turn hands work to a cloud helper",
+  "tmA": "403 Only a minion's turn hands work to a cloud helper",
+  "tmB": "403 Only a minion's turn hands work to a cloud helper",
+  "m1": "400 text is a line of at most 400 characters",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/cloud-helpers/place": {
   "anon": "401 Not logged in",
   "person": "403 Only a minion's turn hands work to a cloud helper",
@@ -4459,6 +4469,16 @@
   "outsider": "403 A minion may only be dismissed by itself",
   "tmA": "403 A minion may only be dismissed by itself",
   "tmB": "403 A minion may only be dismissed by itself",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/cloud-helpers/line": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn hands work to a cloud helper",
+  "member": "403 Only a minion's turn hands work to a cloud helper",
+  "outsider": "403 Only a minion's turn hands work to a cloud helper",
+  "tmA": "403 Only a minion's turn hands work to a cloud helper",
+  "tmB": "403 Only a minion's turn hands work to a cloud helper",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

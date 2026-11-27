@@ -132,7 +132,7 @@ function flakeBlock(s, flakes, refresh) {
         meta: f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} ${f.fix?.state === 'held' ? 'fixed it' : 'is on it'}`) : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it'),
       },
       h('span', {}, h('strong', { title: f.file }, f.file), f.cloud && f.cloud === f.count ? [' ', toneChip('violet', 'cloud only')] : null),
-      f.cloud && f.cloud === f.count ? h('span', { class: 'ci-detail-line muted' }, 'Seen only by the nightly cloud sweep, on a 4-vCPU VM: it starts no fix minion and refuses no ship.') : null,
+      f.cloud && f.cloud === f.count ? h('span', { class: 'ci-detail-line muted' }, 'Seen only by the nightly cloud sweep, on a 4-vCPU VM: it starts no fix minion by itself and refuses no ship.') : null,
       h(
         'span',
         { class: 'ci-detail-line muted' },
@@ -159,14 +159,14 @@ function flakeBlock(s, flakes, refresh) {
 }
 
 // The nightly cloud sweep (#2187, src/cloud-flakes.ts): each night's files and verdicts beside its sessions, minutes and cost.
-// verdict -> [hue, what it means]
-/** @type {Record<string, [string, string]>} */
+// verdict -> [hue, chip tone, what it means]
+/** @type {Record<string, [string, string, string]>} */
 const VERDICT = {
-  flaky: ['waiting', 'some copies failed: a cloud sighting'],
-  red: ['danger', 'failed alone on the VM too: a plain red or the VM itself'],
-  skipped: ['held', 'a test skipped on the VM, so it proves nothing'],
-  stopped: ['held', 'over the 25-minute step'],
-  clean: ['done', 'every copy passed'],
+  flaky: ['waiting', 'warn', 'some copies failed: a cloud sighting'],
+  red: ['danger', 'danger', 'failed alone on the VM too: a plain red or the VM itself'],
+  skipped: ['held', 'neutral', 'a test skipped on the VM, so it proves nothing'],
+  stopped: ['held', 'neutral', 'over the 25-minute step'],
+  clean: ['done', 'ok', 'every copy passed'],
 };
 /** @param {number} usd */
 const dollars = (usd) => `$${usd.toFixed(2)}`;
@@ -200,8 +200,8 @@ function sweepBlock(s, sweeps) {
   };
   /** @param {SweepNight} n */
   const summary = (n) => {
-    const unproven = n.files.length - count(n, 'clean') - count(n, 'flaky') - count(n, 'red');
-    const parts = n.files.length ? [`${n.files.length} files, ${count(n, 'flaky')} flaky`, count(n, 'red') ? `${count(n, 'red')} red` : '', unproven ? `${unproven} unproven` : ''].filter(Boolean).join(', ') : 'no results';
+    const others = ['red', 'stopped', 'skipped'].map((v) => (count(n, v) ? `${count(n, v)} ${v}` : '')).filter(Boolean);
+    const parts = n.files.length ? [`${n.files.length} files, ${count(n, 'flaky')} flaky`, ...others].join(', ') : 'no results';
     return `${parts} · ${n.sessions} session × ${Math.round(n.minutes)} min${n.sha ? ` · ${n.sha.slice(0, 9)}` : ''}${n.error ? ` · ${n.error.split('\n')[0].slice(0, 140)}` : ''}`;
   };
   const flaky = count(last, 'flaky');
@@ -209,8 +209,8 @@ function sweepBlock(s, sweeps) {
   const files = [...last.files]
     .sort((a, b) => order.indexOf(a.verdict) - order.indexOf(b.verdict))
     .map((f) => {
-      const [hue, why] = VERDICT[f.verdict] ?? VERDICT.red;
-      return hueRow({ hue }, h('strong', { title: f.file }, f.file), h('span', { class: 'ci-detail-line muted', title: f.detail }, `${f.verdict}: ${why} · ${f.failed} of ${f.copies} failed · ${f.seconds} s`));
+      const [hue, tone, why] = VERDICT[f.verdict] ?? VERDICT.red;
+      return hueRow({ hue }, h('span', {}, h('strong', { title: f.file }, f.file), ' ', toneChip(tone, f.verdict)), h('span', { class: 'ci-detail-line muted', title: f.detail }, `${why} · ${f.failed} of ${f.copies} failed · ${f.seconds}\u00a0s`));
     });
   const nights = sweeps.map((n) => hueRow({ hue: state(n)[0], lead: dollars(n.costUsd), meta: n.minion ? h('a', { href: `#/p/${s.id}/t/${n.minion}` }, `#${n.minion}`) : null }, h('strong', {}, when(n.at)), h('span', { class: 'ci-detail-line muted' }, summary(n))));
   const [hue, tone, word] = state(last);

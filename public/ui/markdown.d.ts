@@ -42,5 +42,5 @@ export function updateMarkdown(el: Element, src: string, opts?: MarkdownOptions)
 
 /** Put `text` on the clipboard; resolves whether it worked. Without a secure context (plain http) it copies a hidden textarea, put beside `near` (default the body: pass an element inside an open modal dialog). Fenced code blocks drawn by markdownElement and updateMarkdown carry a Copy button (`.cui-copy`) that uses it. */
 export function copyText(text: string, near?: Element): Promise<boolean>;
-/** The text Copy puts on the clipboard: a shell-tagged block gets exactly one trailing newline, others stay as written. */
+/** The text Copy puts on the clipboard: a shell-tagged block loses its trailing newlines (a paste then leaves the cursor at the end of the command), others stay as written. */
 export function copyPayload(text: string, shell: boolean): string;

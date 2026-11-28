@@ -200,7 +200,7 @@ land_verdict() {
 
 # GitHub can't take the ship's run (#2209): cancel it and start tests.yml on the desktop. Fails, with $why, when it can't.
 ci_to_desk() {
-  online=$(ci_online) || online=''
+  read -r online registered <<<"$(ci_online)"
   # Slow to start with no desktop to go to: GitHub's run is still the best bet, so it keeps it.
   if [ "$online" = 0 ] && [ "$ci_gh" = 1 ] && [ -n "$ci_id" ] && [ "$ci_status" != completed ]; then
     say "$gh_why, and no $CI_LABEL runner is online, so this keeps waiting on GitHub's run ($ci_url)"
@@ -209,11 +209,11 @@ ci_to_desk() {
   [ -z "$ci_id" ] || [ "$ci_status" = completed ] || hub gh api -X POST "repos/$ci_slug/actions/runs/$ci_id/cancel" >/dev/null 2>&1 || true
   ci_stale=${ci_id:-$ci_stale} ci_id='' ci_status='' ci_taken='' limit=$CI_LIMIT rerun_wait='' burn_wait=''
   [ -n "$online" ] || { why="$gh_why, and GitHub didn't say which desktop runners are online$(ci_said)"; return 1; }
-  [ "$online" -gt 0 ] || { why="$gh_why, and no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 1; }
+  [ "${registered:-0}" -gt 0 ] || { why="$gh_why, and no $CI_LABEL runner is registered"; return 1; }
   hub gh api -X POST "repos/$ci_slug/actions/workflows/${CI_WORKFLOW##*/}/dispatches" -f ref="$CI_REF" -f 'inputs[where]=desktop' \
     >/dev/null 2>"$state/ci.err" ||
     { why="$gh_why, and starting the run on the desktop failed$(ci_said)"; return 1; }
-  say "$gh_why, so the run goes to Cara's desktop instead"
+  say "$gh_why, so the run goes to Cara's desktop instead$([ "$online" -gt 0 ] || echo " (asleep: the job wakes one)")"
   retro_log "ci to desktop · $branch · $gh_why"
   ci_gh='' gh_why='' started=$SECONDS online_at=$SECONDS told=''
 }

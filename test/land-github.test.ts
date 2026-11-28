@@ -70,7 +70,7 @@ test('GitHub broken with no desktop runner online: the suite runs here, loudly, 
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = c.run({ FAKE_CI: 'red', FAKE_STEP: 'the tools the tests need', FAKE_RUNNERS: '0' });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: GitHub's run failed in its step "the tools the tests need", before its tests ran \(https:\/\/ci\/7\), and no citadel-ci-linux runner is online or asleep \(none is registered for /);
+  assert.match(res.stderr, /CI FALLBACK: GitHub's run failed in its step "the tools the tests need", before its tests ran \(https:\/\/ci\/7\), and no citadel-ci-linux runner is registered/);
   assert.doesNotMatch(c.calls(), /dispatches/);
   assert.equal(c.localRuns(), 1);
   assert.ok(!existsSync(ciDown(r)), 'no note that skips CI for the next ships');
@@ -85,7 +85,7 @@ test("GitHub broken with the desktop's runners asleep: the run goes to the deskt
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = c.run({ FAKE_CI: 'red', FAKE_STEP: 'the tools the tests need', FAKE_CI_RERUN: 'green', FAKE_RUNNERS_FILE: asleep(r.dir, 3) });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /before its tests ran \(https:\/\/ci\/7\), so the run goes to Cara's desktop instead \(its 3 runners are asleep: Citadel's runner plan wakes one for it\)/);
+  assert.match(res.stderr, /before its tests ran \(https:\/\/ci\/7\), so the run goes to Cara's desktop instead \(asleep: the job wakes one\)/);
   assert.match(res.stderr, /CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/);
   assert.match(c.calls(), /dispatches -f ref=land\/ticket\/1-x -f inputs\[where\]=desktop/);
   assert.doesNotMatch(res.stderr, /CI FALLBACK/);

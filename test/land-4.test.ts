@@ -609,7 +609,7 @@ test('a late start or a slow run falls back on a quiet perigee but leaves no ci-
   const t0 = Date.now();
   const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_START_ONLINE: '60', FAKE_RUNNERS_WAIT: '0', ...procAt(r) });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: no runner started the job within 1s, and no citadel-ci-linux runner is online/);
+  assert.match(res.stderr, /CI FALLBACK: no runner started the job within 1s, and no citadel-ci-linux runner is registered/);
   assert.ok(Date.now() - t0 < 30_000, 'it fell back at the short bound, not the long one');
   assert.ok(existsSync(ciDown(r)), 'no runner online: the note is written');
 });

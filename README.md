@@ -665,6 +665,7 @@ a run (the defaults are set for perigee; each script's comments say more):
 | Variable | Default | What it limits |
 |---|---|---|
 | `LAND_CI_START` | 90 s | `land.sh`: wait for a runner to take the CI job while none is online, then fall back |
+| `LAND_CI_WAKE` | 180 s | `land.sh`: the same wait while the label's runners are all asleep under Citadel's runner plan (offline on GitHub; the queued job wakes one, #2299) |
 | `LAND_CI_START_ONLINE` | 900 s | `land.sh`: the same wait while a runner is online but busy |
 | `LAND_CI_TIMEOUT` | 540 s | `land.sh`: wait for the CI run to finish once a runner took it, then fall back |
 | `LAND_CI_DOWN` | 600 s | `land.sh`: after a landing's CI wait ran out, the next landings skip CI for this long |

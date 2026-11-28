@@ -245,11 +245,11 @@ land_regen # tools/land/rebase.sh
 
 # The gate (#523): the full suite, green on this exact commit. Cara's desktop runs it (.github/workflows/tests.yml): the
 # commit goes to a scratch branch land/<branch> on GitHub, and this waits for that run, still holding the lock. The wait
-# is bounded: no runner online, GitHub not answering, a job no runner starts in time or a run not done within
+# is bounded: no runner, GitHub not answering, a job no runner starts in time or a run not done within
 # LAND_CI_TIMEOUT of starting (LAND_CI_RERUN more for a rerun of its failed files alone, ADR 0022) all fall back, loudly,
-# to the run on perigee (also LAND_CI=0, for when CI is broken). "In time" is LAND_CI_START (90 s) with no runner online,
-# LAND_CI_START_ONLINE (15 min) while one is online and busy (#1361). A red run refuses, never falls back, with two
-# exceptions: #769, a red whose failed files all passed when rerun alone gets one fresh run, and only a fully green one
+# to the run on perigee (also LAND_CI=0, for when CI is broken). "In time" is LAND_CI_START (90 s), LAND_CI_WAKE
+# (3 min) if all sleep (#2299), LAND_CI_START_ONLINE (15 min) if one is busy (#1361). A red run refuses, never falls back,
+# with two exceptions: #769, a red whose failed files all passed when rerun alone gets one fresh run, and only a fully green one
 # lands (ADR 0006); #1377, a run cut off before any test failed (or killed from outside, #1393) gets the same one fresh run.
 land_checks # tools/land/gate.sh
 land_settings # tools/land/settings.sh

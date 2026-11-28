@@ -561,7 +561,7 @@ export class SelfUpdate {
   /** Every stale file fetched and checked first, then swapped in, the old ones kept; any failure puts them all back. */
   async swap(stale, have) {
     const { version, files } = this.target;
-    this.say('updating', `to version ${version}`);
+    this.say('updating', `swapping in version ${version}`);
     const part = (n) => join(this.dir, `${n}.new`);
     try {
       for (const n of stale) {

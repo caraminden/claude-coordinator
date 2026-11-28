@@ -562,8 +562,9 @@ function ciAgentVersion(r) {
   if (!r.self_update) return h('div', { class: 'small' }, toneChip('warn', 'Can’t update itself'), ` ${os}: installed before it could. Run its install once more (below).`);
   if (!u) return h('div', { class: 'small' }, toneChip('neutral', 'Checking'), ` ${os}: hasn't said its version yet.`);
   const chip = { current: toneChip('ok', 'Up to date'), waiting: toneChip('info', 'Update waiting'), updating: toneChip('info', 'Updating'), failed: toneChip('danger', 'Update failed') }[u.state];
-  const behind = u.state !== 'current' && r.latest && r.latest !== u.version ? `, Citadel has ${r.latest}` : '';
-  return h('div', { class: 'small' }, chip, ` ${os}: version `, h('code', {}, u.version), `${behind}${u.why ? `. ${u.why}` : ''}`);
+  const behind = u.state !== 'current' && r.latest && r.latest !== u.version ? [', Citadel has ', h('code', {}, r.latest)] : [];
+  const why = u.why ? `. ${u.why[0].toUpperCase()}${u.why.slice(1)}.` : '';
+  return h('div', { class: 'small' }, chip, ` ${os}: version `, h('code', {}, u.version), ...behind, why);
 }
 
 /** Why an old CI runner agent wants updating (Build 7 M6b), and the line for each one there.

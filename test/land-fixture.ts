@@ -219,8 +219,8 @@ jsonrunners() {
   rows=$(sed 's/{"name":"[^"]*","status"/\\n&/g' "$1" | grep '"labels"' | grep "\\"name\\":\\"$label\\"")
   case "$jqx" in
     *'\\(length)'*) echo "$(grep -c '"status":"online"' <<<"$rows") $(grep -c . <<<"$rows")" ;;
-    *'.busy == false'*) grep '"status":"online"' <<<"$rows" | grep -c '"busy":false' ;;
-    *) grep -c . <<<"$rows" ;;
+    *'.busy == false'*) grep '"status":"online"' <<<"$rows" | grep -c '"busy":false' || true ;;
+    *) grep -c . <<<"$rows" || true ;;
   esac
 }
 echo "$*" >>"${calls}"

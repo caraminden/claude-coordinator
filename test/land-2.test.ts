@@ -470,7 +470,7 @@ test('asleep runners none of which wakes for the job: past LAND_CI_WAKE the suit
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_WAKE: '2', LAND_CI_ONLINE_POLL: '0', FAKE_RUNNERS_FILE: asleep(r.dir, 2) });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: no runner started the job within 2s: none of the 2 asleep woke \(PC off, or no room in Citadel's plan\)/);
+  assert.match(res.stderr, /CI FALLBACK: no runner started the job within [23]s: none of the 2 asleep woke \(PC off, or no room in Citadel's plan\)/);
   assert.doesNotMatch(res.stderr, /logged on/);
   assert.equal(c.localRuns(), 1);
 });

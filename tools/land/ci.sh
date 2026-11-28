@@ -238,7 +238,7 @@ ci_gate() {
       if [ -z "$online" ]; then why="GitHub didn't say which runners are online$(ci_said)" down=1
       elif [ "$online$registered" = 00 ]; then why="no runner started the job within ${CI_START}s, and no $CI_LABEL runner is registered" down=1
       elif [ "$online" = 0 ]; then
-        [ "$waited" -lt "$CI_WAKE" ] || why="no runner started the job within ${CI_WAKE}s: none of the $registered asleep woke (PC off, or no room in Citadel's plan)" down=1
+        [ "$waited" -lt "$CI_WAKE" ] || why="no runner started the job within ${waited}s: none of the $registered asleep woke (PC off, or no room in Citadel's plan)" down=1
       elif [ "$waited" -ge "$CI_START_ONLINE" ]; then why="no runner started the job within ${CI_START_ONLINE}s, though a $CI_LABEL runner is online"
       elif [ -z "$told" ] || [ $((SECONDS - told)) -ge 300 ]; then
         # Every 5 min, a new phase too (DEPLOY_QUEUE_STALL).

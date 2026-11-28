@@ -548,7 +548,7 @@ the deploy lock it rebases the branch onto the local `main`, waits for the full
 suite to pass on that exact commit, fast-forwards `main` in the scheme repo, then
 runs `tools/deploy.sh`. The suite runs on Cara's desktop
 (`.github/workflows/tests.yml`, on a scratch branch `land/<branch>`); when no
-runner is online or CI doesn't answer in time, `land.sh` prints `CI FALLBACK` and
+runner is registered, none wakes or CI doesn't answer in time, `land.sh` prints `CI FALLBACK` and
 runs it on perigee instead (`LAND_CI=0` forces that). A conflict
 or a red test stops it before `main` moves; a deploy whose checks fail puts
 `main` back too.

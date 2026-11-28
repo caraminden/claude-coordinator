@@ -40,7 +40,7 @@ export const heavyRoutes: Route[] = [
     },
   },
   // tools/heavy-ci.ts, from a turn or its job (which has no Citadel token): a heavy job Citadel holds for room keeps waiting,
-  // rather than going back to perigee after CITADEL_HEAVY_CI_QUEUE as one no runner is up for does. Only a yes or no.
+  // rather than going back to perigee after CITADEL_HEAVY_CI_QUEUE as one no runner is up for does; a pool scheme's, the pool's (P6). Only a yes or no.
   {
     method: 'GET',
     path: '/api/heavy/held',
@@ -49,7 +49,7 @@ export const heavyRoutes: Route[] = [
       const repo = url.searchParams.get('repo') ?? '';
       const run = Number(url.searchParams.get('run'));
       if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isSafeInteger(run)) throw new HttpError(400, 'Send ?repo=owner/name&run=<run id>');
-      return json(res, 200, { held: app.heavy?.holds(repo, run) ?? false });
+      return json(res, 200, { held: (app.heavy?.holds(repo, run) ?? false) || (app.pool?.holds(repo, run) ?? false) });
     },
   },
 ];

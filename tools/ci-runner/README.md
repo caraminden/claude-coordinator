@@ -29,7 +29,7 @@ scheme X" (Josh, 2026-11-25: "there should be one connection that multiple schem
    nothing when one goes on or off, only when it fails. Only when no PC lends a scheme CI while its jobs wait
    do its members get one card naming PCs they could ask (withdrawn once a PC lends it). Set the [caps](#your-own-caps) if 75% of the PC is too much.
 
-`ci_runners` (below) stays for odd cases: a second runner, a [role](#runner-roles-1934), a list. A **CI runner host**
+`ci_runners` lists a scheme's runners; its add and remove are retired (P6, #2305): a scheme on the [runner pool](#one-job-runners-in-slot-folders-runner-pool-p2-2269) gets a one-job runner per job, and a new scheme starts on it. A **CI runner host**
 row (**Add a CI runner host** on the Machines page, before Build 7) still works, and Citadel never takes its runners
 off by itself. An admin's new host is shared, with no owner, and runs CI for no scheme until an admin ticks one.
 
@@ -107,7 +107,7 @@ who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` show
 
 ## Runner roles (#1934)
 
-What a runner is for is its labels, which workflows' `runs-on` picks. `ci_runners add` takes a `role`, and Citadel sets that
+Retired with `ci_runners add` (P6, #2305): kept for standing runners until P7 deletes them. What a runner is for is its labels, which workflows' `runs-on` picks. `ci_runners add` took a `role`, and Citadel sets that
 role's labels on the runners the add makes, through GitHub's API with the scheme owner's login, as soon as GitHub lists each:
 
 | Role | Labels (`L` is `<scheme-slug>-ci`, or `<scheme-slug>-ci-linux` with `os: linux`) | For |

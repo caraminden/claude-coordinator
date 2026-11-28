@@ -420,7 +420,7 @@ export interface App {
   /** Heavy jobs off the server waiting for room on a PC (src/heavy-place.ts, #2120); absent in tests that don't need it. */
   heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone' | 'holds' | 'room'>;
   /** The runner pool's line (src/runner-pool.ts, Build 11 P1: watching only); absent in tests that don't need it. */
-  pool?: Pick<RunnerPool, 'view'>;
+  pool?: Pick<RunnerPool, 'view' | 'holds'>;
   /** Each CI machine's pause and its owner's busy spells (src/owner-busy.ts, Build 11 P4); absent in tests that don't need it. */
   ownerBusy?: Pick<OwnerBusy, 'front' | 'pause' | 'resume' | 'anyway' | 'use'>;
   /** The heavy jobs each place holds or has waiting (src/heavy-now.ts, #2109); absent in tests that don't need it. */

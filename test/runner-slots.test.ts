@@ -161,11 +161,14 @@ test("a desktop job's start asks the Windows agent for the signed-in session, an
   const w = slots();
   await w.rs.start(w.project, w.machine, { os: 'windows', slot: 1, labels: ['self-hosted', 'Peek-Auras-desktop'], job: 7 });
   await w.rs.start(w.project, w.machine, { os: 'windows', slot: 2, labels: ['self-hosted', 'peek-auras-ci'], job: 8 });
+  // Citadel's heavy desktop build is a size on a Linux runner, not a session (its desktop.yml).
+  await w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['self-hosted', 'citadel-ci-linux', 'citadel-heavy-desktop'], job: 9 });
   assert.deepEqual(
     w.sent.map((j) => j.op === 'start' && [j.slot, j.session]),
     [
       [1, true],
       [2, undefined],
+      [1, undefined],
     ],
   );
 });

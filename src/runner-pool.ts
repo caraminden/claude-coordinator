@@ -430,6 +430,15 @@ export class RunnerPool {
     return (this.queued.get(scheme) ?? []).every(fits) ? can.map((m) => m.name) : [];
   }
 
+  /**
+   * Whether a job of this run waits in the pool with a machine that could take it (tools/heavy-ci.ts, through /api/heavy/held:
+   * then it keeps waiting rather than going back to perigee), as HeavyPlacer.holds is for a scheme off the pool.
+   */
+  holds(repo: string, run: number): boolean {
+    const r = repo.toLowerCase();
+    return [...(this.open?.values() ?? [])].some((o) => o.run === run && o.repo.toLowerCase() === r && o.runner === null && this.able(o.scheme).length > 0);
+  }
+
   /** An agent's word on a slot (src/runner-slots.ts onReport): a runner that took its job keeps its room until it is seen running; one that ended or stopped is gone. */
   onSlot(r: Pick<SlotReport, 'runner' | 'event'>) {
     const rec = this.started.get(r.runner);
@@ -609,8 +618,7 @@ export class RunnerPool {
     return this.current;
   }
 
-  /** Start a one-job runner for `job` on `machine` in its scheme's lowest free slot there, booked at once so the next look doesn't start a second; null when every slot is busy. */
-  /** Start the job's runner in a free slot, or say why none (the machine's name follows). */
+  /** Start the job's runner in its scheme's lowest free slot, booked at once so the next look doesn't start a second, or say why none (the machine's name follows). */
   private begin(job: PoolJob, machine: number, labels: string[], now: number): Started | string {
     const os = job.needs.os!;
     const prefix = (n: number) => slotPrefix(machine, os, n);

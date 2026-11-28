@@ -713,3 +713,13 @@ test("a pool scheme's desktop jobs start in the signed-in session, one at a time
   w.pool.pass(w.sight([desk(22), w.j(w.peek, 23, { status: 'in_progress', runner: 'pool-m1-w2-j23' })]));
   assert.deepEqual(w.starts.at(-1), { repo: w.peek, slot: 1, labels: ['self-hosted', 'peek-auras-desktop'], job: 22, machine: 1, os: 'windows' });
 });
+
+test("a pool scheme's run is held while one of its jobs waits in the pool for a machine that can take it, so heavy-ci keeps waiting (P6)", () => {
+  const w = poolWorld({ pooled: new Set([PEEK]), limit: 16 });
+  w.pool.pass(w.sight([w.j(w.peek, 31, { labels: ['self-hosted', 'peek-auras-ci', 'citadel-heavy-suite'] })]));
+  assert.equal(w.pool.holds(w.peek.toUpperCase(), 31), true, 'booked but not yet on its runner: still the pool’s');
+  assert.equal(w.pool.holds(w.peek, 32), false, 'another run');
+  w.tick(POOL.pollMs);
+  w.pool.pass(w.sight([w.j(w.peek, 31, { status: 'in_progress', runner: 'pool-m1-w1-j31' })]));
+  assert.equal(w.pool.holds(w.peek, 31), false, 'on its runner: nothing waits');
+});

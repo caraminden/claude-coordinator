@@ -13,6 +13,7 @@ import { hostsCi, type Listed, type RunnerOs, type RunnerTokens } from './ci-run
 import type { Machine, Project, Store } from './db.ts';
 import { HttpError } from './http.ts';
 import type { MachineRelay } from './machines.ts';
+import { needsOf } from './runner-pool.ts';
 import { thrown } from './thrown.ts';
 
 /** A slot number: 1 to MAX_SLOTS per scheme per machine and OS (the agent's scripts refuse more). */
@@ -126,8 +127,8 @@ export class RunnerSlots {
     if (!Array.isArray(labels) || !labels.length || labels.length > 10 || !labels.every((l) => typeof l === 'string' && /^[\w.-]{1,100}$/.test(l))) throw new HttpError(400, 'labels must be 1 to 10 runner labels');
     if (job !== undefined && (!Number.isSafeInteger(job) || job < 1)) throw new HttpError(400, 'job must be a GitHub job id');
     // A desktop job opens windows and reads the screen: its runner runs in the signed-in person's session (P6, #2305;
-    // runner-slot.ps1 -Session), which only Windows has.
-    const session = labels.some((l) => l.toLowerCase().endsWith('-desktop'));
+    // runner-slot.ps1 -Session), which only Windows has. The pool's own reading, so `citadel-heavy-desktop` (a size) isn't one.
+    const session = needsOf(labels, project.name).session;
     if (session && os !== 'windows') throw new HttpError(400, "a desktop job's runner needs a Windows session");
     const name = poolName(machine.id, os, slot, job);
     const config = await this.tokens.jit(machine, project, name, labels);

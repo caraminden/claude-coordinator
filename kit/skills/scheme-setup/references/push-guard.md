@@ -111,12 +111,12 @@ run) and add a last step `if: success()` with `continue-on-error: true` running
 `tools/ci-numbers.sh suite-time=${secs}s`. Citadel's own `.github/workflows/tests.yml` is the example.
 A scheme's existing workflows are left alone.
 
-Write no workflow the plan doesn't ask for, and add no runner: once a workflow on the default
-branch asks for the scheme's label, a computer lending the scheme CI registers a runner by
-itself (Citadel, #2064), and jobs wait in the queue until it's there. If no computer lends the
-scheme CI, its members get one card naming computers they could ask; don't install a runner any
-other way. `ci_runners` is only for odd cases a plan names (a second runner, a `role`). *Done
-when* no job's `runs-on` is a bare hosted runner.
+Write no workflow the plan doesn't ask for, and add no runner: a new scheme is on Citadel's runner
+pool, so once a workflow on the default branch asks for the scheme's label, a computer lending the
+scheme CI gets a one-job runner for each job, and jobs wait in the queue until one is placed. If no
+computer lends the scheme CI, its members get one card naming computers they could ask; don't
+install a runner any other way (`ci_runners` only lists them now). *Done when* no job's `runs-on`
+is a bare hosted runner.
 
 **A repo with no CI** starts from this skill's `templates/starter-ci/` when the plan gives it CI: the check on the
 scheme's Linux runner after each ship, and a nightly boot check that starts the app and gets its health page. Its

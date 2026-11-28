@@ -22,7 +22,7 @@ test('build lines are given only to a minion in a build with its branch made, an
   assert.ok(!owner('build/7').includes('git branch build/7 main'), 'made already');
   assert.ok(owner('build/7', 'https://x.example/p/').includes('https://x.example/p/'));
   assert.ok(!buildLines({ build: 7, branch: 'build/7', owner: false, preview: 'https://x.example/p/' }).join('\n').includes('https://x.example/p/'), 'feeders get no preview link');
-  assert.ok(!prompt(null).includes('Build 7'), 'no role, no lines');
+  assert.ok(!prompt(null).includes('Plot 7'), 'no role, no lines');
   assert.ok(prompt(null, true, 'coordinator').includes(BUILDS_LINE));
   assert.ok(!prompt(null, false, 'coordinator').includes(BUILDS_LINE));
 });
@@ -67,7 +67,7 @@ test("an Overseer gets the skill in place of the build steps, a member the board
   // A goal cabal's member with a build label of its own: still a goal member, and that build's feeder, not its Overseer's.
   const labelled = turn({ build: 7, branch: 'build/7', owner: false }, goalRole);
   assert.match(labelled, /ship to live yourself/);
-  assert.ok(labelled.includes('You are a feeder in Build 7') && !labelled.includes("through Worker machines' Overseer"), labelled);
+  assert.ok(labelled.includes('You are a feeder in Plot 7') && !labelled.includes("through Worker machines' Overseer"), labelled);
   assert.ok(prompt(null, false, 'coordinator').includes(CABALS_LINE), 'goal cabals whatever the Builds setting');
 });
 

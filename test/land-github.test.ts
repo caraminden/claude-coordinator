@@ -4,7 +4,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { git, setup, ci, write } from './land-fixture.ts';
-import { landLog, ciDown } from './land-setup.ts';
+import { landLog, ciDown, asleep } from './land-setup.ts';
 
 // #2209 (Cara, 2026-11-27: "github should actually be the main CI? with my desktop as the fallback"): main's tests.yml
 // with the shard job sends a ship's run to GitHub's runners; the desktop takes it when GitHub can't, with no person.
@@ -70,10 +70,40 @@ test('GitHub broken with no desktop runner online: the suite runs here, loudly, 
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = c.run({ FAKE_CI: 'red', FAKE_STEP: 'the tools the tests need', FAKE_RUNNERS: '0' });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: GitHub's run failed in its step "the tools the tests need", before its tests ran \(https:\/\/ci\/7\), and no citadel-ci-linux runner is online/);
+  assert.match(res.stderr, /CI FALLBACK: GitHub's run failed in its step "the tools the tests need", before its tests ran \(https:\/\/ci\/7\), and no citadel-ci-linux runner is registered/);
   assert.doesNotMatch(c.calls(), /dispatches/);
   assert.equal(c.localRuns(), 1);
   assert.ok(!existsSync(ciDown(r)), 'no note that skips CI for the next ships');
+});
+
+// #2299: the desktop's runners asleep under Citadel's runner plan (offline on GitHub) can still take the run: it goes there,
+// and the plan wakes one for the queued job, rather than the suite running on perigee.
+test("GitHub broken with the desktop's runners asleep: the run goes to the desktop for Citadel's plan to wake one (#2299)", () => {
+  const r = setup();
+  const c = ci(r);
+  onGitHub(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = c.run({ FAKE_CI: 'red', FAKE_STEP: 'the tools the tests need', FAKE_CI_RERUN: 'green', FAKE_RUNNERS_FILE: asleep(r.dir, 3) });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /before its tests ran \(https:\/\/ci\/7\), so the run goes to Cara's desktop instead \(asleep: the job wakes one\)/);
+  assert.match(res.stderr, /CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/);
+  assert.match(c.calls(), /dispatches -f ref=land\/ticket\/1-x -f inputs\[where\]=desktop/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.equal(c.localRuns(), 0);
+});
+
+// #2299 review: asleep is the desktop's idle state under Citadel's runner plan, so slow shards still go there.
+test("shards slow to start with the desktop's runners asleep: the run goes to the desktop, which the job wakes (#2299)", () => {
+  const r = setup();
+  const c = ci(r);
+  onGitHub(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = c.run({ FAKE_CI: 'queued', FAKE_GH_JOBS: '0 20 5', FAKE_CI_RERUN: 'green', LAND_CI_GH_START: '0', FAKE_RUNNERS_FILE: asleep(r.dir, 3) });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /GitHub started only 15 of 20 shards within 0s .*, so the run goes to Cara's desktop instead \(asleep: the job wakes one\)/);
+  assert.match(res.stderr, /CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/);
+  assert.match(c.calls(), /runs\/7\/cancel/);
+  assert.equal(c.localRuns(), 0);
 });
 
 test('shards slow to start with no desktop runner online: the ship keeps waiting on GitHub and lands on its run', () => {
@@ -83,7 +113,7 @@ test('shards slow to start with no desktop runner online: the ship keeps waiting
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = c.run({ FAKE_CI_SLOW: '1', FAKE_GH_JOBS: '0 20 5', FAKE_RUNNERS: '0', LAND_CI_GH_START: '0' });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /GitHub started only 15 of 20 shards within 0s .*, and no citadel-ci-linux runner is online, so this keeps waiting on GitHub's run \(https:\/\/ci\/7\).*CI passed on \w+ in \d+s \(https:\/\/ci\/7\)/s);
+  assert.match(res.stderr, /GitHub started only 15 of 20 shards within 0s .*, and no citadel-ci-linux runner is registered, so this keeps waiting on GitHub's run \(https:\/\/ci\/7\).*CI passed on \w+ in \d+s \(https:\/\/ci\/7\)/s);
   assert.doesNotMatch(c.calls(), /dispatches|cancel/);
   assert.equal(c.localRuns(), 0);
 });

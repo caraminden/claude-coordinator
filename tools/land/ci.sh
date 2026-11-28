@@ -123,17 +123,18 @@ ci_burned() {
 # Only when no runner is online, GitHub errors (#1361) or a runner's clock is off (#900): a slow run says nothing about the next ship.
 ci_down() { printf '%s %s\n' "$(date +%s)" "$why" >"$state/ci-down" 2>/dev/null || true; }
 
-# How many runners with the label are online (its own query, a page of 100).
+# "<online> <registered>" runners with the label (#2299: Citadel's plan keeps idle ones asleep, offline, until a job wakes one).
+ci_rq() { printf '[.runners[] | select(any(.labels[]; .name == "%s"))] | "\\(map(select(.status == "online")) | length) \\(length)"' "$CI_LABEL"; }
 ci_online() {
   local n
-  n=$(hub gh api "repos/$ci_slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || return 1
-  [[ $n =~ ^[0-9]+$ ]] || { echo "it sent: $(head -c 100 <<<"$n")" >"$state/ci.err"; return 1; }
+  n=$(hub gh api "repos/$ci_slug/actions/runners?per_page=100" --jq "$(ci_rq)" 2>"$state/ci.err") || return 1
+  [[ $n =~ ^[0-9]+\ [0-9]+$ ]] || { echo "it sent: $(head -c 100 <<<"$n")" >"$state/ci.err"; return 1; }
   echo "$n"
 }
 
 # 0: green on this commit. 1: red ($ci_lost: its runner was lost, so no verdict). 2: no answer, with the reason in $why.
 ci_gate() {
-  local url online='' online_at='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' burn_wait='' ran
+  local url online='' registered online_at='' started=$SECONDS waited ci_taken='' taken_at='' nap down n told='' limit=$CI_LIMIT rerun_wait='' burn_wait='' ran
   local ci_gh='' gh_why='' gh_n gh_miss=0
   ci_lost='' ci_step=''
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
@@ -159,9 +160,10 @@ ci_gate() {
   if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
     ci_stale=$ci_id ci_id='' ci_status='' ci_result='' # its verdict isn't this run's, if GitHub misses the next ask (LB9)
     # The desktop's runners, for its run or as GitHub's fallback, which is all a run on GitHub needs of them.
-    online=$(hub gh api "repos/$ci_slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>"$state/ci.err") || { [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }; }
-    [[ $online =~ ^[0-9]+$ ]] || [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$online"))"; return 2; }
-    [ -n "$ci_gh" ] || [ "$online" -gt 0 ] || { why="no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)"; return 2; }
+    n=$(hub gh api "repos/$ci_slug/actions/runners" --jq "$(ci_rq)" 2>"$state/ci.err") || { [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online$(ci_said)"; return 2; }; }
+    [[ $n =~ ^[0-9]+\ [0-9]+$ ]] || [ -n "$ci_gh" ] || { why="GitHub didn't say which runners are online (it sent: $(head -c 100 <<<"$n"))"; return 2; }
+    read -r online registered <<<"$n"
+    [ -n "$ci_gh" ] || [ "$registered" -gt 0 ] || { why="no $CI_LABEL runner is registered"; return 2; }
     [ -z "$ci_gh" ] || : >"$state/pre-yield.$$"
     ci_pushed=$tip ci_pushed_at=$SECONDS # before the push: a stop can end it once GitHub has it
     # Forced on purpose: land/ and land-base/ branches are scratch only this script writes. Atomic: the burn-in needs the base.
@@ -231,10 +233,12 @@ ci_gate() {
     elif [ -z "$ci_gh" ] && [ "$waited" -ge "$CI_START" ]; then
       # Not started: is a runner online? Asked past CI_START, then every CI_ONLINE_POLL s; a missed answer keeps the last.
       if [ -z "$online_at" ] || [ $((SECONDS - online_at)) -ge "$CI_ONLINE_POLL" ]; then
-        if n=$(ci_online); then online=$n online_at=$SECONDS; fi
+        if n=$(ci_online); then read -r online registered <<<"$n"; online_at=$SECONDS; fi
       fi
       if [ -z "$online" ]; then why="GitHub didn't say which runners are online$(ci_said)" down=1
-      elif [ "$online" = 0 ]; then why="no runner started the job within ${CI_START}s, and no $CI_LABEL runner is online (they run only while Cara is logged on to her desktop)" down=1
+      elif [ "$online$registered" = 00 ]; then why="no runner started the job within ${CI_START}s, and no $CI_LABEL runner is registered" down=1
+      elif [ "$online" = 0 ]; then
+        [ "$waited" -lt "$CI_WAKE" ] || why="no runner started the job within ${waited}s: none of the $registered asleep woke (PC off, or no room in Citadel's plan)" down=1
       elif [ "$waited" -ge "$CI_START_ONLINE" ]; then why="no runner started the job within ${CI_START_ONLINE}s, though a $CI_LABEL runner is online"
       elif [ -z "$told" ] || [ $((SECONDS - told)) -ge 300 ]; then
         # Every 5 min, a new phase too (DEPLOY_QUEUE_STALL).

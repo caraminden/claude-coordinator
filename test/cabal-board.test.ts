@@ -208,3 +208,24 @@ test("the timeline shows a reader outside the lead's scheme no log, no other ask
   assert.match(inside, /Away #\d+: AWAY-ASK/);
   assert.match(inside, /SECRET-SHIP/);
 });
+
+test('a member with a merged commit reads merged only once its work is finished (#2302)', async () => {
+  git(repo, 'branch', 'build/8', 'main');
+  const lead = minion('Plot 8 lead', 8, 'build/8', 0);
+  const mk = (title: string) => minion(title, 8, 'build/8', 1);
+  const working = mk('Fixer');
+  const away = mk('Sealed fix');
+  const waiting = mk('Done and waiting');
+  git(repo, 'checkout', '-q', 'build/8');
+  for (const t of [working, away, waiting]) git(repo, 'merge', '-q', '--no-ff', '-m', 'merge', `ticket/${t.id}`);
+  git(repo, 'checkout', '-q', 'main');
+  for (const t of [working, away, waiting]) store.joinCabal(t.id, lead.id, p.id, t.title);
+  store.updateTicket(working.id, { status: 'running' });
+  sealed.add(away.id);
+  const b = (await readBoard(store, lead.id, deps))!;
+  const state = (title: string) => b.members.find((m) => m.title === title)!.state;
+  assert.equal(state('Fixer'), 'running', 'working, though a commit merged');
+  assert.equal(state('Sealed fix'), 'sealed');
+  assert.equal(state('Done and waiting'), 'merged', 'open and idle with its branch merged is finished');
+  assert.equal(b.counts.merged, 1);
+});

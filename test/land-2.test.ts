@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { land, git, setup, landAsync, ci, quietProc } from './land-fixture.ts';
 import { until } from './wait.ts';
 import { landText } from './land-files.ts';
-import { timings, stopped, cancels, hubHas, waits, procAt, once, RERUNNING, windowed, killer, landLog } from './land-setup.ts';
+import { timings, stopped, cancels, hubHas, waits, procAt, once, RERUNNING, windowed, killer, landLog, asleep } from './land-setup.ts';
 
 test('a stopped ship whose run GitHub never lists ends within its cap, scratch branches gone (#1894)', async () => {
   const s = await stopped({ LAND_CI_LATE: '3', LAND_CI_LATE_POLL: '0.2' }, waits);
@@ -422,13 +422,66 @@ test('a CI run killed from outside after a test had failed is a real red: refuse
   );
 });
 
+// #2299 (Nov 27, 01:48-02:30 PST): Citadel's runner plan keeps idle desktop runners asleep, their services stopped, so
+// GitHub lists them offline, and it wakes one for a queued job. A check that counted only online runners never pushed
+// the job that wakes one, and ran the suite on perigee with Cara's desktop up. A registered runner is one that can run it.
+test("runners asleep under Citadel's runner plan are no reason to fall back: the run is pushed for the plan to wake one (#2299)", () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const res = c.run({ FAKE_RUNNERS_FILE: asleep(r.dir, 4), COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI passed on \w+ in \d+s/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+  assert.equal(c.localRuns(), 0);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+});
+
+test('an asleep runner that wakes for the job within LAND_CI_WAKE takes it: no fallback, though none was online past LAND_CI_START (#2299)', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const runners = asleep(r.dir, 2);
+  const state = join(r.dir, 'ci-state');
+  writeFileSync(state, 'queued');
+  const shared = join(r.dir, 'shared');
+  let woke = false;
+  const res = await c.runAsync({ FAKE_CI_FILE: state, LAND_CI_START: '1', LAND_CI_WAKE: '60', LAND_CI_ONLINE_POLL: '0', FAKE_RUNNERS_FILE: runners, COORDINATOR_SHARED_DIR: shared }, (s) => {
+    if (woke || !/waiting for CI on/.test(s)) return;
+    woke = true;
+    setTimeout(() => {
+      asleep(r.dir, 2, 'online');
+      writeFileSync(state, 'running');
+      setTimeout(() => writeFileSync(state, 'green'), 500);
+    }, 3000);
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI passed/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|no runner started/);
+  assert.equal(c.localRuns(), 0, 'no suite on perigee');
+  const queued = Number(landLog(shared).match(/· timing · ticket\/1-x · .* · ci-queue (\d+) · /)?.[1]);
+  assert.ok(queued >= 2, `it waited past the 1 s start bound for the wake (${queued} s)`);
+});
+
+test('asleep runners none of which wakes for the job: past LAND_CI_WAKE the suite runs here, saying so (#2299)', () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_WAKE: '2', LAND_CI_ONLINE_POLL: '0', FAKE_RUNNERS_FILE: asleep(r.dir, 2) });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI FALLBACK: no runner started the job within [23]s: none of the 2 asleep woke \(PC off, or no room in Citadel's plan\)/);
+  assert.doesNotMatch(res.stderr, /logged on/);
+  assert.equal(c.localRuns(), 1);
+});
+
 test('when CI cannot answer, it says so loudly, logs it, runs the suite here and lands', async (t) => {
   const cases: [string, Record<string, string>, RegExp][] = [
-    ['no runner online', { FAKE_RUNNERS: '0' }, /no citadel-ci-linux runner is online/],
+    ['no runner registered, online or asleep', { FAKE_RUNNERS: '0' }, /CI FALLBACK: no citadel-ci-linux runner is registered\. Running/],
     ['GitHub down', { FAKE_CI: 'down' }, /GitHub didn't answer/],
     ['GitHub down, and it says nothing of the hour either (#1722)', { FAKE_CI: 'down', FAKE_QUOTA: 'down' }, /GitHub didn't answer/],
     ['the runner list fails', { FAKE_RUNNERS: 'down' }, /didn't say which runners are online/],
-    ['no runner starts the job, and none is online', { FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0' }, /no runner started the job within 1s, and no citadel-ci-linux runner is online/],
+    ['no runner starts the job, and none is online or asleep', { FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0' }, /no runner started the job within 1s, and no citadel-ci-linux runner is registered/],
     ['a runner is online but starts no job in the longer bound', { FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_START_ONLINE: '2' }, /no runner started the job within 2s, though a citadel-ci-linux runner is online/],
     ['the run never finishes', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }, /CI didn't finish within 1s of starting/],
     ['GitHub stops answering while CI runs (#1655)', { FAKE_CI: 'running', FAKE_CI_FAIL_AFTER: '2', LAND_CI_TIMEOUT: '4' }, /CI FALLBACK: GitHub didn't answer since \d\d:\d\d \(\d+ polls failed in a row\) \(gh: API rate limit exceeded.*, so it isn't known whether CI finished/],
@@ -546,7 +599,7 @@ test('after CI gave no answer in time, the landings of the next minutes skip the
   r.commit(r.wt, 'b.txt', 'two\n');
   res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '30' });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: CI gave no answer to a landing \d+ s ago \(no runner started the job within 1s, and no citadel-ci-linux runner is online .*\), so this one doesn't wait for it \(it is asked again from \d\d:\d\d\)/);
+  assert.match(res.stderr, /CI FALLBACK: CI gave no answer to a landing \d+ s ago \(no runner started the job within 1s, and no citadel-ci-linux runner is registered\), so this one doesn't wait for it \(it is asked again from \d\d:\d\d\)/);
   assert.equal(c.calls(), asked, 'GitHub is not asked');
   assert.equal(c.localRuns(), 2);
   r.commit(r.wt, 'b.txt', 'three\n');
@@ -636,7 +689,7 @@ test('with no runner online and a busy perigee, the ship asks CI again until a r
     once(() => writeFileSync(runners, '1')),
   );
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI: no citadel-ci-linux runner is online.*but perigee is busy/);
+  assert.match(res.stderr, /CI: no citadel-ci-linux runner is registered.*but perigee is busy/);
   assert.match(res.stderr, /CI passed/);
   assert.doesNotMatch(res.stderr, /CI FALLBACK/);
   assert.equal(c.localRuns(), 0);

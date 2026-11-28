@@ -224,3 +224,12 @@ export const startsLater = (file: string, ms = 2500) => {
 };
 
 export const ciDown = (r: ReturnType<typeof setup>) => join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'ci-down');
+
+// GitHub's runner list (#2299) with n citadel-ci-linux runners in one status (offline: asleep under Citadel's runner plan)
+// and another scheme's online one, for FAKE_RUNNERS_FILE.
+export const asleep = (dir: string, n: number, status = 'offline') => {
+  const file = join(dir, 'runners.json');
+  const runners = Array.from({ length: n }, (_, i) => ({ name: `pc-linux-${i + 1}`, status, busy: false, labels: [{ name: 'self-hosted' }, { name: 'citadel-ci-linux' }] }));
+  writeFileSync(file, JSON.stringify({ runners: [...runners, { name: 'other', status: 'online', busy: false, labels: [{ name: 'other-ci-linux' }] }] }));
+  return file;
+};

@@ -11,11 +11,9 @@ const run = promisify(execFile);
 // PRs are listed at most this often per repo; a new one shows up on the next look.
 const TTL_MS = 5 * 60_000;
 
-/** "owner/name" (lowercase) of a GitHub repo URL, https or git@; null for anything else. */
-export function repoSlug(repoUrl: string | null): string | null {
-  const m = /^(?:https:\/\/github\.com\/|git@github\.com:)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(repoUrl ?? '');
-  return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
-}
+import { repoSlug } from './repo-slug.ts';
+
+export { repoSlug };
 
 export interface Owner {
   id: number;

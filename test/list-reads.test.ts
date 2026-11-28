@@ -14,7 +14,9 @@ const COUNTER = join(import.meta.dirname, 'fixtures', 'sql-count.ts');
 const roots: string[] = [];
 
 /** A database with `n` open minions in one scheme, each with what a list row reads: properties, a person who touched it,
- *  a turn's cost, an open card, held mail, a loop hold, a chain to a dismissed leader and a delivery waiting for it. */
+ *  a turn's cost, an open card, held mail, a loop hold, a chain behind an open minion and a relay from a dismissed one.
+ *  Nothing here may be something a server acts on by itself: about 3 s after boot its live check started every chain
+ *  behind a dismissed leader and stamped each row from its own clock, so two servers' answers differed (#2286). */
 function seed(n: number): string {
   const root = mkdtempSync(join(tmpdir(), `list-reads-${n}-`));
   roots.push(root);
@@ -31,6 +33,7 @@ function seed(n: number): string {
     store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Cara' });
     const leader = store.createTicket({ project_id: p.id, title: 'leader', permission_mode: 'default', created_by: 'Josh' });
     store.updateTicket(leader.id, { status: 'closed' });
+    const ahead = store.createTicket({ project_id: p.id, title: 'ahead', permission_mode: 'default', created_by: 'Josh' }); // open, so its chains wait
     for (let i = 0; i < count; i++) {
       const t = store.createTicket({ project_id: p.id, title: `minion ${i}`, permission_mode: 'default', created_by: i % 2 ? 'Cara' : 'Josh' });
       store.props.set('minion', t.id, p.id, { type: 'bug', assigned: 'Josh' }, 'Cara');
@@ -40,7 +43,7 @@ function seed(n: number): string {
       const mail = store.addEvent(t.id, 'user_message', { text: 'held for later', author: 'Josh' });
       store.setSetting(queueKey(t.id), { held: [{ author: 'Josh', text: 'held for later', images: [], id: mail.id }] });
       store.setSetting(`loop:${t.id}`, { sent: [now], held: [{ to: t.id, author: 'Josh', text: 'again', at: now }] });
-      store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: t.id, when_kind: 'live', when_arg: { after: leader.id, base: null }, payload: { message: 'go on', from: 'Josh', reason: "leader's work is live" }, set_by: 'Josh' });
+      store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: t.id, when_kind: 'live', when_arg: { after: ahead.id, base: null }, payload: { message: 'go on', from: 'Josh', reason: "ahead's work is live" }, set_by: 'Josh' });
       store.addDelivery({ project_id: p.id, kind: 'relay', to_kind: 'minion', to_id: t.id, when_kind: 'live', when_arg: 'f'.repeat(40), payload: { ticket: leader.id, to: { minion: t.id, number: t.number ?? 0 }, text: 'once live' }, set_by: 'Josh' });
     }
   }
@@ -56,7 +59,11 @@ before(async () => {
   const rOff = mkdtempSync(join(tmpdir(), 'list-reads-off-'));
   roots.push(rOff);
   cpSync(join(r60, 'data'), join(rOff, 'data'), { recursive: true }); // the same rows, before either server writes
-  [s10, s60, off] = await Promise.all([boot(seed(10)), boot(r60), boot(rOff, { CITADEL_READ_SCOPE: '0' })]);
+  // One after another: ten copies of this file at once (the ship's burn-in) then boot ten servers together, as any
+  // one-server file does. All three at once made thirty, and none said its port within the 20 s it is given (#2286).
+  s10 = await boot(seed(10));
+  s60 = await boot(r60);
+  off = await boot(rOff, { CITADEL_READ_SCOPE: '0' });
 });
 after(async () => {
   await Promise.all([s10, s60, off].map((s) => s?.stop()));
@@ -80,7 +87,7 @@ test("a scheme's open list and the scheme list run as many statements for 60 ope
   const [a10, a60] = [await scheme(s10), await scheme(s60)];
   const open10 = await get(s10, `/api/projects/${a10}?tickets=open`),
     open60 = await get(s60, `/api/projects/${a60}?tickets=open`);
-  assert.equal(JSON.parse(open60.body).tickets.length, 60);
+  assert.equal(JSON.parse(open60.body).tickets.length, 61, 'the 60 and the minion they wait behind');
   assert.ok(open10.n > 0, 'the counter is loaded');
   assert.equal(open60.n, open10.n, `?tickets=open: ${open10.n} statements for 10 open minions, ${open60.n} for 60`);
   const list10 = await get(s10, '/api/projects'),

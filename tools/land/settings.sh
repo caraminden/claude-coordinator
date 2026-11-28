@@ -15,6 +15,7 @@ land_settings() {
   # suite's growth (#1606); a run that hangs costs 3 min more before it falls back.
   CI_START=${LAND_CI_START:-90} CI_START_ONLINE=${LAND_CI_START_ONLINE:-900} CI_LIMIT=${LAND_CI_TIMEOUT:-540} CI_POLL=${LAND_CI_POLL:-15} CI_BACKOFF=${LAND_CI_BACKOFF:-60} # #1655: 5 s was 720 calls an hour for each landing waiting
   CI_LATE=${LAND_CI_LATE:-20} CI_LATE_POLL=${LAND_CI_LATE_POLL:-2} # for how long after a push a stop looks for its run, which GitHub lists some seconds late (#1894)
+  CI_WAKE=${LAND_CI_WAKE:-180} # #2299: a job's wait for an asleep runner to wake
   CI_ONLINE_POLL=${LAND_CI_ONLINE_POLL:-30} # how often a job waiting past CI_START asks whether a runner is online
   CI_GH_START=${LAND_CI_GH_START:-60} # a ship's run on GitHub with a shard not started by then goes to the desktop (#2209)
   # The reruns alone get a window of their own (#1374): the workflow reruns the failed files in a step of its own, and at

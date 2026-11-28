@@ -76,6 +76,35 @@ $citadel = @([CitadelCiJob]::Calls | Sort-Object)
   }
 });
 
+test('with no shared cap (-CpuPercent 0, the agent since #2262), no slot is capped, one nested elsewhere included', { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'keep-runners-'));
+  try {
+    const out = pwsh(
+      `
+$CpuPercent = 0
+$slots = @{
+  'C:\\b' = @{ Key = 'caraminden/peek-auras|desktop-g248ij8'; Job = [IntPtr]2; Rate = 1333; Busy = $true; Inside = $true }
+  'C:\\e' = @{ Key = 'caraminden/mandate|desktop-g248ij8'; Job = [IntPtr]5; Rate = -1; Busy = $true; Inside = $false }
+}
+$ships = $null
+Set-SlotRate
+$none = @([CitadelCiJob]::Calls | Sort-Object)
+[CitadelCiJob]::Calls.Clear()
+# An older agent's ship, read before the new agent empties ships.json: a share of the PC, not of a cap that isn't there.
+$ships = 'caraminden/claude-coordinator|desktop-g248ij8'
+Set-SlotRate
+$ship = @([CitadelCiJob]::Calls | Sort-Object)
+@{ none = $none; ship = $ship } | ConvertTo-Json -Compress`,
+      dir,
+    );
+    // Cara, 2026-11-27, "Drop the cap, keep low priority": b's old squeeze lifts and e, in a job of its own, gets no cap.
+    assert.deepEqual(out.none, ['2=0', '5=0']);
+    assert.deepEqual(out.ship, ['2=1500', '5=1500']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('ships.json counts until its expiry, and a missing, broken or expired file names no ship', { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'keep-runners-'));
   try {

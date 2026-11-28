@@ -18,7 +18,7 @@
 // PC needs no open port. It is a helper of the PC's machine agent (One kind of machine H2): pressing Set up on CI runners makes that
 // agent write its elevate script, which runs tools/ci-runner/install-runner-agent.ps1 (or .sh) as administrator; tools/ci-runner/README.md says more.
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, statfsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, statfsSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, hostname, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -338,8 +338,9 @@ export class Sampler {
 
 // ---- Cap and yield (#552; Josh, 2026-11-11: "ok, CI is using my whole desktop, can we limit it a bit?") ----
 // On Windows, keep-runners.ps1 holds every runner on the PC (Citadel's or not) and all it starts at below-normal
-// priority, all of them together under CI_CPU_PERCENT of the PC, in one job object it keeps open; and it starts runner
-// services a reboot left stopped. It runs as long as the agent does, so the cap comes back with every boot and install.
+// priority, in one job object it keeps open, with no CPU cap (#2262: under the 75% cap Peek's runners starved on an
+// idle PC; Cara, 2026-11-27, "Drop the cap, keep low priority"); and it starts runner services a reboot left stopped.
+// It runs as long as the agent does. CI_CPU_PERCENT is the Linux runners' cap.
 export const CI_CPU_PERCENT = 75;
 const KEEPER_AGAIN_MS = 60_000;
 /** The Linux runners' slice (systemd), which install-runner-agent.sh makes on plain Linux; in WSL, .wslconfig caps the VM. */
@@ -380,18 +381,18 @@ export async function sliceCap(caps, { run = runCommand, units = '/etc/systemd/s
   else log(`Couldn't cap CI at ${caps.cpu}%: ${output.split('\n').at(-1)}`);
 }
 
-/** keep-runners.ps1 from the agent's folder, in Windows PowerShell, with the cap and this agent's pid (it ends with the agent). */
+/** keep-runners.ps1 from the agent's folder, in Windows PowerShell, with no cap and this agent's pid (it ends with the agent). */
 export function keeperCommand(dir, pid = process.pid, systemRoot = process.env.SystemRoot ?? 'C:\\Windows', caps = ownerCaps(dir)) {
   return {
     command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', String(caps.cpu), '-AgentPid', String(pid), '-SqueezePercent', String(caps.squeeze), '-CitadelSqueezePercent', String(caps.citadel)],
+    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, 'keep-runners.ps1'), '-CpuPercent', '0', '-AgentPid', String(pid), '-SqueezePercent', String(caps.squeeze), '-CitadelSqueezePercent', String(caps.citadel)],
   };
 }
 
 /** Starts keep-runners.ps1, logs what it says, and starts it again a minute after it ever ends. */
 export function keepRunners(dir, log, again = KEEPER_AGAIN_MS, caps = ownerCaps(dir, log)) {
   if (!existsSync(join(dir, 'keep-runners.ps1'))) {
-    log("keep-runners.ps1 is not in the agent's folder, so CI is not capped (#552): install the agent again.");
+    log("keep-runners.ps1 is not in the agent's folder, so CI is not held at low priority (#552): install the agent again.");
     return;
   }
   const { command, args } = keeperCommand(dir, process.pid, undefined, caps);
@@ -410,6 +411,8 @@ export function keepRunners(dir, log, again = KEEPER_AGAIN_MS, caps = ownerCaps(
 // Citadel sends the runners on a ship run (any scheme's land/ branch) every 15 seconds. While a list names any, every
 // other runner on the PC is held to SQUEEZE_PERCENT of it together, shared among those running a job; a list that
 // stops coming lifts it after SHIP_HOLD_MS, so a Citadel that went away never leaves runners squeezed.
+// Off since #2262 (Cara, 2026-11-27, "wait and load balance, not run the job starved"): the agent sends every
+// squeeze an empty list, which lifts one an older agent left; the parts stay for that lift.
 export const SQUEEZE_PERCENT = 30;
 // Windows only (Josh, 2026-11-24, "Squeeze Peek's builds harder"): while a Citadel ship runs, the others share this much.
 export const WINDOWS_CITADEL_SQUEEZE_PERCENT = 10;
@@ -506,8 +509,7 @@ export class LinuxSqueeze {
 // many CI runners to keep awake, every 10 seconds: { plan: { runners, queued } }. The rest sleep (their service stopped),
 // so GitHub hands a job to a PC with room. A ship's runners and a runner running a job are never stopped; a plan that
 // stops coming wakes every runner it put to sleep after PLAN_HOLD_MS, so a Citadel that went away never leaves CI asleep.
-// While a plan is held the ship squeeze above is off: the plan holds the ship's threads first. A Citadel from before
-// sends no plan, and the squeeze works as it did.
+// The plan holds the ship's threads first; no runner is squeezed (#2262).
 export const PLAN_HOLD_MS = 2 * 60_000;
 
 /** Citadel's plan, checked: the runners to keep awake (a whole number) and CI jobs waiting by repo; null if it isn't one. */
@@ -615,14 +617,9 @@ const SLEPT_FILE = 'slept.json';
  * else stopped is never started.
  */
 export class RunnerWake {
-  constructor({ os = defaultOs(), dir = '.', run = runCommand, units = '/etc/systemd/system', procs = linuxProcs, windowsProcs = () => /** @type {{ path?: string }[]} */ ([]), identity = runnerIdentity, roots = windowsRoots, now = Date.now, log = () => {} } = {}) {
+  constructor({ os = defaultOs(), dir = '.', run = runCommand, units = '/etc/systemd/system', procs = linuxProcs, windowsProcs = () => /** @type {{ path?: string }[]} */ ([]), took = tookJob, identity = runnerIdentity, roots = windowsRoots, now = Date.now, log = () => {} } = {}) {
     // wakeable: the repo of each runner it may keep up (awake, or put to sleep by it), one a runner, for its load samples.
-    Object.assign(this, { os, dir, run, units, procs, windowsProcs, identity, roots, now, log, plan: null, until: 0, ships: [], said: '', wakeable: null, queue: Promise.resolve() });
-  }
-
-  /** A plan is held: the squeeze stays off. */
-  held() {
-    return !!this.plan && this.now() < this.until;
+    Object.assign(this, { os, dir, run, units, procs, windowsProcs, took, identity, roots, now, log, plan: null, until: 0, ships: [], said: '', wakeable: null, queue: Promise.resolve() });
   }
 
   update(plan, ships = this.ships) {
@@ -690,7 +687,7 @@ export class RunnerWake {
           .filter(Boolean),
       );
     const busy = working();
-    const list = units.map((u, i) => ({ ...u, key: u.unit, awake: states[i] === 'active', busy: busy.has(u.dir), ship: this.onShip(u) }));
+    const list = units.map((u, i) => ({ ...u, key: u.unit, awake: states[i] === 'active', busy: busy.has(u.dir) || this.took(u.dir), ship: this.onShip(u) }));
     // One someone else stopped is theirs: left down and out of the count.
     const ours = list.filter((r) => r.awake || slept.has(r.key));
     this.wakeable = ours.map((r) => r.repo.toLowerCase());
@@ -700,7 +697,7 @@ export class RunnerWake {
       if (want === r.awake) continue;
       // The plan moved since the runner took a job: it finishes, and sleeps at the next look.
       // Looked at again right before the stop: GitHub may have handed it a job while the ones before it stopped.
-      if (!want && (r.busy || r.ship || working().has(r.dir))) continue;
+      if (!want && (r.busy || r.ship || working().has(r.dir) || this.took(r.dir))) continue;
       const { code: c, output: out } = await this.run({ command: 'systemctl', args: [want ? 'start' : 'stop', r.unit] }, process.env, 60_000);
       if (c !== 0) {
         this.log(`Couldn't ${want ? 'wake' : 'put to sleep'} ${r.unit}: ${out.split('\n').at(-1)}`);
@@ -728,7 +725,7 @@ export class RunnerWake {
       const { name, repo } = this.identity(dir);
       if (!name || !repo) return [];
       const key = dir.toLowerCase();
-      return [{ key, dir, name, repo, awake: up.has(key), busy: working.has(key), ship: false }];
+      return [{ key, dir, name, repo, awake: up.has(key), busy: working.has(key) || this.took(dir), ship: false }];
     });
     for (const r of list) r.ship = this.onShip(r);
     const ours = list.filter((r) => r.awake || slept.has(r.key));
@@ -739,6 +736,34 @@ export class RunnerWake {
     writeFileSync(`${file}.new`, JSON.stringify({ until: this.plan ? this.until : 0, dirs: asleep }));
     renameSync(`${file}.new`, file);
     this.say(this.plan ? `Citadel's plan: ${this.plan.runners} runner(s) awake besides a ship's; ${asleep.length} of ${ours.length} to sleep.` : 'No plan from Citadel: every runner is up.');
+  }
+}
+
+/**
+ * Whether a runner's listener holds a job (#2262): the last JobState its newest _diag/Runner_*.log gave is Busy. It
+ * says so as it takes the job, before its Worker starts (a starved Worker took 16 s and more), and Online once done.
+ * Only the log's last 256 KB is read: by the time a job has written that much, its Worker shows it.
+ * @param {string} dir
+ */
+export function tookJob(dir) {
+  try {
+    const diag = join(dir, '_diag');
+    const newest = readdirSync(diag)
+      .filter((f) => /^Runner_.*\.log$/.test(f))
+      .sort()
+      .at(-1);
+    if (!newest) return false;
+    const fd = openSync(join(diag, newest), 'r');
+    try {
+      const size = fstatSync(fd).size;
+      const tail = Buffer.alloc(Math.min(size, 256 * 1024));
+      readSync(fd, tail, 0, tail.length, size - tail.length);
+      return [...tail.toString('utf8').matchAll(/JobState: (\w+)/g)].at(-1)?.[1] === 'Busy';
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return false;
   }
 }
 
@@ -819,7 +844,7 @@ async function main() {
   // Load samples (#534) go out on their own clock, whatever the stream to Citadel is doing; a failure is said once
   // until one gets through, and never touches a job.
   const sampler = new Sampler({ os, dir: jobs.dir });
-  // Runners awake (M6b): while Citadel's plan is held the squeeze is off, and the plan's runners stay up.
+  // Runners awake (M6b): the plan's runners stay up.
   const wake = new RunnerWake({ os, dir: jobs.dir, log, windowsProcs: () => sampler.lastProcs });
   let sampleError = '';
   const sample = async () => {
@@ -843,22 +868,15 @@ async function main() {
   const caps = ownerCaps(jobs.dir, log);
   if (os === 'windows') keepRunners(jobs.dir, log, undefined, caps);
   else sliceCap(caps, { log }).catch((err) => log(`Couldn't cap CI: ${err.message}`));
-  const squeeze = os === 'linux' ? new LinuxSqueeze({ log, percent: caps.squeeze }) : null;
-  squeeze?.next().catch((err) => log(`Couldn't clear the ship squeeze: ${err.message}`));
-  if (squeeze) setInterval(() => squeeze.tick().catch((err) => log(`Couldn't lift the ship squeeze: ${err.message}`)), 10_000).unref();
+  // No ship squeezes a runner (#2262; Cara, 2026-11-27: "if a machine doesnt have room, we can wait and load balance,
+  // not run the job starved"): a ship goes first through the plan's sleep only. The empty list lifts what an older agent left.
+  if (os === 'linux') new LinuxSqueeze({ log, percent: caps.squeeze }).next().catch((err) => log(`Couldn't clear the ship squeeze: ${err.message}`));
+  else writeShips(jobs.dir, []);
   let lastShips = [];
-  let squeezed = true;
   let shipError = '';
-  const squeezeShips = async () => {
-    squeezed = !wake.held();
-    const list = squeezed ? lastShips : [];
-    if (squeeze) await squeeze.update(list);
-    else writeShips(jobs.dir, list);
-  };
   const ships = async (raw) => {
     try {
       lastShips = cleanShips(raw);
-      await squeezeShips();
       await wake.shipsAre(lastShips);
       shipError = '';
     } catch (err) {
@@ -872,21 +890,13 @@ async function main() {
     if (!p) return log(`Citadel sent a plan this agent can't read: ${JSON.stringify(raw).slice(0, 200)}`);
     try {
       await wake.update(p, lastShips);
-      if (squeezed) await squeezeShips();
       planError = '';
     } catch (err) {
       if (err.message !== planError) log(`Couldn't apply Citadel's plan (said once): ${err.message}`);
       planError = err.message;
     }
   };
-  setInterval(
-    () =>
-      wake
-        .tick()
-        .then(() => (!wake.held() && !squeezed ? squeezeShips() : null))
-        .catch((err) => log(`Couldn't wake the runners: ${err.message}`)),
-    10_000,
-  ).unref();
+  setInterval(() => wake.tick().catch((err) => log(`Couldn't wake the runners: ${err.message}`)), 10_000).unref();
   // Stopped (systemd's stop, Ctrl+C): the runners it put to sleep wake first, as with no agent at all; at most 30 s.
   for (const sig of ['SIGTERM', 'SIGINT'])
     process.once(sig, () => {

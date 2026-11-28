@@ -9,7 +9,8 @@
     1. finds every runner on the PC, Citadel's or not: each RunnerService.exe and Runner.Listener.exe (a service's
        or a session runner's) and every process started under them;
     2. puts any of those not yet held into one Windows job object, which runs everything in it at below-normal
-       priority and holds it all together to -CpuPercent of the whole PC (a hard cap). A process started by one in
+       priority (and, with -CpuPercent, holds it all together to that share of the whole PC: a hard cap; the agent
+       sets none since #2262, Cara, 2026-11-27, "Drop the cap, keep low priority"). A process started by one in
        the job is in the job from its first instruction, so a job's cargo, MSBuild, node or dotnet is held too; the
        sweep only catches what started before this script did;
     3. in the first 30 minutes after the PC starts, starts any runner service that is set to start automatically but
@@ -39,7 +40,8 @@
   With -Prove: the folder holding Git Bash's bash.exe, as the installer was given it.
 
 .PARAMETER CpuPercent
-  The share of the whole PC (every core) all CI together may use, 1 to 100.
+  The share of the whole PC (every core) all CI together may use, 1 to 100; 0 (the default, and the agent's since
+  #2262) caps nothing and lifts a cap an older run left on the shared job.
 
 .PARAMETER SqueezePercent
   The share of the whole PC every runner not on a ship may use together while a ship runs, 1 to 100.
@@ -55,7 +57,7 @@
 #>
 [CmdletBinding()]
 param(
-  [ValidateRange(1, 100)][int]$CpuPercent = 75,
+  [ValidateRange(0, 100)][int]$CpuPercent = 0,
   [ValidateRange(1, 100)][int]$SqueezePercent = 30,
   [ValidateRange(1, 100)][int]$CitadelSqueezePercent = 10,
   [int]$AgentPid = 0,
@@ -110,7 +112,7 @@ public static class CitadelCiJob {
   // Breakaway is not allowed: Git Bash asks for it whenever a job allows it, so every cargo a bash step started got out
   // (#1268, proven on the test box 2026-11-21); refused, it starts them in the job. A tool that demands it fails to start.
   // A name already taken opens that job and sets these limits on it again (a restarted script gets its jobs back);
-  // percent 0 sets no cap.
+  // percent 0 sets no cap, and lifts one the job had.
   public static IntPtr Create(string name, int percent) {
     IntPtr job = CreateJobObjectW(IntPtr.Zero, name);
     if (job == IntPtr.Zero) throw new Win32Exception();
@@ -118,16 +120,20 @@ public static class CitadelCiJob {
     limit.Basic.LimitFlags = LIMIT_PRIORITY_CLASS;
     limit.Basic.PriorityClass = BELOW_NORMAL;
     if (!SetInformationJobObject(job, 9, ref limit, Marshal.SizeOf(limit))) throw new Win32Exception();
-    if (percent > 0) SetRate(job, percent * 100);
+    SetRate(job, percent * 100);
     return job;
   }
 
   // A hard cap in hundredths of a percent, 0 for none. In a job nested under a capped one it is a share of that one's
-  // cap, not of the PC (Windows: rates are relative to the nearest parent with one).
+  // cap, not of the PC (Windows: rates are relative to the nearest parent with one). Windows refuses to turn off a rate
+  // a job never had (error 87, "The parameter is incorrect"): it has none, which is what was asked (#2262).
   public static void SetRate(IntPtr job, int hundredths) {
     CpuRate rate = new CpuRate();
     if (hundredths > 0) { rate.ControlFlags = RATE_ENABLE | RATE_HARD_CAP; rate.Rate = (uint)Math.Min(10000, hundredths); }
-    if (!SetInformationJobObject(job, 15, ref rate, Marshal.SizeOf(rate))) throw new Win32Exception();
+    if (SetInformationJobObject(job, 15, ref rate, Marshal.SizeOf(rate))) return;
+    int err = Marshal.GetLastWin32Error();
+    if (hundredths <= 0 && err == 87) return;
+    throw new Win32Exception(err);
   }
 
   // 0 when the process is in the job now; -1 when it can't be opened (it ended, or is protected); -2 when its pid now
@@ -256,7 +262,8 @@ $shipsFile = Join-Path $PSScriptRoot 'ships.json'
 $ships = @()
 $firstShip = $false
 $said = ''
-Write-Host "Holding every CI runner on this PC at below-normal priority, all of them together under $CpuPercent% of its $cores cores; while a ship runs, every other runner under $SqueezePercent% together ($CitadelSqueezePercent% while one is Citadel's)."
+$capped = if ($CpuPercent) { ", all of them together under $CpuPercent% of its $cores cores" } else { ', with no CPU cap' }
+Write-Host "Holding every CI runner on this PC at below-normal priority$capped; while ships.json names a ship, every other runner under $SqueezePercent% together ($CitadelSqueezePercent% while one is Citadel's)."
 
 # A runner folder's "repo|name" from the .runner file its setup wrote, as Citadel names a ship's runner; null until it reads.
 function Get-RunnerKey([string]$dir) {
@@ -300,11 +307,28 @@ function Read-Slept {
   } catch { return @() }
 }
 
-# Whether a runner folder's Runner.Worker runs a job right now: asked again right before each stop, since GitHub may
-# have handed it one since the sweep looked.
+# Whether a runner's listener holds a job (#2262): the last JobState its newest _diag\Runner_*.log gave is Busy. It says
+# so as it takes the job, before its Worker starts (a starved Worker took 16 s and more), and Online once done. Only the
+# log's last 256 KB is read: by the time a job has written that much, its Worker shows it. The agent's tookJob is its twin.
+function Test-RunnerTookJob($dir) {
+  $log = Get-ChildItem -LiteralPath (Join-Path $dir '_diag') -Filter 'Runner_*.log' -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
+  if (-not $log) { return $false }
+  try {
+    $f = [IO.File]::Open($log.FullName, 'Open', 'Read', 'ReadWrite, Delete')
+    try {
+      [void]$f.Seek([math]::Max(0, $f.Length - 256KB), 'Begin')
+      $text = (New-Object IO.StreamReader($f)).ReadToEnd()
+    } finally { $f.Dispose() }
+  } catch { return $false }
+  $states = [regex]::Matches($text, 'JobState: (\w+)')
+  return $states.Count -gt 0 -and $states[$states.Count - 1].Groups[1].Value -eq 'Busy'
+}
+
+# Whether a runner folder runs a job right now (its Runner.Worker, or a listener that took one): asked again right
+# before each stop, since GitHub may have handed it one since the sweep looked.
 function Test-RunnerWorking($dir) {
   $re = '^' + [regex]::Escape([string]$dir) + '\\bin(\.[\d.]+)?\\runner\.worker\.exe$'
-  return [bool](@(Get-CimInstance Win32_Process -Filter "Name = 'Runner.Worker.exe'" -ErrorAction SilentlyContinue) | Where-Object { [string]$_.ExecutablePath -match $re })
+  return [bool](@(Get-CimInstance Win32_Process -Filter "Name = 'Runner.Worker.exe'" -ErrorAction SilentlyContinue) | Where-Object { [string]$_.ExecutablePath -match $re }) -or (Test-RunnerTookJob $dir)
 }
 
 # A runner service's folder from its PathName ("C:\actions-runner-x\bin\RunnerService.exe"), lowercase; '' if it isn't one.
@@ -368,7 +392,8 @@ function Set-SlotRate {
   $squeeze = if ($script:firstShip) { $CitadelSqueezePercent } else { $SqueezePercent }
   $share = $squeeze / $busy
   foreach ($slot in $slots.Values) {
-    $rate = if ($ships.Count -and $ships -notcontains $slot.Key) { if ($slot.Inside) { $share / $CpuPercent * 10000 } else { $share * 100 } } elseif ($slot.Inside) { 0 } else { $CpuPercent * 100 }
+    # With no shared cap (-CpuPercent 0) a nested rate is a share of the PC itself.
+    $rate = if ($ships.Count -and $ships -notcontains $slot.Key) { if ($slot.Inside -and $CpuPercent) { $share / $CpuPercent * 10000 } else { $share * 100 } } elseif ($slot.Inside) { 0 } else { $CpuPercent * 100 }
     $rate = [int][math]::Max([math]::Min($rate, 10000), [math]::Sign($rate))
     if ($rate -eq $slot.Rate) { continue }
     try { [CitadelCiJob]::SetRate($slot.Job, $rate); $slot.Rate = $rate } catch { Write-Host "Couldn't set $($slot.Key)'s share: $($_.Exception.Message)" }

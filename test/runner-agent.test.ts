@@ -3,6 +3,7 @@
 // Here the scripts are faked (a node one-liner stands in for PowerShell); the Windows side is untested until installed.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -142,9 +143,9 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     agent = spawn(process.execPath, [join(installed, 'runner-agent.mjs'), srv.base, '--token-file', tokenFile, '--os', 'windows', '--sample-ms', '200', '--log', logFile], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
     const online = await until('the runner agent to connect', async () => (await srv.call('/api/machines')).data.find((m: { name: string; online?: boolean }) => m.name === 'desk-runners' && m.online));
     assert.equal(online.runners, true);
-    // The cap and yield (#552): started from its folder with the cap and the agent's pid, its lines in the agent's log.
+    // The yield (#552): started from its folder with the agent's pid, its lines in the agent's log; no CPU cap since #2262.
     const held = await until('keep-runners.ps1 to start', async () => existsSync(logFile) && /keep-runners: holding: .*/.exec(readFileSync(logFile, 'utf8'))?.[0]);
-    assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 75 -AgentPid ${agent.pid} -SqueezePercent 30 -CitadelSqueezePercent 10`), held);
+    assert.ok(held.includes(`-File ${join(installed, 'keep-runners.ps1')} -CpuPercent 0 -AgentPid ${agent.pid} -SqueezePercent 30 -CitadelSqueezePercent 10`), held);
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
 
     // A new runner host acts for every scheme its owner is in (Build 10: one kind of machine, spec section 3), and for none they aren't.
@@ -185,6 +186,43 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
   } finally {
     if (agent) await stopProcs([agent]);
     await srv.stop();
+  }
+});
+
+test('no ship squeezes a runner (Cara, 2026-11-27: "if a machine doesnt have room, we can wait and load balance, not run the job starved"): with no plan held, a ship still leaves ships.json empty', async () => {
+  // #2262: a Citadel ship on the PC's WSL runners held every Windows runner to 10% of the PC together, and a Worker
+  // squeezed that hard missed the listener's 30 s handshake. A ship goes first through the plan's sleep only.
+  const root = mkdtempSync(join(scratch.dir, 'no-squeeze-'));
+  const ps = join(root, 'win', 'System32', 'WindowsPowerShell', 'v1.0');
+  mkdirSync(ps, { recursive: true });
+  writeFileSync(join(ps, 'powershell.exe'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(ps, 'powershell.exe'), 0o755);
+  const installed = join(root, 'agent');
+  mkdirSync(installed);
+  copyFileSync(join(import.meta.dirname, '..', 'public', 'runner-agent.mjs'), join(installed, 'runner-agent.mjs'));
+  writeFileSync(join(installed, 'keep-runners.ps1'), '');
+  writeFileSync(join(root, 'token'), 'ccm_1_test\n');
+  const ship = { repo: 'caraminden/claude-coordinator', runner: 'desktop-g248ij8-linux', first: true };
+  // After the ship, a list job: its answer coming back means the agent has handled the ship before it.
+  let answered = false;
+  const server = createServer((req, res) => {
+    req.resume();
+    if (req.url === '/api/machines/runner-result') answered = true;
+    if (!req.url?.startsWith('/api/machines/connect')) return void res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write(`data: ${JSON.stringify({ hello: 'pc' })}\n\ndata: ${JSON.stringify({ ships: [ship] })}\n\ndata: ${JSON.stringify({ runners: { id: ID, op: 'list' } })}\n\n`);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+  const logFile = join(root, 'agent.log');
+  const agent = spawn(process.execPath, [join(installed, 'runner-agent.mjs'), `http://127.0.0.1:${port}`, '--token-file', join(root, 'token'), '--os', 'windows', '--sample-ms', '60000', '--log', logFile], { env: { ...process.env, SystemRoot: join(root, 'win') }, stdio: 'ignore' });
+  try {
+    await until('the agent to answer the job after the ship', async () => answered);
+    assert.deepEqual(JSON.parse(readFileSync(join(installed, 'ships.json'), 'utf8')).ships, [], 'keep-runners.ps1 is told of no ship');
+  } finally {
+    await stopProcs([agent]);
+    server.closeAllConnections();
+    await new Promise((r) => server.close(r));
   }
 });
 
@@ -437,7 +475,8 @@ test("the owner's caps.json sets the caps on that PC; today's numbers without on
     assert.deepEqual(r.caps, { cpu: 75, squeeze: 30, citadel: 10 }, bad);
     assert.equal(r.said.length, 1, bad);
   }
-  assert.match(keeperCommand(dir, 7, 'C:\\Windows', { cpu: 50, squeeze: 20, citadel: 10 }).args.join(' '), /-CpuPercent 50 -AgentPid 7 -SqueezePercent 20 -CitadelSqueezePercent 10$/);
+  // Cara, 2026-11-27, "Drop the cap, keep low priority" (#2262): Windows runners get no CPU cap, cpu_percent or not.
+  assert.match(keeperCommand(dir, 7, 'C:\\Windows', { cpu: 50, squeeze: 20, citadel: 10 }).args.join(' '), /-CpuPercent 0 -AgentPid 7 -SqueezePercent 20 -CitadelSqueezePercent 10$/);
 });
 
 test("Linux: the owner's squeeze is used, and the all-CI cap goes on the runners' slice only where the installer made one", async () => {

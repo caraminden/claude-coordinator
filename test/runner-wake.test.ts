@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { cleanPlan, PLAN_HOLD_MS, pickAwake, RunnerWake } from '../public/runner-agent.mjs';
+import { cleanPlan, PLAN_HOLD_MS, pickAwake, RunnerWake, tookJob } from '../public/runner-agent.mjs';
 import { cleanSample } from '../src/ci-load.ts';
 import { Store } from '../src/db.ts';
 import { balance, runnerOrder, runnerShares, runnersFor } from '../src/machine-balancer.ts';
@@ -122,8 +122,10 @@ function linux() {
   const calls: string[] = [];
   let clock = 0;
   let working: string[] = [];
+  let took: string[] = [];
   const wake = new RunnerWake({
     os: 'linux',
+    took: (d: string) => took.some((t) => d === `/opt/r/${t}`),
     dir,
     units: dir,
     now: () => clock,
@@ -141,7 +143,7 @@ function linux() {
     },
   });
   let onCall = () => {};
-  return { wake, dir, calls, up, tick: (ms: number) => (clock += ms), work: (d: string[]) => (working = d), after: (f: () => void) => (onCall = f) };
+  return { wake, dir, calls, up, tick: (ms: number) => (clock += ms), work: (d: string[]) => (working = d), take: (d: string[]) => (took = d), after: (f: () => void) => (onCall = f) };
 }
 
 test('Linux: the plan stops idle units past its count and starts them again when it grows or stops coming', async () => {
@@ -149,7 +151,7 @@ test('Linux: the plan stops idle units past its count and starts them again when
   try {
     work(['twi']);
     await wake.update({ runners: 2, queued: { 'o/twi': 1 } });
-    assert.ok(wake.held());
+    assert.ok(wake.plan, 'the plan is held');
     // twi runs a job (1 of 2), and twi's queued job takes twi-2: both citadel units sleep.
     assert.deepEqual(calls.sort(), ['stop citadel-runner-o-citadel-2.service', 'stop citadel-runner-o-citadel.service']);
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'slept.json'), 'utf8')), ['citadel-runner-o-citadel-2.service', 'citadel-runner-o-citadel.service']);
@@ -161,7 +163,7 @@ test('Linux: the plan stops idle units past its count and starts them again when
     calls.length = 0;
     tick(PLAN_HOLD_MS);
     await wake.tick();
-    assert.ok(!wake.held());
+    assert.equal(wake.plan, null, 'the plan lapsed');
     assert.deepEqual(calls, ['start citadel-runner-o-citadel-2.service'], 'a plan that stops coming wakes what it put to sleep');
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'slept.json'), 'utf8')), []);
   } finally {
@@ -204,12 +206,47 @@ test('Linux: a runner GitHub hands a job while the ones before it stop is looked
   }
 });
 
+// #2262 (Peek Auras' ask 2): a runner whose listener took a job, but whose Worker hasn't started yet (a starved one took
+// 16 s and more), was idle to the plan and could be stopped mid-job.
+test("a runner's listener holds a job from the JobState: Busy its newest Runner log gave until it says another", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'runner-wake-'));
+  try {
+    const diag = join(dir, 'r', '_diag');
+    assert.equal(tookJob(join(dir, 'r')), false, 'no _diag folder');
+    mkdirSync(diag, { recursive: true });
+    assert.equal(tookJob(join(dir, 'r')), false, 'no log yet');
+    const line = (state: string) => `[2026-11-27 08:10:56Z INFO BrokerMessageListener] Received job status event. JobState: ${state}\n`;
+    writeFileSync(join(diag, 'Runner_20261127-080000-utc.log'), line('Online') + line('Busy') + '[2026-11-27 08:11:01Z INFO JobDispatcher] Successfully renew job\n');
+    assert.equal(tookJob(join(dir, 'r')), true, 'took a job, no Worker needed');
+    writeFileSync(join(diag, 'Worker_20261127-090000-utc.log'), line('Online'));
+    assert.equal(tookJob(join(dir, 'r')), true, "a Worker's log is not the listener's");
+    writeFileSync(join(diag, 'Runner_20261127-090000-utc.log'), line('Busy') + line('Online'));
+    assert.equal(tookJob(join(dir, 'r')), false, 'the newest Runner log counts: its job is done');
+  } finally {
+    // timing-ok: own temp dir
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Linux: a runner whose listener took a job before its Worker started counts as busy and is never stopped', async () => {
+  const { wake, dir, calls, take } = linux();
+  try {
+    take(['twi']);
+    await wake.update({ runners: 1, queued: {} });
+    assert.deepEqual(calls.sort(), ['stop citadel-runner-o-citadel-2.service', 'stop citadel-runner-o-citadel.service', 'stop citadel-runner-o-twi-2.service'], 'twi is the one kept: it holds a job');
+  } finally {
+    // timing-ok: own temp dir
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Windows: the runners to sleep go to asleep.json for keep-runners.ps1, with the plan's expiry; no plan names none", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'runner-wake-'));
   try {
     // keep-runners.ps1 put c:\actions-runner-b to sleep earlier: it counts as one of ours, though it isn't up.
     writeFileSync(join(dir, 'slept.json'), JSON.stringify(['c:\\actions-runner-b']));
     const roots = ['C:\\actions-runner-a', 'C:\\actions-runner-a-2', 'C:\\actions-runner-b', 'C:\\actions-runner-c'];
+    const took: string[] = [];
     const wake = new RunnerWake({
       os: 'windows',
       dir,
@@ -218,11 +255,17 @@ test("Windows: the runners to sleep go to asleep.json for keep-runners.ps1, with
       identity: (d: string) => ({ name: d.slice(3), repo: `o/${d.slice(18).replace(/-2$/, '')}` }),
       // c is down and not ours: someone stopped it.
       windowsProcs: () => [{ path: 'C:\\actions-runner-a\\bin\\Runner.Listener.exe' }, { path: 'C:\\actions-runner-a\\bin\\Runner.Worker.exe' }, { path: 'C:\\actions-runner-a-2\\bin\\Runner.Listener.exe' }],
+      took: (d: string) => took.includes(d),
     });
     await wake.update({ runners: 1, queued: {} });
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'asleep.json'), 'utf8')), { until: 1000 + PLAN_HOLD_MS, dirs: ['C:\\actions-runner-a-2', 'C:\\actions-runner-b'] });
     await wake.update({ runners: 2, queued: { 'o/b': 1 } });
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'asleep.json'), 'utf8')).dirs, ['C:\\actions-runner-a-2'], "b's queued job wakes b");
+    // a-2's listener took a job before its Worker started: busy, so it stays up past a plan of one (a's job fills it).
+    took.push('C:\\actions-runner-a-2');
+    await wake.update({ runners: 1, queued: {} });
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'asleep.json'), 'utf8')).dirs, ['C:\\actions-runner-b']);
+    took.length = 0;
     wake.plan = null;
     await wake.next();
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'asleep.json'), 'utf8')), { until: 0, dirs: [] });
@@ -282,6 +325,39 @@ ConvertTo-Json -Compress -InputObject @($calls)`,
     // The agent is gone: every one it put to sleep wakes, though the plan it left hasn't run out.
     assert.deepEqual(run(ab, all('Stopped', 'Running'), '', '-WakeAll'), ['start actions.runner.o-a.pc']);
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'slept.json'), 'utf8')), []);
+  } finally {
+    // timing-ok: own temp dir
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("keep-runners.ps1 asks a runner's listener too, right before a stop: one that took a job before its Worker started is working", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'runner-wake-'));
+  try {
+    const runner = join(dir, 'actions-runner-a');
+    mkdirSync(join(runner, '_diag'), { recursive: true });
+    const working = () => {
+      const file = join(dir, 'run.ps1');
+      writeFileSync(
+        file,
+        `$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 3
+$t = $null; $e = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile('${script}', [ref]$t, [ref]$e)
+foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) { . ([scriptblock]::Create($f.Extent.Text)) }
+function Get-CimInstance { @() }
+ConvertTo-Json -Compress -InputObject (Test-RunnerWorking '${runner}')`,
+      );
+      const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', file], { encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      return JSON.parse(r.stdout.trim().split('\n').at(-1)!) as boolean;
+    };
+    const line = (state: string) => `[2026-11-27 08:10:56Z INFO BrokerMessageListener] Received job status event. JobState: ${state}\r\n`;
+    assert.equal(working(), false, 'no log, no Worker');
+    writeFileSync(join(runner, '_diag', 'Runner_20261127-080000-utc.log'), line('Online') + line('Busy'));
+    assert.equal(working(), true, 'the listener took a job; its Worker has not started');
+    writeFileSync(join(runner, '_diag', 'Runner_20261127-090000-utc.log'), line('Busy') + line('Online'));
+    assert.equal(working(), false, 'its newest log says the job is done');
   } finally {
     // timing-ok: own temp dir
     rmSync(dir, { recursive: true, force: true });

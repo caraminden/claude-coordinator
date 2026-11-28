@@ -5,7 +5,7 @@
 // Reconnecting…; then the hold lets go (the server is fine again) and a key goes in through DevTools (Input.dispatchKeyEvent:
 // the browser-side path, before-input-event and all). PASS: a new page loaded and its stream answered, no chip, within 8 s
 // (well inside the page's own 30 s retry). RIG_HELD=1, a control: the hold stays on through one Ctrl+R, which must still
-// reload, the new page stuck again as it would be on a server still booting.
+// reload, the new page's stream held again as it would be on a server still booting.
 //   node stuck-live.mjs <config URL from rig.ts up's box line> [build number | checkout, default checkout]
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -172,12 +172,14 @@ for (const [where, focusJs] of Object.entries(FOCUS)) {
     };
     const reloaded = await until(fresh, 8000);
     const back = !keepHeld && (await until(async () => answered > a0 && !(await chip()) && (await ev(`!!document.querySelector('textarea')`)), 8000));
-    // The control: the new page asked into the hold too, and sits on the chip again with no stream answered.
-    const again = keepHeld && (await until(async () => answered === a0 && hung.length > h0 + 1 && (await chip()), 8000));
+    // The control: the new page asked into the hold too, no stream answered. A fresh page shows no chip for a stream that
+    // never opens until its own 30 s retry, so the chip is only reported.
+    const again = keepHeld && (await until(() => answered === a0 && hung.length > h0 + 1, 8000));
+    const chipAgain = keepHeld && (await chip());
     const ok = stuck && stillStuck && focused && reloaded && (keepHeld ? again : back);
     if (!ok) fails++;
     console.log(
-      `${ok ? 'PASS' : 'FAIL'} stuck (${asked ? 'stream held' : 'no stream asked'}, chip ${stuck ? 'shown' : 'not shown'}${stillStuck ? '' : ', not stuck before the key'}), focus ${where.padEnd(8)}${focused ? '' : ' (not focused)'} ${name.padEnd(12)} -> ${reloaded ? 'reloaded' : 'no reload'}${keepHeld ? (again ? ', hold kept, stuck again' : ', hold kept, but not stuck again') : back ? ', stream answered, chip gone' : ', still stuck'}`,
+      `${ok ? 'PASS' : 'FAIL'} stuck (${asked ? 'stream held' : 'no stream asked'}, chip ${stuck ? 'shown' : 'not shown'}${stillStuck ? '' : ', not stuck before the key'}), focus ${where.padEnd(8)}${focused ? '' : ' (not focused)'} ${name.padEnd(12)} -> ${reloaded ? 'reloaded' : 'no reload'}${keepHeld ? (again ? `, hold kept, the new page's stream held too (chip ${chipAgain ? 'shown' : 'not shown yet'})` : ", hold kept, but the new page's stream wasn't held") : back ? ', stream answered, chip gone' : ', still stuck'}`,
     );
     if (keepHeld) held = false;
     // A control: the reloaded page's stream is held too, and only its own 30 s retry would bring it back, so one key is enough.

@@ -390,7 +390,7 @@ function ciUsePart(c, redraw) {
     pause
       ? [h('span', {}, h('b', {}, `Paused ${pause.words}`), h('span', { class: 'muted' }, ` by ${pause.by}: no new CI job starts here; running ones finish.`)), btn('Resume', resume)]
       : busy && !busy.anyway
-        ? [h('span', {}, h('b', {}, `Stepping back: ${busy.why}.`), h('span', { class: 'muted' }, " No new CI job starts here until it's quiet again; running ones finish.")), btn('Run CI anyway', anyway, 'Start CI jobs here again until this clears'), btn('Pause', pick)]
+        ? [h('span', {}, h('b', {}, `Stepping back: ${busy.why}.`), h('span', { class: 'muted' }, " No new CI job starts here until it's quiet again; running ones finish.")), h('span', { class: 'mcard-ci-acts' }, btn('Run CI anyway', anyway, 'Start CI jobs here again until this clears'), btn('Pause', pick))]
         : [busy ? h('span', { class: 'muted' }, `Running CI anyway while ${busy.why}.`) : null, h('span', { class: 'spacer' }), btn('Pause', pick, 'Start no new CI jobs here for a while')],
   );
 }

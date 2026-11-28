@@ -1,4 +1,4 @@
-// #890: the top-right corner of a scheme page in the installed app. No control in the page sits under the window's
+// #890 (home too, #2276): the top-right corner of a scheme page or the overview in the installed app. No control in the page sits under the window's
 // caption buttons (the strip's right end, from getTitlebarAreaRect), at a few window widths, and the strip's colour
 // (the window-controls-overlay theme colour) is the page's, not the title bar's white.
 const measure = `
@@ -11,7 +11,7 @@ const measure = `
   }
   const meta = [...document.querySelectorAll('meta[name=theme-color]')].filter((m) => matchMedia(m.media || 'all').matches).map((m) => m.content)[0];
   return { area: [t.x, t.y, t.width, t.height], inner: innerWidth, client: document.documentElement.clientWidth, under: out, meta };`;
-const pages = ROUTES.filter((r) => r.startsWith('#/p/') && !r.includes('99999'));
+const pages = [...ROUTES.filter((r) => r.startsWith('#/p/') && !r.includes('99999')), '#/home']; // the overview too (#2276)
 expect('a scheme page to check', pages.length, (n) => n > 0);
 for (const route of pages) {
   for (const width of [1300, 1000, 820]) {

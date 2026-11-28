@@ -44,6 +44,8 @@ export const POOL = {
   startAgainMs: 60_000,
   /** A running run's jobs are read again at least this often when GitHub says the run didn't change (API budget, P0). */
   runningMs: 60_000,
+  /** An ended job's row is kept this long, then pruned (once a day). */
+  keepMs: 7 * 86_400_000,
   /** Threads a job counts as: a plain CI job, and a heavy kind by its `citadel-heavy-<kind>` label (an unknown kind as a build). */
   sizes: { ci: COST.ci, heavy: HEAVY_SIZES as Readonly<Record<string, number>>, heavyUnknown: HEAVY_SIZES.apk },
 } as const;

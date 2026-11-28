@@ -57,6 +57,10 @@ export const poolQueries = {
       throw err;
     }
   },
+  /** Deletes the rows of jobs that ended before `before` (the caller passes now - POOL.keepMs). */
+  poolPrune(this: Store, before: number) {
+    this.db.prepare('DELETE FROM pool_jobs WHERE ended_at IS NOT NULL AND ended_at < ?').run(before);
+  },
   /** The jobs not ended yet: what the pool picks up again after a restart. */
   poolOpen(this: Store): PoolRow[] {
     return this.db.prepare('SELECT * FROM pool_jobs WHERE ended_at IS NULL').all() as PoolRow[];

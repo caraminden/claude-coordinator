@@ -390,6 +390,16 @@ test('the watcher keeps the books, counts running jobs as used room, and logs ea
   assert.equal(store.rows.find((r) => r.job_id === 1)!.ended_at, null);
 });
 
+test('ended pool_jobs rows go after POOL.keepMs; open rows and recent ended ones stay', () => {
+  const store = new Store(':memory:');
+  const job = (job_id: number) => ({ repo: 'o/peek', job_id, run_id: 9, project_id: PEEK, name: `job ${job_id}`, labels: '[]', size: 4, ship: 0, first_seen: NOW });
+  store.poolLook({ seen: [job(1), job(2), job(3)], ran: [], placed: [], ended: [{ repo: 'o/peek', job_id: 1 }], at: NOW });
+  store.poolLook({ seen: [], ran: [], placed: [], ended: [{ repo: 'o/peek', job_id: 2 }], at: NOW + POOL.keepMs });
+  store.poolPrune(NOW + 1);
+  const left = () => (store.db.prepare('SELECT job_id FROM pool_jobs ORDER BY job_id').all() as { job_id: number }[]).map((r) => r.job_id);
+  assert.deepEqual(left(), [2, 3], 'job 1 ended a keepMs ago; 2 just now; 3 is open');
+});
+
 // P3 (#2275): the pool starts one-job runners for a scheme switched to it; the rest it only watches.
 const TOC = 9;
 function poolWorld(o: { pooled?: Set<number>; standing?: Set<string>; limit?: number } = {}) {

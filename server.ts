@@ -103,7 +103,7 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
-import { poolOn } from './src/runner-pool.ts';
+import { poolOn, POOL as RUNNER_POOL } from './src/runner-pool.ts';
 import { BUSY, OwnerBusy, offWords } from './src/owner-busy.ts';
 import { actionsMinutes, FALLBACK, Fallbacks, type Gh, PERIGEE_HEAVY, perigeeRunner, restartOnGithub } from './src/runner-fallback.ts';
 import { readPressure } from './src/host-load.ts';
@@ -2208,6 +2208,7 @@ const shipTrail = new ShipTrail({
 const trailPoll = () => Promise.race([shipTrail.poll().catch((err) => console.error(`[ship trail] ${thrown(err).message}`)), sleep(2000, undefined, { ref: false })]);
 if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await trailPoll(), await landHandoffs.poll(), serverWork.sync()));
 // Was a blocking scan at each start, before the listen (#1463).
+if (!BOOT_CHECK && !PREVIEW) every('pool jobs prune', 24 * 3600_000, () => store.poolPrune(Date.now() - RUNNER_POOL.keepMs), 15 * 60_000);
 if (!BOOT_CHECK && !PREVIEW) every('landings prune', 24 * 3600_000, () => landings.prune(), 10 * 60_000);
 if (!BOOT_CHECK) {
   every('deploy watch', 60_000, () => deployWatch!.tick(), 0);

@@ -112,6 +112,7 @@ export const WRITES = [
   'memory.deleteTicket',
   'saveTimeLogExplain',
   'poolLook',
+  'poolPrune',
 ];
 
 /**

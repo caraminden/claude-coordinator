@@ -339,6 +339,36 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       return route(c, t, e);
     },
   },
+  'stale-plan-card': {
+    about: 'a minion whose change shipped, a ship step left todo, now idle on a card: the bar says it waits on you, not Paused at the ship step (#2273)',
+    seed(c) {
+      const t = minion(c, 'Bar after a ship', { note: 'needs a pick: next step' });
+      const w = chat(c, t, 12);
+      w.asked('Fix the badge colours.');
+      w.init();
+      w.plan(
+        [
+          ['Find the badge styles', 3, 'read'],
+          ['Change the colours', 5, 'build'],
+          ['Run the tests', 4, 'test'],
+          ['Ship through the pipeline lane', 6, 'ship'],
+        ],
+        -1,
+      );
+      w.call('mcp__thread__plan', {
+        steps: [
+          { n: 1, status: 'done' },
+          { n: 2, status: 'done' },
+          { n: 3, status: 'done' },
+        ],
+      });
+      w.call('mcp__thread__hand_off_land', { summary: 'badge colours' });
+      w.call('mcp__thread__ask_question', { questions: [{ question: 'Close this minion?', options: [{ label: 'Close it' }, { label: 'Keep it open' }] }] }, null);
+      const e = w.put('question', { id: hex(), questions: [{ question: 'Close this minion?', header: 'Close', multiSelect: false, options: [{ label: 'Close it', recommended: true }, { label: 'Keep it open' }] }] });
+      w.done('Shipped; asked whether to close.');
+      return route(c, t, e);
+    },
+  },
   'feeder-card': {
     about: "a Build 5 feeder's go card (kind merge, stamped into: 5): its chip and option read Merge, not Ship It",
     seed(c) {

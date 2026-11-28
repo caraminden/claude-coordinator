@@ -170,13 +170,19 @@ namespace Citadel.Desktop
         /// Whether to restart now. A new launcher put in place (`launcherWaits`) is a reason of its own. A build's second try
         /// (it failed once) waits for a start by the person: a build that crashed once doesn't get to crash again unseen.
         /// </summary>
-        public static Held Hold(State s, bool launcherWaits, bool windowShows, TimeSpan sinceInput)
+        public static Held Hold(State s, bool launcherWaits, bool windowShows, TimeSpan sinceInput) { return Hold(s, launcherWaits, windowShows, sinceInput, Idle); }
+
+        /// <summary>Hold with another idle time: a test's launcher.json sets a short one.</summary>
+        public static Held Hold(State s, bool launcherWaits, bool windowShows, TimeSpan sinceInput, TimeSpan idle)
         {
-            bool build = s.Pending != null && (s.Struck == null || !s.Struck.Contains(s.Pending.Id));
+            bool build = s.Pending != null && !SecondTry(s);
             if (!build && !launcherWaits) return s.Pending != null ? Held.SecondTry : Held.NothingNew;
             if (windowShows) return Held.WindowOpen;
-            return sinceInput < Idle ? Held.InUse : Held.No;
+            return sinceInput < idle ? Held.InUse : Held.No;
         }
+
+        /// <summary>The waiting build failed once (its next try is its last). A restart in the tray for a new launcher doesn't try it either.</summary>
+        public static bool SecondTry(State s) { return s.Pending != null && s.Struck != null && s.Struck.Contains(s.Pending.Id); }
     }
 
     public class Rollback

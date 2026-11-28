@@ -41,6 +41,14 @@ On every start the launcher:
 6. Takes a newer launcher the same way. It must pass `--selftest` (read this folder and print its
    version) before it replaces the old one, and the old one is kept beside it. If the new one fails
    before the app starts, the old one comes back.
+7. Stays beside the app while a copy of it runs, so a PC that keeps it in the tray still updates
+   (launcher 5, #2279). It reads the feed every 30 to 40 minutes. Once a build or a launcher waits, it
+   restarts the app into it when the app is idle: none of its windows shows (minimised counts as
+   showing) and nobody has touched the PC for 5 minutes. It asks the app to quit (below), waits 30 s,
+   and starts again with the window hidden: the new build gets its trial and probation as on any start.
+   A window someone has open is never closed; the update waits for the next hide or start. A build's
+   second try (it failed once) waits for a start by the person. An app that doesn't quit when asked
+   keeps running and is asked again after the next feed read.
 
 `launcher.log` beside the exe says what happened. `state.json` holds `current`, `previous` (the build to
 go back to), `pending`, `failed` (refused), `struck` (failed once) and `probation` (the current build's
@@ -56,6 +64,10 @@ its current build is good and the builds it refused stay refused.
   own process: an exe that starts another and exits is never watched, so its build stays on probation
   and its crashes aren't caught. An app you can't change uses `started: "alive"`: still running (or
   exited 0) after 30 s counts as started. That is weaker: a build that hangs at a blank window passes.
+- **Updates in the tray.** The launcher sets `CITADEL_QUIT_FILE`: when that file appears, an app whose
+  windows are all hidden quits with exit code 0 (one with a window showing ignores it). A start with
+  `CITADEL_START_HIDDEN` set is the launcher's restart into an update: start in the tray, window hidden,
+  and still write the start signal. An app that does neither only takes updates on a start.
 - **Read-only build folder.** Each build lives in its own `versions\<n>\` folder, which goes away two
   builds later. Keep settings and saves elsewhere (`%APPDATA%\<app>`).
 - **The build** is a `.zip` or `.tar.gz` of the app's folder (a lone top folder is stripped), with the

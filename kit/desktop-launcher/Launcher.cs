@@ -7,6 +7,9 @@
 // start or crashes on probation goes back to the last good build, with one line for the person, and gets one more try on
 // the next start; a second failure refuses it on this PC. An update never leaves a PC without a working app. The launcher updates itself the same way: a new one must pass --selftest before it replaces
 // this exe, and if it then fails before the app starts, it puts the old one back and hands over to it.
+// It stays beside the app while it runs (#2279): it reads the feed every half hour or so and, once an update waits and the
+// app sits hidden in the tray with the PC idle, asks it to quit (CITADEL_QUIT_FILE) and starts again to take the update,
+// the app's window hidden (CITADEL_START_HIDDEN). A window someone has open is never closed.
 //
 // Install folder: <app>.exe (this), launcher.json { "app", "feed" }, state.json, versions\<build>\, launcher.log.
 // Built from this file and Trial.cs (the trial rules, tested off Windows in tests\).
@@ -35,6 +38,9 @@ namespace Citadel.Desktop
         [DataMember(Name = "app")] public string App;
         [DataMember(Name = "feed")] public string Feed;
         [DataMember(Name = "title", EmitDefaultValue = false)] public string Title;
+        /// <summary>For tests only: seconds between feed checks in the tray, and the seconds without input that count as idle (Tray.Every, Tray.Idle).</summary>
+        [DataMember(Name = "trayEvery", EmitDefaultValue = false)] public int TrayEvery;
+        [DataMember(Name = "trayIdle", EmitDefaultValue = false)] public int TrayIdle;
     }
 
     [DataContract]
@@ -62,7 +68,7 @@ namespace Citadel.Desktop
     public static class Program
     {
         /// <summary>This launcher's version: the feed offers a newer one by a higher number. Raise it with every change.</summary>
-        public const int Version = 4;
+        public const int Version = 5;
 
         [STAThread]
         public static int Main(string[] args)
@@ -110,15 +116,25 @@ namespace Citadel.Desktop
         static readonly TimeSpan FeedWait = TimeSpan.FromSeconds(5);
         const long MaxDownload = 4L * 1024 * 1024 * 1024;
 
+        /// <summary>How long the launcher in the tray looks between asking whether the app still runs, a window shows or an update waits.</summary>
+        static readonly TimeSpan Poll = TimeSpan.FromSeconds(5);
+        /// <summary>How long an app asked to quit for an update (QuitFile) has to close before it's left running.</summary>
+        static readonly TimeSpan QuitWait = TimeSpan.FromSeconds(30);
+        /// <summary>The first argument of a start the launcher makes itself, to restart the app into an update while it's in the tray.</summary>
+        const string TrayRestart = "--tray-restart";
+
         readonly string dir;
         readonly string[] args;
+        /// <summary>This start restarts the app in the tray (TrayRestart): the app is asked to start with its window hidden.</summary>
+        readonly bool hidden;
         Config config;
         public string Title = "The app";
 
         public Launcher(string dir, string[] args)
         {
             this.dir = dir;
-            this.args = args;
+            hidden = args.Length > 0 && args[0] == TrayRestart;
+            this.args = hidden ? args.Skip(1).ToArray() : args;
         }
 
         string P(params string[] parts) { return Path.Combine(new[] { dir }.Concat(parts).ToArray()); }
@@ -127,11 +143,16 @@ namespace Citadel.Desktop
         string OldLauncher { get { return Path.ChangeExtension(Me, ".old.exe"); } }
         string TrialFile { get { return P("launcher.trial"); } }
         string BadFile { get { return P("launcher.bad"); } }
+        /// <summary>The file the launcher writes to ask the app to quit for an update (CITADEL_QUIT_FILE); an app that honours it quits only while its window is hidden.</summary>
+        string QuitFile { get { return P("quit"); } }
 
         public int Run()
         {
             ReadConfig();
+            // Before any launcher update renames this exe: the restart in the tray starts whatever exe has this name then.
+            string me = Me;
             bool mine;
+            bool restart = false;
             using (var mutex = new Mutex(false, "Local\\citadel-launcher-" + config.App))
             {
                 try { mine = mutex.WaitOne(0); } catch (AbandonedMutexException) { mine = true; }
@@ -152,7 +173,9 @@ namespace Citadel.Desktop
                         if (state.Pending == null) throw new Exception("Couldn't download " + Title + " from " + config.Feed + ": see launcher.log.");
                     }
                     // Only a start with a build to try waits for the feed. The running copy is asked again after the wait.
-                    bool tryNow = Trial.TryNow(state, () => ACopyRuns(state));
+                    // A restart in the tray leaves a build's second try to a start by the person (Tray.SecondTry).
+                    if (hidden && Tray.SecondTry(state)) Log("build " + state.Pending.Id + " failed once: its second try waits for a start by the person");
+                    bool tryNow = Trial.TryNow(state, () => ACopyRuns(state)) && !(hidden && Tray.SecondTry(state));
                     bool withdrawn = tryNow && DropWithdrawn(state, FeedBeforeTrial());
                     tryNow = tryNow && !withdrawn && Trial.TryNow(state, () => ACopyRuns(state));
                     if (state.Pending != null && !withdrawn && !tryNow)
@@ -170,13 +193,120 @@ namespace Citadel.Desktop
                         WatchProbation(state, started);
                         updates.Join();
                     }
+                    restart = StayInTray(state);
                 }
                 finally
                 {
                     if (mine) mutex.ReleaseMutex();
                 }
             }
+            // After the mutex is let go, so the new start is the one that tries the build.
+            if (restart)
+            {
+                Log("starting the launcher again to take the update, with " + Title + "'s window hidden");
+                Process.Start(new ProcessStartInfo(me, (TrayRestart + " " + Quote(args)).Trim()) { UseShellExecute = false, WorkingDirectory = dir }).Dispose();
+            }
             return 0;
+        }
+
+        // ---- In the tray (#2279) ----
+
+        /// <summary>
+        /// Stay beside the app while a copy of it runs, read the feed every Tray.Every and, once an update waits and the app
+        /// is idle in the tray (Tray.Hold), ask it to quit. True when it quit: the caller starts the launcher again, which
+        /// takes the update the way any start does (the trial, probation and roll back are the same). False once the app
+        /// is closed. Never throws: Main would read a failure as this launcher failing its own trial.
+        /// </summary>
+        bool StayInTray(State state)
+        {
+            try
+            {
+                var every = config.TrayEvery > 0 ? TimeSpan.FromSeconds(config.TrayEvery) : Tray.Every;
+                var idle = config.TrayIdle > 0 ? TimeSpan.FromSeconds(config.TrayIdle) : Tray.Idle;
+                var rnd = new Random();
+                var next = DateTime.UtcNow + Tray.NextCheck(every, rnd.NextDouble());
+                var askAfter = DateTime.MinValue;
+                var said = Held.No;
+                while (true)
+                {
+                    if (!ACopyRuns(state)) { Log(Title + " is closed: the launcher leaves"); return false; }
+                    if (DateTime.UtcNow >= next)
+                    {
+                        // A second launcher update before the first one took over would move the waiting one aside.
+                        CheckForUpdates(state, !File.Exists(TrialFile));
+                        next = DateTime.UtcNow + Tray.NextCheck(every, rnd.NextDouble());
+                    }
+                    bool launcherWaits = File.Exists(TrialFile);
+                    var held = state.Pending == null && !launcherWaits ? Held.NothingNew : Tray.Hold(state, launcherWaits, WindowShows(state), SinceInput(), idle);
+                    if (held != said && held != Held.No && held != Held.NothingNew)
+                        Log((state.Pending != null ? "build " + state.Pending.Id : "the new launcher") + " waits: "
+                            + (held == Held.WindowOpen ? Title + "'s window is open" : held == Held.InUse ? "the PC is in use" : "its second try is for a start by the person"));
+                    said = held;
+                    if (held == Held.No && DateTime.UtcNow >= askAfter)
+                    {
+                        Log(Title + " is idle in the tray: asking it to quit, to take " + (Tray.SecondTry(state) || state.Pending == null ? "the new launcher" : "build " + state.Pending.Id));
+                        if (AskToQuit(state)) return true;
+                        Log(Title + " didn't quit within " + QuitWait.TotalSeconds + " s: it is asked again after the next feed check");
+                        askAfter = next;
+                    }
+                    Thread.Sleep(Poll);
+                }
+            }
+            catch (Exception e)
+            {
+                Log("stopped watching from the tray: " + e);
+                return false;
+            }
+        }
+
+        /// <summary>Write QuitFile and wait for every copy to close. The file goes either way, so a copy started later doesn't read it.</summary>
+        bool AskToQuit(State state)
+        {
+            try
+            {
+                File.WriteAllText(QuitFile, "quit");
+                var until = DateTime.UtcNow + QuitWait;
+                while (DateTime.UtcNow < until)
+                {
+                    Thread.Sleep(500);
+                    if (!ACopyRuns(state)) return true;
+                }
+                return false;
+            }
+            finally
+            {
+                TryDelete(QuitFile);
+            }
+        }
+
+        delegate bool EnumWindowsProc(IntPtr window, IntPtr param);
+        [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc each, IntPtr param);
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+        [StructLayout(LayoutKind.Sequential)] struct LastInputInfo { public uint Size; public uint Time; }
+        [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+        /// <summary>Whether any window of a copy of the app shows (a minimised one too). When Windows can't say, it counts as showing.</summary>
+        bool WindowShows(State state)
+        {
+            var pids = new HashSet<uint>(AppPids(state).Select(p => (uint)p));
+            bool shows = false;
+            bool all = EnumWindows((w, _) =>
+            {
+                uint pid;
+                GetWindowThreadProcessId(w, out pid);
+                if (pids.Contains(pid) && IsWindowVisible(w)) { shows = true; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return shows || !all;
+        }
+
+        /// <summary>How long since anyone touched this PC's keyboard or mouse. Zero when Windows can't say, which reads as in use.</summary>
+        static TimeSpan SinceInput()
+        {
+            var info = new LastInputInfo { Size = (uint)Marshal.SizeOf(typeof(LastInputInfo)) };
+            if (!GetLastInputInfo(ref info)) return TimeSpan.Zero;
+            return TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - info.Time));
         }
 
         public void ReadConfig()
@@ -214,6 +344,10 @@ namespace Citadel.Desktop
             var psi = new ProcessStartInfo(exe, Quote(args)) { WorkingDirectory = folder, UseShellExecute = false };
             psi.EnvironmentVariables["CITADEL_BUILD"] = b.Id.ToString();
             psi.EnvironmentVariables["CITADEL_STARTED_FILE"] = startedFile;
+            // An ask to quit left from before is never read by a new copy; a start by the person also takes back one still out.
+            TryDelete(QuitFile);
+            psi.EnvironmentVariables["CITADEL_QUIT_FILE"] = QuitFile;
+            if (hidden) psi.EnvironmentVariables["CITADEL_START_HIDDEN"] = "1";
             return psi;
         }
 
@@ -223,9 +357,13 @@ namespace Citadel.Desktop
             Process.Start(StartInfo(b, P("started-" + b.Id))).Dispose();
         }
 
-        /// <summary>Whether a copy of the app from any build in versions\ is running (Trial.TryNow): found by its exe's name, then its path.</summary>
-        bool ACopyRuns(State state)
+        /// <summary>Whether a copy of the app from any build in versions\ is running (Trial.TryNow).</summary>
+        bool ACopyRuns(State state) { return AppPids(state).Count > 0; }
+
+        /// <summary>The processes of every copy of the app from any build in versions\: found by its exe's name, then its path.</summary>
+        List<int> AppPids(State state)
         {
+            var found = new List<int>();
             string root = Path.GetFullPath(Versions).TrimEnd('\\') + "\\";
             var names = new[] { state.Current, state.Previous, state.Pending }.Where(b => b != null && !string.IsNullOrEmpty(b.Exe))
                 .Select(b => Path.GetFileNameWithoutExtension(b.Exe)).Distinct(StringComparer.OrdinalIgnoreCase);
@@ -236,12 +374,12 @@ namespace Citadel.Desktop
                     using (p)
                     {
                         // Another user's or an elevated process can't be read: not a copy this launcher started.
-                        try { if (p.MainModule.FileName.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return true; }
+                        try { if (p.MainModule.FileName.StartsWith(root, StringComparison.OrdinalIgnoreCase)) found.Add(p.Id); }
                         catch (Exception) { }
                     }
                 }
             }
-            return false;
+            return found;
         }
 
         /// <summary>A build the launcher watches on probation, and when it started.</summary>
@@ -490,7 +628,7 @@ namespace Citadel.Desktop
                     state.Pending = staged;
                     Save(state);
                 }
-                Log("build " + f.Build + " is ready: it is tried on the next start");
+                Log("build " + f.Build + " is ready: it is tried on the next start, or once " + Title + " is idle in the tray");
             }
             finally
             {

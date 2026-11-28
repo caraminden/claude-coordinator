@@ -55,3 +55,13 @@ sandboxed, cross-site) and runs a published build (`keys.mjs 9`), the checkout's
 in each place; `rclick` reads the menu each right-click opens (UI Automation: Electron's menus aren't Win32 menus) and invokes
 Reload this app. While an elevated window has the box's foreground (the `front` line names it), Windows drops injected input:
 set `RIG_INPUT=cdp` to send it through DevTools, which takes the same browser-side path but skips Windows' message loop.
+`stuck` (#2263) presses the same keys with the page stuck on Reconnecting… (its live stream asked and never answered, the
+server since recovered, a service worker serving `/c/` from cache) and passes when the reloaded page's stream connects.
+
+`scripts/electron-app/stuck-live.mjs` (#2263) does that on Citadel's real page: a published build (`stuck-live.mjs <rig URL> 11`)
+or `checkout` on the WCO rig's dev copy (`rig.ts up`, no driver), signed in, through a proxy on the box that holds the live
+stream the way a booting server did (#2260). It drops the stream, waits for the Reconnecting… chip, lets go, presses each
+reload key with focus in the page and in the text box (DevTools input), and passes when a new page loads and its stream
+answers within 8 s, well inside the page's own 30 s retry. `RIG_HELD=1` keeps the hold through one Ctrl+R: the window
+still reloads and the new page sticks again, as on a server still booting. Under the `run` task, PowerShell may report
+exit 1 for the app's stderr line alone: read the PASS/FAIL lines and the last `fails` count.

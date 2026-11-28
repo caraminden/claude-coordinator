@@ -1,6 +1,6 @@
 // No new copy of a shared test harness (Nov 28 test audit, #2309). A test file that writes its own fake executable or
-// stubs the browser's EventSource/fetch by hand goes red, naming the helper. The detectors are the reviewer's
-// (kit/skills/test-quality/scripts/test-habits.ts). `kept` only shrinks: a file with fewer copies than listed stays
+// stubs the browser's EventSource/fetch by hand goes red, naming the helper. The detectors are the reviewer's (plus fetch,
+// which it does not flag) (kit/skills/test-quality/scripts/test-habits.ts). `KEPT` only shrinks: a file with fewer copies than listed stays
 // green; a new file, or a higher count, goes red.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

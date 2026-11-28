@@ -308,4 +308,4 @@ button.link.mcard-open, .mcard button.link { align-self: flex-start; display: in
 .mcard-ci-use { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .mcard-ci-use > span:first-child { flex: 1 1 16rem; }
 .mcard-ci-use > div { flex-basis: 100%; }
-.mcard-ci-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.mcard-ci-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-left: auto; }

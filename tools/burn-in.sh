@@ -9,7 +9,7 @@
 #   tools/burn-in.sh --ship <base>          a ship's CI run (tests.yml): the test files it adds or changes since <base>,
 #                                           then up to BURN_IN_MAPPED (3) tests tools/affected-map.txt maps its changed
 #                                           source files to or that import them (in turns), one file after another, within
-#                                           BURN_IN_LIMIT (150) s; with BURN_IN_TIMES (a file it keeps), one whose last
+#                                           BURN_IN_LIMIT (135) s; with BURN_IN_TIMES (a file it keeps), one whose last
 #                                           burn-in at the same content took longer than the time left is not started;
 #                                           a heavy file's copies run fewer at a time, to fit the runner (below, #2290)
 #   tools/burn-in.sh --importers <path>...  the test files that import those paths, nearest first, with why (no run)
@@ -34,7 +34,7 @@
 # fresh-session race (about 1 CPU a copy) was caught in 9 of 10 copies at 10 at once, 3 runs of 3, and in no copy of 3
 # runs at 4 at a time: a light file's race needs all its copies at once. 3 x 4 CPUs runs a file of up to 1.2 CPUs 10 at
 # once, list-reads 6, cabal-card-browser (3.1) 3. A 16-CPU runner (the desktop) runs every file of up to 4.8 CPUs 10 at
-# once, as before. The weighing run doesn't come out of the limit (at most 60 s a file, on top of it).
+# once, as before. The weighing runs get 15 s on top of the limit in all (BURN_IN_WEIGH_ROOM), then come out of it.
 set -uo pipefail
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 copies=${BURN_IN_COPIES:-10}
@@ -184,6 +184,8 @@ weigh() {
   rm -rf "$dir"
   rc=$(awk '$1 == "rc" { print $2 }' <<<"$out")
   [ "$rc" = 0 ] || weigh_note="; that run alone failed (exit $rc), and its copies still decide"
+  # Stopped at its limit, its processes' CPU time is lost with them: it counts as filling the runner.
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then weight=$cpus weigh_note="; that run alone was stopped at $limit s, so it counts as filling the runner"; return 0; fi
   # The whole machine's ticks are USER_HZ, 100 a second on Linux.
   weight=$(awk -v ns=$((t1 - t0)) -v by="$by" -v ticks=$((b1 - b0)) 'function s(x) { split(x, a, /[ms]/); return a[1] * 60 + a[2] } $1 != "rc" { n++; if (n == 2) cpu = s($1) + s($2) } END { if (by == "machine" && ticks / 100 > cpu) cpu = ticks / 100; w = ns > 0 ? cpu / (ns / 1e9) : 0; printf "%.2f", w }' <<<"$out")
 }
@@ -221,7 +223,7 @@ if [ "${1:-}" != --ship ]; then
 fi
 
 base=${2:?usage: burn-in.sh --ship <base>}
-limit=${BURN_IN_LIMIT:-150} mapped_max=${BURN_IN_MAPPED:-3} cpus=${BURN_IN_CPUS:-$(nproc 2>/dev/null || echo 4)} load=${BURN_IN_LOAD:-3}
+limit=${BURN_IN_LIMIT:-135} mapped_max=${BURN_IN_MAPPED:-3} cpus=${BURN_IN_CPUS:-$(nproc 2>/dev/null || echo 4)} load=${BURN_IN_LOAD:-3}
 [[ $cpus =~ ^[1-9][0-9]*$ ]] || { echo "burn-in: BURN_IN_CPUS must be a whole number, not $cpus"; exit 1; }
 [[ $load =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "burn-in: BURN_IN_LOAD must be a number, not $load"; exit 1; }
 git rev-parse -q --verify "$base^{commit}" >/dev/null || { echo "burn-in: SKIPPED: no commit $base to compare with, so nothing was burned in"; exit 0; }
@@ -273,7 +275,9 @@ keep_time() {
   [ "$(wc -l <"$times" 2>/dev/null || echo 0)" -le 4000 ] || { tail -n 2000 "$times" >"$times.$$" && mv -f "$times.$$" "$times"; }
 }
 # Every file runs, past a red one (#1564): a train with three racy riders hears of all three in one red run, not one a run.
-deadline=$((SECONDS + limit)) start=$SECONDS skipped=() slow=() nov=() red=()
+# The weighing runs get weigh_room s more than the limit in all: 135 + 15 is the 150 s the copies had before #2290, so
+# the step stays within land.sh's CI_BURN (180 s, test/ci-runner-choice.test.ts).
+deadline=$((SECONDS + limit)) start=$SECONDS weigh_room=${BURN_IN_WEIGH_ROOM:-15} skipped=() slow=() nov=() red=()
 for f in "${files[@]}"; do
   left=$((deadline - SECONDS))
   [ "$left" -ge 15 ] || { skipped+=("$f"); continue; }
@@ -288,10 +292,11 @@ for f in "${files[@]}"; do
   if honours_inner "$f"; then
     fit "$f" "$copies" "$cpus" # its in-file concurrency is capped to fit the CPUs (#2073)
   else
-    # Its weighing run is on top of the limit, the copies keeping all the time left (at most a minute: a file alone for
-    # longer can't finish its copies anyway).
+    # Its weighing run is on top of the limit while weigh_room lasts, then comes out of it (at most a minute: a file
+    # alone for longer can't finish its copies anyway).
     weigh "$f" "$((left < ${BURN_IN_WEIGH_LIMIT:-60} ? left : ${BURN_IN_WEIGH_LIMIT:-60}))"
-    deadline=$((deadline + SECONDS - t0)) t0=$SECONDS
+    tw=$((SECONDS - t0)) && [ "$tw" -le "$weigh_room" ] || tw=$weigh_room
+    deadline=$((deadline + tw)) weigh_room=$((weigh_room - tw)) left=$((deadline - SECONDS)) t0=$SECONDS
     read -r weight fit_k < <(awk -v c="$cpus" -v l="$load" -v w="$weight" -v n="$copies" 'BEGIN { k = w > 0.05 ? int(c * l / w) : n; if (k > n) k = n; if (k < 2) k = 2; printf "%.1f %d\n", w, k }')
     echo "burn-in: $f: one copy alone kept $weight of this runner's $cpus CPUs busy, so $([ "$fit_k" -ge "$copies" ] && echo "all $copies copies run at once" || echo "its $copies copies run at most $fit_k at a time") (a load of up to $load x its CPUs)${weigh_note}"
   fi

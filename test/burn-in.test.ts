@@ -37,8 +37,8 @@ function repo(change: Record<string, string>, map = '', base: Record<string, str
   return dir;
 }
 // BURN_IN_CPUS 16 and BURN_IN_WEIGHT 0 by default, so neither the runner's CPU count (4 on GitHub's) nor a weighing run
-// paces these copies (#2290's tests set them).
-const ship = (dir: string, env: Record<string, string> = {}) => spawnSync('bash', ['tools/burn-in.sh', '--ship', 'HEAD~1'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), BURN_IN_CPUS: '16', BURN_IN_WEIGHT: '0', ...env } });
+// paces these copies (#2290's tests set them); a weighing run counts its own processes, not a GitHub shard's other tests.
+const ship = (dir: string, env: Record<string, string> = {}) => spawnSync('bash', ['tools/burn-in.sh', '--ship', 'HEAD~1'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), BURN_IN_CPUS: '16', BURN_IN_WEIGHT: '0', BURN_IN_WEIGH_BY: 'tree', ...env } });
 
 test('a test file failing 1 copy in 10 is refused, with that copy named and its output shown', () => {
   const r = ship(repo({ 'test/racy.test.ts': ONE_IN_TEN, 'test/clean.test.ts': CLEAN }));
@@ -94,7 +94,7 @@ test('a file failing only some copies is not run alone', () => {
 test('a clean new test passes all 10 copies at once', () => {
   const r = ship(repo({ 'test/clean.test.ts': CLEAN }));
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^burn-in: 1 file\(s\), 10 copies of each at once, one file after another, within 150 s: changed: test\/clean\.test\.ts$/m);
+  assert.match(r.stdout, /^burn-in: 1 file\(s\), 10 copies of each at once, one file after another, within 135 s: changed: test\/clean\.test\.ts$/m);
   assert.match(r.stdout, /^burn-in: test\/clean\.test\.ts: 10 of 10 copies at once passed, in \d+ s$/m);
 });
 
@@ -131,7 +131,7 @@ test('a source-only change burns in the tests that import it, directly or throug
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /^burn-in: picked test\/direct\.test\.ts: it imports src\/a\.ts$/m);
   assert.match(r.stdout, /^burn-in: picked test\/via\.test\.ts: it imports src\/b\.ts, which imports src\/a\.ts$/m);
-  assert.match(r.stdout, /^burn-in: 2 file\(s\), 2 copies of each at once, one file after another, within 150 s: importing the change: test\/direct\.test\.ts test\/via\.test\.ts$/m);
+  assert.match(r.stdout, /^burn-in: 2 file\(s\), 2 copies of each at once, one file after another, within 135 s: importing the change: test\/direct\.test\.ts test\/via\.test\.ts$/m);
   assert.match(r.stdout, /^burn-in: test\/via\.test\.ts: 2 of 2 copies at once passed/m);
   assert.doesNotMatch(r.stdout, /too-far|other\.test/, 'two files away, or not importing it at all, is not burned in');
 });
@@ -453,11 +453,27 @@ test("on GitHub's runners the whole machine's busy time weighs a file, so what i
   assert.ok(machine.weight - tree.weight > 0.3, `left-behind spinners: the run's own CPU time weighed ${tree.weight}, the machine's ${machine.weight}`);
 });
 
-test("the weighing run doesn't come out of the limit: the copies still get all of it", () => {
-  const { r, ran } = paced({ 'test/held.test.ts': held }, { BURN_IN_WEIGHT: '', BURN_IN_HOLD: '9000', BURN_IN_LIMIT: '16' });
+test('a weighing run stopped at its limit counts as filling the runner, so the copies are paced, not all run at once', () => {
+  const { r, ran } = paced({ 'test/held.test.ts': held }, { BURN_IN_CPUS: '4', BURN_IN_WEIGHT: '', BURN_IN_HOLD: '3000', BURN_IN_WEIGH_LIMIT: '1', BURN_IN_COPIES: '4' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(ran, 4);
+  assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: one copy alone kept 4\.0 of this runner's 4 CPUs busy, so its 4 copies run at most 3 at a time \(a load of up to 3 x its CPUs\); that run alone was stopped at 1 s, so it counts as filling the runner$/m);
+});
+
+test("the weighing runs get room on top of the limit, so a file's copies keep the time a file alone took", () => {
+  const { r, ran } = paced({ 'test/held.test.ts': held }, { BURN_IN_WEIGHT: '', BURN_IN_HOLD: '9000', BURN_IN_LIMIT: '16', BURN_IN_WEIGH_ROOM: '25' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(ran, 11, 'the weighing copy and all 10 ran to the end, about 20 s against a 16 s limit');
   assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: 10 of 10 copies at once passed/m);
+});
+
+test('past their room the weighing runs come out of the limit, so the step stays within what land.sh waits for', () => {
+  // The run above with 1 s of room: about 9 s of weighing leaves the copies about 8 s of the 16, too few to finish.
+  const { r } = paced({ 'test/held.test.ts': held }, { BURN_IN_WEIGHT: '', BURN_IN_HOLD: '9000', BURN_IN_LIMIT: '16', BURN_IN_WEIGH_ROOM: '1' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: NO VERDICT on test\/held\.test\.ts: stopped at the 16 s limit/m);
+  const done = Number(r.stdout.match(/^burn-in: done in (\d+) s$/m)?.[1]);
+  assert.ok(done <= 19, `done in ${done} s: the limit and the 1 s of room, give or take the stop`);
 });
 
 test('a race failing 1 copy in 10 is still refused when its copies run 3 at a time, in the line land.sh reads', () => {

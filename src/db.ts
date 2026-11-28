@@ -16,6 +16,7 @@ import { deliveryQueries } from './db/deliveries.ts';
 import { flakeQueries } from './db/flakes.ts';
 import { flowQueries } from './db/flow.ts';
 import { machineQueries } from './db/machines.ts';
+import { poolQueries } from './db/runner-pool.ts';
 import { legacyFromRoles, parseLegacyLend, ROLE_NAMES, rolesFromLegacy, runnerHost, runnerSeen, sameLend } from './machine-roles.ts';
 import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
@@ -364,6 +365,7 @@ export const SCHEMA_HISTORY = [
   [127, "machines.owner_id filled where it was empty, from created_by or machine_joins; those rows' roles caps.everyone (Build 10 H1, #2184)"],
   [128, 'machines.vm_of: the computer a VM runs on, linked when its agent finds the VM in Hyper-V (Build 10 H4, #2188)'],
   [129, "a CI runner host's row becomes one PC's: last_check's runners flag goes, its CI role's runner_host becomes runner_agent (Build 10 H6, #2202)"],
+  [130, 'pool_jobs: every CI job the runner pool has seen (Build 11 P1, #2268)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -878,6 +880,7 @@ const AREAS = [
   flakeQueries,
   flowQueries,
   machineQueries,
+  poolQueries,
   minionQueries,
   pushQueries,
   readWarmQueries,
@@ -906,6 +909,7 @@ type Areas = typeof healthQueries &
   typeof flakeQueries &
   typeof flowQueries &
   typeof machineQueries &
+  typeof poolQueries &
   typeof minionQueries &
   typeof pushQueries &
   typeof readWarmQueries &

@@ -936,4 +936,26 @@ CREATE TABLE IF NOT EXISTS wait_records (
   data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS wait_records_ticket ON wait_records(ticket_id, id);
+-- Every CI job the runner pool has seen waiting for a self-hosted runner (Build 11 P1, src/runner-pool.ts): placed_* is
+-- where the pool started it (P3 on), runner and ran_on what GitHub says took it and on which machine. Ended rows are
+-- kept POOL.keepMs.
+CREATE TABLE IF NOT EXISTS pool_jobs (
+  repo TEXT NOT NULL,
+  job_id INTEGER NOT NULL,
+  run_id INTEGER NOT NULL,
+  project_id INTEGER,
+  name TEXT NOT NULL DEFAULT '',
+  labels TEXT NOT NULL DEFAULT '[]',
+  size INTEGER NOT NULL,
+  ship INTEGER NOT NULL DEFAULT 0,
+  first_seen INTEGER NOT NULL,
+  placed_machine INTEGER,
+  placed_at INTEGER,
+  runner TEXT,
+  ran_on INTEGER,
+  started_at INTEGER,
+  ended_at INTEGER,
+  PRIMARY KEY (repo, job_id)
+);
+CREATE INDEX IF NOT EXISTS pool_jobs_open ON pool_jobs(ended_at);
 `;

@@ -16,6 +16,8 @@ import { osOfLabel } from './ci-auto.ts';
 import { runnerLabel } from './ci-runner.ts';
 import { HEAVY_SIZES, heavyKind } from './heavy-place.ts';
 import { COST, rank } from './machine-balancer.ts';
+import type { PoolSight } from './ci-ships.ts';
+import type { PoolLook, PoolRow } from './db/runner-pool.ts';
 
 /** The pool's numbers, in one place: starting values (#2264), changed only here. */
 export const POOL = {
@@ -242,4 +244,162 @@ export function settle(runners: readonly PoolRunner[], took: readonly Took[], no
   // The jobs made for runners that no runner holds now (a swap's leftover, a reaped runner's): placed again.
   const free = [...new Set(runners.map((r) => r.job))].filter((j) => !held.has(j));
   return { holds, free, reap };
+}
+
+/** A machine that lends CI, as the server knows it; the pool takes what CI runs there off `limit` to get its free room. */
+export interface PoolPc extends Omit<PoolMachine, 'free'> {
+  /** Threads CI may use there now before CI's own jobs: the owner's CI limit, less the minion turns running there. */
+  limit: number;
+  /** Its runner agents' hostnames: a runner's name starts with one. */
+  hosts: readonly string[];
+}
+
+/** One job in the line, as the CI page shows it. */
+export interface PoolLineJob {
+  repo: string;
+  scheme: number;
+  id: number;
+  run: number;
+  name: string;
+  labels: string[];
+  ship: boolean;
+  since: number;
+  size: number;
+  place: number;
+  step: number;
+  /** The machine it would start on now (P1 starts nothing); null: it waits, `why` says why. */
+  machine: string | null;
+  why: string | null;
+}
+
+export interface PoolView {
+  at: number;
+  /** Every waiting job, in line order. */
+  line: PoolLineJob[];
+  /** P1: nothing is started; the line says what would be. */
+  watching: true;
+}
+
+type Open = { repo: string; id: number; run: number; scheme: number; size: number; runner: string | null; ranOn: number | null };
+
+/** Which machine a runner is on, by the hostname its name starts with (the longest that fits). */
+export function machineOfRunner(runner: string, pcs: readonly Pick<PoolPc, 'id' | 'hosts'>[]): number | null {
+  const name = runner.toLowerCase();
+  let best: { id: number; len: number } | null = null;
+  for (const p of pcs) for (const h of p.hosts.map((x) => x.toLowerCase())) if (h && (name === h || name.startsWith(`${h}-`)) && h.length > (best?.len ?? 0)) best = { id: p.id, len: h.length };
+  return best?.id ?? null;
+}
+
+export interface PoolDeps {
+  /** The scheme that has the repo (id and name, for its labels); null: none, so its jobs aren't the pool's. */
+  scheme(repo: string): { id: number; name: string } | null;
+  /** owner/name of the repo whose ships go first (Citadel's own), lowercase; null when unknown. */
+  first(): string | null;
+  machines(): PoolPc[];
+  store: { poolLook(look: PoolLook): void; poolOpen(): PoolRow[]; poolLastStarts(): { project_id: number; at: number; machine: number | null }[] };
+  log(line: string): void;
+  now(): number;
+}
+
+/**
+ * The pool, watching only (P1): each ShipWatch look (`pass`) keeps the books of the jobs seen, puts the waiting ones in line
+ * and places them, and logs "would start X on Y" once for each job's new place. Nothing is started anywhere.
+ */
+export class RunnerPool {
+  private d: PoolDeps;
+  private open: Map<string, Open> | null = null;
+  private lastStart = new Map<number, number>();
+  private warm = new Map<number, number>();
+  private said = new Map<string, number>();
+  private current: PoolView = { at: 0, line: [], watching: true };
+
+  constructor(d: PoolDeps) {
+    this.d = d;
+  }
+
+  view(): PoolView {
+    return this.current;
+  }
+
+  pass(sight: PoolSight): PoolView {
+    const now = this.d.now();
+    if (!this.open) {
+      this.open = new Map(this.d.store.poolOpen().map((r) => [`${r.repo}#${r.job_id}`, { repo: r.repo, id: r.job_id, run: r.run_id, scheme: r.project_id ?? 0, size: r.size, runner: r.runner, ranOn: r.ran_on }]));
+      for (const r of this.d.store.poolLastStarts()) {
+        this.lastStart.set(r.project_id, r.at);
+        if (r.machine !== null) this.warm.set(r.project_id, r.machine);
+      }
+    }
+    const pcs = this.d.machines();
+    const look: PoolLook = { seen: [], ran: [], ended: [], at: now, keepAfter: now - POOL.keepMs };
+    const first = this.d.first()?.toLowerCase() ?? null;
+    const waiting: PoolJob[] = [];
+    const listed = new Set<string>();
+    for (const j of sight.jobs) {
+      const s = this.d.scheme(j.repo);
+      if (!s) continue;
+      const key = `${j.repo}#${j.id}`;
+      listed.add(key);
+      const needs = needsOf(j.labels, s.name);
+      const ship = j.ship;
+      let o = this.open.get(key);
+      if (!o) {
+        o = { repo: j.repo, id: j.id, run: j.run, scheme: s.id, size: needs.size, runner: null, ranOn: null };
+        this.open.set(key, o);
+        look.seen.push({ repo: j.repo, job_id: j.id, run_id: j.run, project_id: s.id, name: j.name, labels: JSON.stringify(j.labels), size: needs.size, ship: ship ? 1 : 0, first_seen: now });
+      }
+      if (j.status === 'in_progress' && j.runner && j.runner !== o.runner) {
+        o.runner = j.runner;
+        o.ranOn = machineOfRunner(j.runner, pcs);
+        look.ran.push({ repo: j.repo, job_id: j.id, runner: j.runner, ran_on: o.ranOn, started_at: now });
+        this.lastStart.set(s.id, now);
+        if (o.ranOn !== null) this.warm.set(s.id, o.ranOn);
+      }
+      if (j.status === 'queued') waiting.push({ repo: j.repo, id: j.id, run: j.run, name: j.name, scheme: s.id, ship, first: ship && j.repo === first, since: Number.isFinite(j.created) ? j.created : now, needs });
+    }
+    // A job no longer listed ended: its run is gone from the queued and running lists, or its run's jobs were read without
+    // it. One whose run is listed but whose jobs weren't read (past the first queued runs) stays open.
+    for (const [key, o] of [...this.open]) {
+      if (listed.has(key) || !sight.repos.has(o.repo)) continue;
+      const run = `${o.repo}#${o.run}`;
+      if (sight.runs.has(run) && !sight.known.has(run)) continue;
+      look.ended.push({ repo: o.repo, job_id: o.id });
+      this.open.delete(key);
+    }
+    if (look.seen.length || look.ran.length || look.ended.length) this.d.store.poolLook(look);
+    // CI's room in use on each machine: the jobs running there now, by their size.
+    const used = new Map<number, number>();
+    for (const o of this.open.values()) if (o.runner && o.ranOn !== null) used.set(o.ranOn, (used.get(o.ranOn) ?? 0) + o.size);
+    const machines = pcs.map(({ limit, hosts: _, ...m }) => ({ ...m, free: Math.max(0, limit - (used.get(m.id) ?? 0)) }));
+    const placed = place({ jobs: waiting, machines, now, lastStart: this.lastStart, warm: this.warm });
+    const nameOf = (id: number | null) => (id === null ? null : (machines.find((m) => m.id === id)?.name ?? `machine ${id}`));
+    const said = new Map<string, number>();
+    for (const p of placed) {
+      if (p.machine === null) continue;
+      const key = `${p.job.repo}#${p.job.id}`;
+      said.set(key, p.machine);
+      if (this.said.get(key) !== p.machine) this.d.log(`Runner pool (watching): would start ${p.job.repo} "${p.job.name}" (job ${p.job.id}${p.job.ship ? ', a ship' : ''}) on ${nameOf(p.machine)}, place ${p.place} of ${placed.length}`);
+    }
+    this.said = said;
+    this.current = {
+      at: now,
+      watching: true,
+      line: placed.map((p) => ({
+        repo: p.job.repo,
+        scheme: p.job.scheme,
+        id: p.job.id,
+        run: p.job.run,
+        name: p.job.name,
+        labels: sight.jobs.find((j) => j.repo === p.job.repo && j.id === p.job.id)?.labels ?? [],
+        ship: p.job.ship,
+        since: p.job.since,
+        size: p.job.needs.size,
+        place: p.place,
+        step: p.step,
+        machine: nameOf(p.machine),
+        why: p.why,
+      })),
+    };
+    return this.current;
+  }
 }

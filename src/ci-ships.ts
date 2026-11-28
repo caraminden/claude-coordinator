@@ -8,10 +8,11 @@ import { type GhGet, ghGet, RateLimited, rateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { every, type Job } from './every.ts';
 import { thrown } from './thrown.ts';
-import type { GhJobsBody, GhRunsBody } from './gh-bodies.ts';
+import type { GhJob, GhJobsBody, GhRun, GhRunsBody } from './gh-bodies.ts';
 import { heavyKind, type QueuedHeavy } from './heavy-place.ts';
+import { POOL } from './runner-pool.ts';
 
-export const SHIP_POLL_MS = 15_000;
+export const SHIP_POLL_MS = POOL.pollMs;
 const RATE_LIMITED_MS = 5 * 60_000;
 /** How long a repo whose reads fail keeps its last ships: the agents' own hold, so a ship that ended unseen lifts. */
 const KEEP_FAILED_MS = 2 * 60_000;
@@ -57,6 +58,30 @@ export function queuedOn(host: string, byRepo: Map<string, number>, pcs: Pcs): n
   return n;
 }
 
+/** A self-hosted job queued or running, as the runner pool reads it (Build 11 P1, src/runner-pool.ts). */
+export interface SeenJob {
+  /** owner/name, lowercase. */
+  repo: string;
+  id: number;
+  run: number;
+  name: string;
+  labels: string[];
+  /** Its run is a ship's (a `land/` branch). */
+  ship: boolean;
+  /** When GitHub queued it (ms); NaN when it doesn't say. */
+  created: number;
+  status: 'queued' | 'in_progress';
+  runner: string | null;
+}
+
+/** One look for the pool: the jobs seen, every run listed queued or in progress (`repo#run`), and the runs whose jobs are known. */
+export interface PoolSight {
+  jobs: SeenJob[];
+  runs: Set<string>;
+  known: Set<string>;
+  repos: Set<string>;
+}
+
 export interface ShipWatchDeps {
   /** owner/name, lowercase, of every repo with runners on a runner agent's PC (repeats are fine). */
   repos: () => string[];
@@ -70,6 +95,8 @@ export interface ShipWatchDeps {
   queued?: (byRepo: Map<string, number>, labels: Map<string, Set<string>>, jobs?: Map<string, string[][]>) => void;
   /** The queued jobs asking for a heavy label (src/heavy-place.ts, #2120), and the repos whose queued runs were read; read only with `queued`. */
   heavy?: (jobs: QueuedHeavy[], read: Set<string>) => void;
+  /** Every queued and running self-hosted job, for the runner pool (Build 11 P1); read only with `queued`. */
+  pool?: (sight: PoolSight) => void;
   get?: GhGet;
   log?: (line: string) => void;
 }
@@ -78,6 +105,8 @@ export class ShipWatch {
   private deps: ShipWatchDeps;
   private get: GhGet;
   private cache = new Map<string, { etag: string | null; body: unknown }>();
+  // A running run's jobs path, with its run's updated_at and when it was read: read again only once either moves on.
+  private runRead = new Map<string, { updated: string; at: number }>();
   // Each repo's ships at its last good read: a read that fails keeps them, so a GitHub hiccup doesn't lift a squeeze.
   private last = new Map<string, { ships: Ship[]; at: number }>();
   private pausedUntil = 0;
@@ -125,15 +154,20 @@ export class ShipWatch {
         const labels = new Map<string, Set<string>>();
         const jobs = new Map<string, string[][]>();
         const heavy: QueuedHeavy[] = [];
+        const sight: PoolSight = { jobs: [], runs: new Set(), known: new Set(), repos: new Set() };
         for (const repo of repos) {
           const as = this.deps.as(repo);
           if (as === null) continue;
           try {
-            const w = await this.waiting(repo, as, used);
+            const w = await this.waiting(repo, as, used, sight);
             queued.set(repo, w.n);
             if (w.labels.size) labels.set(repo, w.labels);
             if (w.jobs.length) jobs.set(repo, w.jobs);
             heavy.push(...w.heavy);
+            if (this.deps.pool) {
+              await this.running(repo, as, used, sight, now);
+              sight.repos.add(repo);
+            }
           } catch (err) {
             if (err instanceof RateLimited) throw err;
             this.say(`Ship watch: ${repo}'s queued jobs: ${thrown(err).message ?? err}`);
@@ -141,7 +175,9 @@ export class ShipWatch {
         }
         this.deps.queued(queued, labels, jobs);
         this.deps.heavy?.(heavy, new Set(queued.keys()));
+        this.deps.pool?.(sight);
       }
+      for (const path of this.runRead.keys()) if (!used.has(path)) this.runRead.delete(path);
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
       const first = this.deps.first?.()?.toLowerCase();
       // Citadel's own ships carry first: true, so shipsOn, and a keeper that squeezes harder for them, can tell them from another scheme's.
@@ -181,17 +217,21 @@ export class ShipWatch {
 
   /** Jobs waiting for a self-hosted runner in the repo's queued runs. shortcut: a queued job inside a run already going isn't counted; read in_progress runs' jobs too if workers grow over waiting CI. */
   // Heavy jobs (src/heavy-place.ts, #2120) come back on their own: they wait for Citadel to place them, so they count as heavy, not as waiting CI.
-  private async waiting(repo: string, as: GithubEnv, used: Set<string>): Promise<{ n: number; labels: Set<string>; jobs: string[][]; heavy: QueuedHeavy[] }> {
+  private async waiting(repo: string, as: GithubEnv, used: Set<string>, sight: PoolSight): Promise<{ n: number; labels: Set<string>; jobs: string[][]; heavy: QueuedHeavy[] }> {
     const runs = ((await this.read(`repos/${repo}/actions/runs?status=queued&per_page=20`, as, used)) as GhRunsBody | null)?.workflow_runs ?? [];
     let n = 0;
     const labels = new Set<string>();
     const jobLabels: string[][] = [];
     const heavy: QueuedHeavy[] = [];
+    for (const r of runs) if (Number.isInteger(r?.id)) sight.runs.add(`${repo}#${r.id}`);
     for (const r of runs.filter((r) => Number.isInteger(r?.id)).slice(0, QUEUED_RUNS)) {
       const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
+      sight.known.add(`${repo}#${r.id}`);
       for (const j of jobs) {
         if (j?.status !== 'queued' || !Array.isArray(j.labels) || !j.labels.includes('self-hosted')) continue;
         const asks = j.labels.filter((l) => typeof l === 'string');
+        const seen = seenJob(repo, r, j);
+        if (seen) sight.jobs.push(seen);
         const kind = heavyKind(asks);
         // Its other labels still ask for runners (#2064); the heavy one is Citadel's to hand out.
         for (const l of asks) if (l !== 'self-hosted' && l.toLowerCase() !== kind?.label) labels.add(l.toLowerCase());
@@ -207,9 +247,40 @@ export class ShipWatch {
     return { n, labels, jobs: jobLabels, heavy };
   }
 
+  /**
+   * The repo's running runs' self-hosted jobs, queued ones inside them included, for the pool. A run's jobs are read again
+   * only when GitHub's run list says the run changed, or POOL.runningMs has gone by: its steps move its ETag on every look.
+   */
+  private async running(repo: string, as: GithubEnv, used: Set<string>, sight: PoolSight, now: number) {
+    const runs = ((await this.read(`repos/${repo}/actions/runs?status=in_progress&per_page=50`, as, used)) as GhRunsBody | null)?.workflow_runs ?? [];
+    for (const r of runs.filter((r) => Number.isInteger(r?.id))) {
+      sight.runs.add(`${repo}#${r.id}`);
+      const path = `repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`;
+      const updated = String(r.updated_at ?? '');
+      const last = this.runRead.get(path);
+      const had = this.cache.get(path);
+      let body: unknown;
+      if (had && last && last.updated === updated && now - last.at < POOL.runningMs) {
+        used.add(path);
+        body = had.body;
+      } else {
+        body = await this.read(path, as, used);
+        this.runRead.set(path, { updated, at: now });
+      }
+      sight.known.add(`${repo}#${r.id}`);
+      for (const j of (body as GhJobsBody | null)?.jobs ?? []) {
+        if ((j?.status !== 'queued' && j?.status !== 'in_progress') || !Array.isArray(j.labels) || !j.labels.includes('self-hosted')) continue;
+        const seen = seenJob(repo, r, j);
+        if (seen) sight.jobs.push(seen);
+      }
+    }
+  }
+
   private async read(path: string, as: GithubEnv, used: Set<string>): Promise<unknown> {
-    used.add(path);
     const had = this.cache.get(path);
+    // Asked already in this look (a ship's run's jobs, read for its ships and again for the pool): no second call.
+    if (used.has(path) && had) return had.body;
+    used.add(path);
     const r = await this.get(path, had?.etag ?? null, as);
     if (r.status === 304 && had) return had.body;
     if (r.status === 200) {
@@ -226,4 +297,20 @@ export class ShipWatch {
     this.said = line;
     (this.deps.log ?? console.error)(line);
   }
+}
+
+/** A job GitHub listed, as the pool reads it; null for one without an id. */
+function seenJob(repo: string, r: GhRun, j: GhJob): SeenJob | null {
+  if (!Number.isSafeInteger(j.id)) return null;
+  return {
+    repo,
+    id: Number(j.id),
+    run: Number(r.id),
+    name: String(j.name ?? ''),
+    labels: (j.labels ?? []).filter((l) => typeof l === 'string'),
+    ship: SHIP_BRANCH.test(String(r.head_branch ?? '')),
+    created: Date.parse(String(j.created_at ?? '')),
+    status: j.status === 'in_progress' ? 'in_progress' : 'queued',
+    runner: typeof j.runner_name === 'string' && j.runner_name ? j.runner_name : null,
+  };
 }

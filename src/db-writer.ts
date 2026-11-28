@@ -111,6 +111,7 @@ export const WRITES = [
   'schedules.heldNote',
   'memory.deleteTicket',
   'saveTimeLogExplain',
+  'poolLook',
 ];
 
 /**

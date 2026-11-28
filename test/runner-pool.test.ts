@@ -147,3 +147,155 @@ test('the books follow the job each runner really took: a same-repo swap books n
   const d = settle([r('s1', 10)], [{ repo: 'o/mandate', id: 10, runner: 's1' }], NOW);
   assert.deepEqual(Object.fromEntries(d.holds), { s1: { machine: 1, job: 10 } });
 });
+
+// ---------- the watcher (P1: watching only) and the poll that feeds it ----------
+
+import { ShipWatch, type PoolSight, type SeenJob } from '../src/ci-ships.ts';
+import type { PoolLook, PoolRow } from '../src/db/runner-pool.ts';
+import { RunnerPool, machineOfRunner, type PoolPc } from '../src/runner-pool.ts';
+
+/** A fake GitHub that answers 304 to a path asked again with the ETag it gave, and counts the calls GitHub would count. */
+function github(pages: Record<string, unknown>) {
+  const counted: string[] = [];
+  const asked: string[] = [];
+  const get = async (path: string, etag: string | null) => {
+    asked.push(path);
+    const body = pages[path];
+    if (body === undefined) return { status: 404, etag: null, body: { message: 'Not Found' } };
+    const tag = `"${JSON.stringify(body)}"`;
+    if (etag === tag) return { status: 304, etag: tag, body: null };
+    counted.push(path);
+    return { status: 200, etag: tag, body };
+  };
+  return { get, counted, asked, pages };
+}
+
+test('the job poll asks with ETags: an unchanged answer makes no counted call, and a running run is read again only once it changed', async () => {
+  const repo = 'caraminden/peek-auras';
+  const queuedRuns = `repos/${repo}/actions/runs?status=queued&per_page=20`;
+  const runningRuns = `repos/${repo}/actions/runs?status=in_progress&per_page=50`;
+  const jobsOf = (id: number) => `repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`;
+  const gh = github({
+    [queuedRuns]: { workflow_runs: [{ id: 1, head_branch: 'land/9-x' }] },
+    [jobsOf(1)]: { jobs: [{ id: 11, name: 'build', status: 'queued', labels: ['self-hosted', 'peek-auras-ci'], created_at: '2026-11-28T05:00:00Z' }] },
+    [runningRuns]: { workflow_runs: [{ id: 2, head_branch: 'main', updated_at: 'a' }] },
+    [jobsOf(2)]: {
+      jobs: [
+        { id: 21, name: 'test', status: 'in_progress', labels: ['self-hosted', 'peek-auras-ci'], runner_name: 'DESK-2', steps: [{ name: 'a', status: 'in_progress' }] },
+        { id: 22, name: 'after', status: 'queued', labels: ['self-hosted', 'peek-auras-ci'] },
+        { id: 23, name: 'hosted', status: 'queued', labels: ['ubuntu-latest'] },
+      ],
+    },
+  });
+  const sights: PoolSight[] = [];
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: () => {}, pool: (s) => void sights.push(s) });
+  await w.tick(0);
+  assert.equal(gh.counted.length, 4, 'the first look reads each path once: the in-progress list serves the ships and the pool');
+  assert.deepEqual(
+    sights[0].jobs.map((j: SeenJob) => [j.id, j.status, j.runner, j.ship]),
+    [
+      [11, 'queued', null, true],
+      [21, 'in_progress', 'DESK-2', false],
+      [22, 'queued', null, false],
+    ],
+  );
+  assert.deepEqual([...sights[0].known].sort(), [`${repo}#1`, `${repo}#2`]);
+  // Unchanged: every path answers 304, and the running run's jobs aren't asked at all.
+  gh.counted.length = 0;
+  gh.asked.length = 0;
+  await w.tick(POOL.pollMs);
+  assert.deepEqual(gh.counted, []);
+  assert.ok(!gh.asked.includes(jobsOf(2)), "a running run GitHub says didn't change isn't read again");
+  assert.equal(sights[1].jobs.length, 3, 'its jobs still come from the last read');
+  // Its steps moved (a new ETag) but the run didn't: read again once POOL.runningMs has gone by.
+  (gh.pages[jobsOf(2)] as { jobs: { steps?: unknown }[] }).jobs[0].steps = [{ name: 'a', status: 'completed' }];
+  await w.tick(2 * POOL.pollMs);
+  assert.deepEqual(gh.counted, []);
+  await w.tick(POOL.runningMs + POOL.pollMs);
+  assert.deepEqual(gh.counted, [jobsOf(2)]);
+  // The run changed (a job ended): read at once.
+  gh.counted.length = 0;
+  gh.pages[runningRuns] = { workflow_runs: [{ id: 2, head_branch: 'main', updated_at: 'b' }] };
+  (gh.pages[jobsOf(2)] as { jobs: { status?: string }[] }).jobs[0].status = 'completed';
+  await w.tick(POOL.runningMs + 2 * POOL.pollMs);
+  assert.deepEqual(gh.counted.sort(), [jobsOf(2), runningRuns].sort());
+});
+
+/** An in-memory pool_jobs with the store's three calls. */
+function books(rows: PoolRow[] = []) {
+  const looks: PoolLook[] = [];
+  return {
+    looks,
+    rows,
+    poolLook(l: PoolLook) {
+      looks.push(l);
+      for (const r of l.seen) if (!rows.some((x) => x.repo === r.repo && x.job_id === r.job_id)) rows.push({ ...r, placed_machine: null, placed_at: null, runner: null, ran_on: null, started_at: null, ended_at: null });
+      for (const r of l.ran) Object.assign(rows.find((x) => x.repo === r.repo && x.job_id === r.job_id)!, { runner: r.runner, ran_on: r.ran_on, started_at: r.started_at });
+      for (const r of l.ended) Object.assign(rows.find((x) => x.repo === r.repo && x.job_id === r.job_id)!, { ended_at: l.at });
+    },
+    poolOpen: () => rows.filter((r) => r.ended_at === null),
+    poolLastStarts: () => [],
+  };
+}
+
+test('the watcher keeps the books, counts running jobs as used room, and logs each would-start once', () => {
+  const repo = 'caraminden/peek-auras';
+  let now = NOW;
+  const logs: string[] = [];
+  const store = books();
+  const desk: PoolPc = { id: 1, name: 'cara-desktop', priority: null, os: ['windows'], session: true, schemes: [PEEK], limit: 8, off: null, hosts: ['DESK'] };
+  const pool = new RunnerPool({ scheme: (r) => (r === repo ? { id: PEEK, name: 'Peek Auras' } : null), first: () => 'caraminden/claude-coordinator', machines: () => [desk], store, log: (l) => logs.push(l), now: () => now });
+  const j = (id: number, o: Partial<SeenJob> = {}): SeenJob => ({ repo, id, run: id, name: `job ${id}`, labels: ['self-hosted', 'peek-auras-ci'], ship: false, created: NOW - 60_000, status: 'queued', runner: null, ...o });
+  const sight = (jobs: SeenJob[], runs = jobs.map((x) => x.run)): PoolSight => ({ jobs, runs: new Set(runs.map((r) => `${repo}#${r}`)), known: new Set(runs.map((r) => `${repo}#${r}`)), repos: new Set([repo]) });
+
+  let v = pool.pass(sight([j(1), j(2), j(3)]));
+  assert.deepEqual(
+    v.line.map((x) => [x.id, x.machine, x.why]),
+    [
+      [1, 'cara-desktop', null],
+      [2, 'cara-desktop', null],
+      [3, null, 'room on cara-desktop: needs 4 threads, 0 free'],
+    ],
+  );
+  assert.equal(store.rows.length, 3);
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /^Runner pool \(watching\): would start caraminden\/peek-auras "job 1" \(job 1\) on cara-desktop, place 1 of 3$/);
+  // The same look again: nothing new written or logged.
+  now += POOL.pollMs;
+  pool.pass(sight([j(1), j(2), j(3)]));
+  assert.equal(store.looks.length, 1);
+  assert.equal(logs.length, 2);
+  // A standing runner on DESK took job 1: booked to the machine, and its 4 threads are in use.
+  now += POOL.pollMs;
+  v = pool.pass(sight([j(1, { status: 'in_progress', runner: 'DESK-2' }), j(2), j(3)]));
+  assert.deepEqual(
+    store.rows.find((r) => r.job_id === 1),
+    { ...store.rows.find((r) => r.job_id === 1)!, runner: 'DESK-2', ran_on: 1, started_at: now, ended_at: null },
+  );
+  assert.deepEqual(
+    v.line.map((x) => [x.id, x.machine]),
+    [
+      [2, 'cara-desktop'],
+      [3, null],
+    ],
+  );
+  // Job 1's run is gone from the lists: it ended, and its room is free again. Job 3's run is listed but unread: still open.
+  now += POOL.pollMs;
+  const s = sight([j(2)], [2]);
+  s.runs.add(`${repo}#3`);
+  v = pool.pass(s);
+  assert.equal(store.rows.find((r) => r.job_id === 1)!.ended_at, now);
+  assert.equal(store.rows.find((r) => r.job_id === 3)!.ended_at, null);
+  assert.equal(v.watching, true);
+});
+
+test("a runner's machine is the one whose hostname its name starts with", () => {
+  const pcs = [
+    { id: 1, hosts: ['DESK'] },
+    { id: 2, hosts: ['DESK-2', 'desk-2-linux'] },
+  ];
+  assert.equal(machineOfRunner('desk', pcs), 1);
+  assert.equal(machineOfRunner('DESK-3', pcs), 1);
+  assert.equal(machineOfRunner('desk-2-linux-1', pcs), 2);
+  assert.equal(machineOfRunner('laptop', pcs), null);
+});

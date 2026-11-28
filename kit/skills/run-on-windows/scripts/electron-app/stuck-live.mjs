@@ -165,12 +165,19 @@ for (const [where, focusJs] of Object.entries(FOCUS)) {
     await ev(`window.__before = 1`);
     const focused = await ev(focusJs);
     for (const type of ['rawKeyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers }, s).catch(() => {});
-    const reloaded = await until(async () => (await ev(`window.__before`)) === undefined, 8000);
+    // A new document: the mark is gone, read by an evaluate that answered (a failed one is not a reload).
+    const fresh = async () => {
+      const r = await send('Runtime.evaluate', { expression: 'window.__before', returnByValue: true }, s).catch(() => null);
+      return !!r && !r.exceptionDetails && r.result.type === 'undefined';
+    };
+    const reloaded = await until(fresh, 8000);
     const back = !keepHeld && (await until(async () => answered > a0 && !(await chip()) && (await ev(`!!document.querySelector('textarea')`)), 8000));
-    const ok = stuck && stillStuck && focused && reloaded && (keepHeld || back);
+    // The control: the new page asked into the hold too, and sits on the chip again with no stream answered.
+    const again = keepHeld && (await until(async () => answered === a0 && hung.length > h0 + 1 && (await chip()), 8000));
+    const ok = stuck && stillStuck && focused && reloaded && (keepHeld ? again : back);
     if (!ok) fails++;
     console.log(
-      `${ok ? 'PASS' : 'FAIL'} stuck (${asked ? 'stream held' : 'no stream asked'}, chip ${stuck ? 'shown' : 'not shown'}${stillStuck ? '' : ', not stuck before the key'}), focus ${where.padEnd(8)}${focused ? '' : ' (not focused)'} ${name.padEnd(12)} -> ${reloaded ? 'reloaded' : 'no reload'}${keepHeld ? ', hold kept' : back ? ', stream answered, chip gone' : ', still stuck'}`,
+      `${ok ? 'PASS' : 'FAIL'} stuck (${asked ? 'stream held' : 'no stream asked'}, chip ${stuck ? 'shown' : 'not shown'}${stillStuck ? '' : ', not stuck before the key'}), focus ${where.padEnd(8)}${focused ? '' : ' (not focused)'} ${name.padEnd(12)} -> ${reloaded ? 'reloaded' : 'no reload'}${keepHeld ? (again ? ', hold kept, stuck again' : ', hold kept, but not stuck again') : back ? ', stream answered, chip gone' : ', still stuck'}`,
     );
     if (keepHeld) held = false;
     // A control: the reloaded page's stream is held too, and only its own 30 s retry would bring it back, so one key is enough.

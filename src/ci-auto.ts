@@ -64,6 +64,8 @@ export interface CiAutoDeps {
   runnerMachines(os: Os): Machine[];
   /** The repos (owner/name, lowercase) a machine's runner agent for `os` has runners for, by its newest sample. */
   reposOn(machineId: number, os: Os): Set<string>;
+  /** The repos a machine's agent for `os` has standing runners for, asleep ones too and the runner pool's own left out (CiLoad.standingOn): what remove() takes off. Left out, `reposOn`. */
+  standingOn?(machineId: number, os: Os): Set<string>;
   /** Each repo's queued self-hosted jobs' labels (lowercase), from ShipWatch's last look. */
   queuedLabels(): Map<string, Set<string>>;
   /** Start a runner job as Citadel itself (RunnerJobs.start with `auto`); throws when it can't start. */
@@ -170,7 +172,7 @@ export class CiAuto {
       for (const m of this.d.runnerMachines(os)) {
         const ci = this.d.store.machineRoles(m.id).find((r) => r.role === 'ci');
         if (!ci?.on || !ci.setup?.runner_agent) continue;
-        for (const repo of this.d.reposOn(m.id, os)) {
+        for (const repo of (this.d.standingOn ?? this.d.reposOn)(m.id, os)) {
           const project = projects.find((p) => repoSlug(p.repo_url)?.toLowerCase() === repo);
           if (!project || (lendsCi(this.d.store, m, project) && !this.d.pooled?.(project))) continue;
           const key = `remove:${project.id}:${os}:${m.id}`;

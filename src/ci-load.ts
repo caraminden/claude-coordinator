@@ -492,6 +492,18 @@ export class CiLoad {
     return new Set(s && now - s.at < 10 * MIN ? s.runners.map((r) => r.repo.toLowerCase()).filter(Boolean) : []);
   }
 
+  /**
+   * The repos one machine's agent for `os` has standing runners for by its newest sample in the last 10 minutes: running
+   * ones, and those it keeps asleep (`wakeable`), less the runner pool's one-job runners (`pool-…` in a citadel-pool slot,
+   * Build 11 P3), which come and go with their jobs.
+   */
+  standingOn(machineId: number, os: 'windows' | 'linux', now = Date.now()): Set<string> {
+    const s = this.latest.get(`${machineId}:${os}`);
+    if (!s || now - s.at >= 10 * MIN) return new Set();
+    const slot = (r: RunnerUse) => /^pool-/i.test(r.name) || /[\\/]citadel-pool[\\/]/i.test(r.dir);
+    return new Set([...s.runners.filter((r) => !slot(r)).map((r) => r.repo), ...(s.wakeable ?? [])].map((r) => r.toLowerCase()).filter(Boolean));
+  }
+
   /** Each PC connected or heard from in the last 10 minutes, with the runners its agents' newest samples list (#1934). */
   runnersByPc(now = Date.now()): Pcs {
     const pcs: Pcs = new Map(this.deps.hosts().map((h) => [h.toLowerCase(), new Set()]));

@@ -2246,6 +2246,8 @@ const ciAuto = new CiAuto({
   store,
   runnerMachines: (os) => machines.runnerMachines(os),
   reposOn: (id, os) => ciLoad.reposOn(id, os),
+  // What remove() takes off: asleep standing runners too (a pool scheme's must all go), never the pool's own one-job runners.
+  standingOn: (id, os) => ciLoad.standingOn(id, os),
   queuedLabels: () => ciQueuedLabels,
   start: (project, ask) => runnerJobs.start(project, null, ask, APP_NAME),
   room: (id) => balancer.current(id)?.runners ?? null,
@@ -2345,7 +2347,7 @@ const runnerPool = new RunnerPool({
   now: Date.now,
   // P3: a scheme switched to the pool has its jobs started here, one one-job runner each, once its standing runners are off every PC.
   pooled: (id) => poolOn(store, id),
-  standing: (repo) => (['windows', 'linux'] as const).some((os) => machines.runnerMachines(os).some((m) => ciLoad.reposOn(m.id, os).has(repo.toLowerCase()))),
+  standing: (repo) => (['windows', 'linux'] as const).some((os) => machines.runnerMachines(os).some((m) => ciLoad.standingOn(m.id, os).has(repo.toLowerCase()))),
   // A preview runs on a copy of the data: it watches, and never starts a runner on a person's PC.
   ...(PREVIEW || BOOT_CHECK
     ? {}

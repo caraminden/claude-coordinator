@@ -392,3 +392,21 @@ test("each PC's own runners come from its agents' newest samples; a PC connected
   );
   assert.deepEqual(load.runnersByPc(NOW + 11 * MIN).get('desk'), new Set());
 });
+
+test("a PC's standing runners: running and asleep ones, never the runner pool's one-job runners (Build 11 P3)", () => {
+  const store = new Store(join(root, 'standing.db'));
+  const load = new CiLoad(store, { jobs: () => [], hosts: () => [], mandate: async () => true });
+  const desk = store.createMachine('desk', '', 'Cara', owner(store));
+  const use = (name: string, repo: string, dir: string) => ({ name, repo, dir, cpu: 1, mem: 1 });
+  load.add(
+    desk.id,
+    sample(0, {
+      runners: [use('DESK-2', 'caraminden/peek-auras', 'C:\\actions-runners\\peek-2'), use('pool-m1-w1-j55', 'caraminden/theory-of-crafting', 'C:\\citadel-pool\\theory-of-crafting\\slot-1'), use('', 'caraminden/delve', 'C:\\citadel-pool\\delve\\slot-2')],
+      wakeable: ['CaraMinden/Mandate'],
+    }),
+    NOW,
+  );
+  assert.deepEqual([...load.standingOn(desk.id, 'windows', NOW)].sort(), ['caraminden/mandate', 'caraminden/peek-auras']);
+  assert.ok(load.reposOn(desk.id, 'windows', NOW).has('caraminden/theory-of-crafting'), 'reposOn still lists every running runner');
+  assert.deepEqual([...load.standingOn(desk.id, 'windows', NOW + 10 * MIN)], [], 'a sample over 10 minutes old says nothing');
+});

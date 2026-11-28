@@ -753,6 +753,8 @@ export interface HandoffDeps {
   store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
+    /** Tick the plan's ship step once a ship went through (#2278). */
+    tickShipped?(id: number): void;
     send(id: number, author: string, text: string, images?: never[], extra?: { fyi?: boolean; light?: boolean; quick?: boolean }): void;
     close(id: number, text: string): Promise<void>;
     unpark(id: number, by: string, author: string, quiet?: boolean): boolean;
@@ -973,6 +975,7 @@ export class LandHandoffs {
         text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${formatted ? ` The ship script formatted ${formatted[1]} of its files in a commit of its own ${formatted[2]}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${through ? ` Shipped through main's red on ${through}: main still needs a fix for it.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}`,
       }),
     );
+    await once('ticked', () => runner.tickShipped?.(id));
     await faultPoint('ship-noted'); // a drill's kill between the shipped line and the hand-off's rename (C2)
     await once('woke', () => this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`));
     const t = store.getTicket(id);

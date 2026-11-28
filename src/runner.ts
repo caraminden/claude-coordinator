@@ -919,7 +919,7 @@ export class Runner {
       onFilesMayChange: (id, soon) => this.onFilesMayChange(id, soon),
       onTurnError: (id, text, eventId) => this.onTurnError(id, text, eventId),
     });
-    this.turnProgress = new TurnProgress({ store });
+    this.turnProgress = new TurnProgress({ store, emit: (id, kind, data) => this.emit(id, kind, data), broadcastTicket: (id) => this.broadcastTicket(id) });
     this.turnSpend = new TurnSpend({
       store,
       turns: this.turns,
@@ -4081,6 +4081,7 @@ export class Runner {
     return this.turnProgress.progressOf(ticket);
   }
 
+  tickShipped = (id: number) => this.turnProgress.tickShipped(id); // a ship went through: its `ship` step ticks (#2278)
   private progressFor(ticketId: number, ticket?: Ticket) {
     return this.turnProgress.progressFor(ticketId, ticket);
   }

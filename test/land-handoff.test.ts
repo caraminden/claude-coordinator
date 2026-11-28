@@ -83,6 +83,9 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
         return true;
       },
       broadcastTicket: () => {},
+      tickShipped: () => {
+        did.push('tick');
+      },
     },
     from: 'Citadel',
     buildOwner: () => (opts.owner === undefined ? 2 : opts.owner),
@@ -106,6 +109,21 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
   };
   return { owned, waits, landings, ticket, did, sent, light, fyi, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
 }
+
+test("a ship that went through ticks the plan's ship step once; a refused or queued one ticks nothing (#2278)", async () => {
+  const ok = setup('tick-ok');
+  await ok.land(LIVE);
+  await ok.handoffs.poll();
+  assert.equal(ok.did.filter((d) => d === 'tick').length, 1);
+  const refused = setup('tick-refused');
+  await refused.land('land: refused: tests failed\n', 1);
+  await refused.handoffs.poll();
+  assert.equal(refused.did.includes('tick'), false);
+  const queued = setup('tick-nocode', { runners: false });
+  await queued.land('land: CI gave no verdict\n', 75);
+  await queued.handoffs.poll();
+  assert.equal(queued.did.includes('tick'), false);
+});
 
 test('a ship let through on known flakes says so in its shipped line (#1419)', async () => {
   const s = setup('live');

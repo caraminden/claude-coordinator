@@ -36,7 +36,8 @@
 QUICK_SIDE_LABEL=citadel-ci-linux-side
 
 quick_on() {
-  [ "${LAND_QUICK:-1}" != 0 ] && [ -e "$state/quick-train-on" ] && [ "$mode" = land ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] && [ "${LAND_CI:-1}" != 0 ]
+  [ "${LAND_QUICK:-1}" != 0 ] && [ -e "$state/quick-train-on" ] && [ "$mode" = land ] &&
+    [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] && [ "${LAND_CI:-1}" != 0 ]
 }
 
 # <branch> <its head>: it qualified as it joined the line, and hasn't moved since.
@@ -83,7 +84,8 @@ quick_stack() {
   [ -n "$own_q" ] && [ "$own_q" != "$base" ] && ! pipeline_touch "$base" "$own_q" || return 1
   echo "$base $r $own_q" >"$state/quick-stacked.tmp$$"
   out=$(
-    early_memo=$state/quick-stacked.tmp$$ quick_pick=1 branch=$br own=$own_q old=$base lane=full tip=$own_q DEPLOY_QUEUE_TICKET=$tn LAND_TRAIN_MAX=${LAND_QUICK_MAX:-6}
+    early_memo=$state/quick-stacked.tmp$$ quick_pick=1 branch=$br own=$own_q old=$base lane=full tip=$own_q DEPLOY_QUEUE_TICKET=$tn
+    LAND_TRAIN_MAX=${LAND_QUICK_MAX:-6}
     train_n=() train_br=() train_tip=() train_was=() train_held_tips='' QUEUE_TRAIN=train
     train_only=''
     [ $# = 0 ] || train_only=" $* "
@@ -101,7 +103,10 @@ quick_stack() {
 # How many side runners are registered (any state), or nothing when GitHub can't say.
 quick_side() {
   declare -F own_hub >/dev/null || . "$tools/own-check.sh"
-  own_hub gh api "repos/$(early_slug)/actions/runners?per_page=100" --jq "[.runners[] | select(any(.labels[]; .name == \"$QUICK_SIDE_LABEL\"))] | length" 2>/dev/null
+  local slug
+  slug=$(REMOTE=${REMOTE:-${DEPLOY_REMOTE-origin}} early_slug) || return 1 # in line, before land_settings sets REMOTE
+  own_hub gh api "repos/$slug/actions/runners?per_page=100" \
+    --jq "[.runners[] | select(any(.labels[]; .name == \"$QUICK_SIDE_LABEL\"))] | length" 2>/dev/null
 }
 
 # The full train's front, in top_gate before early_next: plans the gap train on its top ($tip).
@@ -130,7 +135,11 @@ quick_plan() {
   done < <(for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
   [ -n "$b" ] || return 0
   n=$(quick_side) || n=''
-  [[ $n =~ ^[1-9][0-9]*$ ]] || { say "quick train: CI's side runner $([ "$n" = 0 ] && echo "isn't registered" || echo "couldn't be read"), so $b waits for the full train"; retro_log "quick train · $b · not planned: no side runner"; return 0; }
+  if ! [[ $n =~ ^[1-9][0-9]*$ ]]; then
+    say "quick train: CI's side runner $([ "$n" = 0 ] && echo "isn't registered" || echo "couldn't be read"), so $b waits for the full train"
+    retro_log "quick train · $b · not planned: no side runner"
+    return 0
+  fi
   out=$(quick_stack "$tip" "${t##*/}" "$b") || { say "quick train: $b doesn't stack on this train's top, so it waits for the full train"; return 0; }
   read -r top riders brs <<<"$out"
   mv -f "$state/quick-stacked.tmp$$" "$state/quick-stacked"
@@ -203,7 +212,8 @@ quick_wait() {
       quick_stop
       quick_checked=$q_top
       rm -f "$state/quick-verdict"
-      (quick_check_run "$q_top" "$q_base" | sed "s/^/$q_top /" >"$state/quick-verdict.tmp$$" && mv -f "$state/quick-verdict.tmp$$" "$state/quick-verdict") </dev/null 9>&- 7>&- 6>&- 5>&- 4>&- &
+      (quick_check_run "$q_top" "$q_base" | sed "s/^/$q_top /" >"$state/quick-verdict.tmp$$" &&
+        mv -f "$state/quick-verdict.tmp$$" "$state/quick-verdict") </dev/null 9>&- 7>&- 6>&- 5>&- 4>&- &
       quick_pid=$!
     fi
   elif [ "${QUEUE_TRAIN:-}" = quick ]; then
@@ -278,14 +288,15 @@ quick_at_lock() {
       pins=$(quick_pinned "$x")
       retro_log "quick train · $branch · red: $x · pinned:${pins:- nothing}"
       if [ -z "$pins" ] || [[ " $pins " == *" front "* ]]; then
-        say "quick train: its quick check was red in ${x//,/, }$([ -z "$pins" ] && echo ", which no ship on it changed" || echo ", which $branch changed"), so it goes on as a full train's front"
+        x="red in ${x//,/, }, which $([ -z "$pins" ] && echo "no ship on it" || echo "$branch") changed"
+        say "quick train: its quick check was $x, so it goes on as a full train's front"
         quick_void
         return 0
       fi
       for t in ${q_riders//,/ }; do
         if [[ " $pins " == *" $t "* ]]; then
           rm -f "$train_dir/$t"
-          say "quick train: $(sed -n 3p "$state/queue/$t" 2>/dev/null) changed ${x//,/, }, red in its quick check, so it leaves the quick train for the full one"
+          say "quick train: $(sed -n 3p "$state/queue/$t" 2>/dev/null) changed ${x//,/, }, red in its quick check, so it leaves for the full train"
         else left+=" $t"; fi
       done
       q_riders=$(echo $left | tr ' ' ,)
@@ -309,7 +320,11 @@ quick_gate() {
   quick_read || [ -n "$quick_again" ] || return 1
   if [ -n "$quick_again" ]; then
     v=$(quick_check_run "$tip" "$old")
-    [ "$v" = green ] || { say "quick train: checked again without the ships it pointed at, it wasn't green ($v), so CI runs on it as a full train"; quick_void; return 1; }
+    if [ "$v" != green ]; then
+      say "quick train: checked again without the ships it pointed at, it wasn't green ($v), so CI runs on it as a full train"
+      quick_void
+      return 1
+    fi
     say "quick train: checked again without them, green on $(git rev-parse --short "$tip")"
   elif [ "$tip" != "$q_top" ]; then
     say "quick train: it came out different from the train its quick check ran on, so CI runs on it as a full train"
@@ -352,7 +367,7 @@ quick_landed() {
   if [ "${rc:-}" = quick ]; then
     echo "$tip" >"$state/quick-untested"
     rm -f "$state/quick-train" "$state/quick-stacked"
-    retro_log "quick train shipped · $label · $((${#train_n[@]} + 1)) ships · $(git rev-parse --short "$tip") · no CI run"
+    retro_log "quick train shipped · $label · $((${#train_n[@]} + 1)) ships, no CI run · $(git rev-parse --short "$tip")"
   elif [ "${rc:-}" != light ]; then
     rm -f "$state/quick-untested"
   fi

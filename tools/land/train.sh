@@ -220,7 +220,8 @@ train_build() {
     { [ "${l[5]:-}" = hold ] || [ "${l[8]:-}" = hold ]; } && [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && break
     x='' y=''
     read -r x y _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused || $x = alone ]] && continue # still on the train before this one, refused by this one, or sent to ship alone (#2098)
-    [ -z "${early_memo:-}" ] || [ "$x" != riding ] || [ "$y" = "$branch" ] || continue # early_next: on the train before this one (quick_stack: one riding the quick train it stacks)
+    # early_next: on the train before this one (quick_stack: one riding the quick train it stacks)
+    [ -z "${early_memo:-}" ] || [ "$x" != riding ] || [ "$y" = "$branch" ] || continue
     [ -z "$train_only" ] || [[ $train_only == *" ${t##*/} "* ]] || continue # early_look: the riders its early run has; train_suspects, pull_look: what is left of a red train
     if [[ $split_rest == *" ${t##*/} "* ]]; then [ -n "$split_of" ] || continue; else [ -z "$split_of" ] || continue; fi # the split's ships ride together only
     [[ $train_refused != *" ${t##*/} "* ]] || continue # refused as a suspect, though its rider already read the verdict

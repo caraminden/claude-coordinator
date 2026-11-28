@@ -6,14 +6,15 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { git } from './land-fixture.ts';
 import { line } from './land-train-fixture.ts';
-import { pushLog, pushes, retro } from './land-train-early-setup.ts';
+import { retro } from './land-train-early-setup.ts';
 import { mixed, on, quick, quickCalls } from './land-quick-train-setup.ts';
 
 test('gap train: the qualifying ships waiting behind a full train ship right after it on one quick check and one deploy, and the next full train rides on its top with its early run kept', async () => {
-  const l = await line(mixed, quick, (r) => (on(r), pushLog(r)));
+  const l = await line(mixed, quick, on);
   const top2 = () => git(l.r.source, 'rev-parse', 'ticket/3-x');
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.doesNotMatch(done.map((d) => d.stderr).join('\n'), /unbound variable|command not found/);
   // In line order: the full train 2+3, the quick train 5+6, then 4's full train with 7 (sensitive: never quick).
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f5.txt: 5', 'f6.txt: 6', 'f4.txt: 4', 's7.txt: 7']);
   assert.equal(l.deployed().length, 4, 'one deploy each: ship 1, the full train, the quick train, the next full train');
@@ -26,14 +27,15 @@ test('gap train: the qualifying ships waiting behind a full train ship right aft
   assert.equal(calls.length, 1, calls.join('\n'));
   assert.match(calls[0], new RegExp(`^head f6.txt: 6 [0-9a-f]{40} args bash tools/light-check-run.sh ${top2()}$`));
   // No CI run for the quick train; 4's train was stacked early on its top, and that run counted.
-  assert.ok(!pushes(l.r.dir).some((p) => /ticket\/[56]-x/.test(p)), pushes(l.r.dir).join('\n'));
+  assert.doesNotMatch(l.c.calls(), new RegExp(`head_sha=${git(l.r.source, 'rev-parse', 'ticket/6-x')}`), 'CI was never asked about the quick top');
+  assert.match(l.c.calls(), new RegExp(`head_sha=${git(l.r.source, 'rev-parse', 'ticket/3-x')}`), 'CI ran on the full train');
   assert.match(done[4].stderr, /land: early next train: ticket\/4-x \(with ticket\/7-x riding\) is stacked on this train's top/);
   assert.doesNotMatch(done[1].stderr, /early next train: ticket\/4-x/, "the full train didn't stack 4 on a top the quick train would leave behind");
   assert.deepEqual(retro(l.r.dir, 'early train · ticket/4-x · counted'), [retro(l.r.dir, 'early train · ticket/4-x · counted')[0]]);
   assert.deepEqual(l.cancelled(), [], 'no CI run was thrown away');
   assert.deepEqual(
     retro(l.r.dir, 'quick train ').filter((x) => !/would qualify|not: /.test(x)),
-    ['quick train · ticket/5-x · planned onto ticket/2-x\'s train sha · riders: ticket/6-x', 'quick train · ticket/5-x · green · riders: sha', 'quick train shipped · ticket/5-x · 2 ships · sha · no CI run'],
+    ["quick train · ticket/5-x · planned onto ticket/2-x's train sha · riders: ticket/6-x", 'quick train · ticket/5-x · green · riders: sha', 'quick train shipped · ticket/5-x · 2 ships, no CI run · sha'],
   );
   assert.ok(!existsSync(join(l.state, 'quick-untested')), "the full train after it cleared the quick top's mark");
   assert.ok(!existsSync(join(l.state, 'quick-train')) && !existsSync(join(l.state, 'quick-stacked')));
@@ -41,7 +43,7 @@ test('gap train: the qualifying ships waiting behind a full train ship right aft
 });
 
 test('gap train: off by default, the same line ships as it did before it existed', async () => {
-  const l = await line(mixed, quick, pushLog);
+  const l = await line(mixed, quick);
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
   // Today's line: each full train takes the next waiter (LAND_TRAIN_MAX=1), in line order, each with its CI run.
@@ -51,7 +53,10 @@ test('gap train: off by default, the same line ships as it did before it existed
   const said = done.map((d) => d.stderr).join('\n');
   assert.doesNotMatch(said, /quick train|quick check/);
   // Only the judged lines #1912 logs today.
-  assert.deepEqual(retro(l.r.dir, 'quick train').filter((x) => !/^quick train · ticket\/\d-x · (would qualify|not: .*)$/.test(x)), []);
+  assert.deepEqual(
+    retro(l.r.dir, 'quick train').filter((x) => !/^quick train · ticket\/\d-x · (would qualify|not: .*)$/.test(x)),
+    [],
+  );
   for (const f of ['quick', 'quick-train', 'quick-stacked', 'quick-untested', 'quick-verdict']) assert.ok(!existsSync(join(l.state, f)), f);
   l.done();
 });

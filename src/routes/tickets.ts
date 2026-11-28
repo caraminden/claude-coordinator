@@ -1234,7 +1234,9 @@ export const ticketRoutes: Route[] = [
           if (starts?.held) {
             runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: `${mine}\n\n${starts.text}` });
             // Nothing left for people after it (#2175): dismissed now, not hours later by a Taskmaster.
-            if (!(await leftForPeople(app, id))) await runner.close(id, `Every pick on its card started, so the server dismissed this minion: ${starts.started.join('; ')}.`);
+            const left = await leftForPeople(app, id);
+            if (!left) await runner.close(id, `Every pick on its card started, so the server dismissed this minion: ${starts.started.join('; ')}.`);
+            else runner.emit(id, 'note', { text: `Every pick on its card started; this minion stays open because ${left}.` });
           } else if (starts) deliverAnswer(app, id, session.name, `${mine}\n\n${starts.text}`, answer, images, files);
           const why = starts
             ? null

@@ -151,7 +151,7 @@ export async function startPicked(app: App, owner: Ticket, questions: Question[]
  * Why the owner of a card whose pick started everything still has something left for people, or null when nothing is (#2175):
  * then the server dismisses it, as the Closing rule asks. Kept open by a branch with work main lacks (commits, or files not
  * committed yet), or one git can't read; another card; a state other than ready (try, pending-deploy, sealed, outside,
- * complete, blocked); a turn running or owed; and leading a build or cabal. The git reads come first, so the checks that
+ * complete, blocked); a turn running or owed; leading a build or cabal; and belonging to a Plot (a feeder closes itself on merge, so a member still open has work owed, #2314). The git reads come first, so the checks that
  * can change meanwhile are read last, with no wait between them and the close.
  */
 export async function leftForPeople(app: { store: Pick<App['store'], 'getTicket' | 'getProject' | 'getCabal' | 'getSetting'>; runner: Pick<App['runner'], 'busy' | 'keptOpen'> }, id: number): Promise<string | null> {
@@ -182,5 +182,7 @@ export async function leftForPeople(app: { store: Pick<App['store'], 'getTicket'
   const kept = runner.keptOpen(id, true);
   if (kept) return kept;
   if (store.getCabal(id) || (t.build != null && store.getSetting<number>(buildOwnerKey(t.project_id, t.build)) === id)) return 'it leads a build or cabal';
+  // Still in a Plot with nothing on its branch: mid-job (waiting on others, or carrying on), not a pure proposer (#2314).
+  if (t.build != null) return 'it is a Plot member, still in its job';
   return null;
 }

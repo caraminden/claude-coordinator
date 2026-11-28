@@ -208,6 +208,8 @@ test('leftForPeople keeps an owner open for its state, a turn, a card, a lead, a
     seen.owner = 1;
     assert.match((await leftForPeople(app, 1)) ?? '', /leads/, "a build's own minion");
     seen.owner = null;
+    // A Plot member that isn't its lead is mid-job (#2314): a feeder closes itself on merge, so one still here has work owed.
+    assert.match((await leftForPeople(app, 1)) ?? '', /Plot member/, 'a Plot member');
     t = { ...base };
     writeFileSync(join(wt, 'x.txt'), 'x');
     execFileSync('git', ['add', 'x.txt'], { cwd: wt });

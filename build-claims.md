@@ -1,4 +1,4 @@
 build: #2267
 #2269: public/runner-agent.mjs tools/ci-runner/ src/ci-runner.ts test/runner-agent.test.ts test/ci-runner.test.ts
 #2275: src/runner-pool.ts src/db/runner-pool.ts src/routes/ci-pool.ts src/runner-slots.ts src/ci-auto.ts src/ci-health.ts src/ci-ships.ts src/machine-balancer.ts src/machines.ts src/routes/machines.ts public/machine-card.js public/machine-role-cards.js public/settings-machines.js public/machines.css public/ci.js public/ci.css public/types/ci.d.ts test/runner-pool.test.ts test/runner-slots.test.ts test/ci-auto.test.ts test/ci-health.test.ts test/ci-ships.test.ts test/machine-balancer.test.ts
-shared: README.md src/db.ts src/db-schema.ts src/db-writer.ts server.ts src/http.ts src/routes/all.ts tools/affected-map.txt test/typecheck-baseline.json
+shared: test/access-matrix.snapshot.json README.md src/db.ts src/db-schema.ts src/db-writer.ts server.ts src/http.ts src/routes/all.ts tools/affected-map.txt test/typecheck-baseline.json

@@ -183,11 +183,11 @@ test('a redraw under a resting pointer leaves the card as it was: no outline fad
 test('an open card lists its dismissed members under the not-started lines, each a link to its chat; a shut one lists none', { skip }, async () => {
   const page = await browser.page(`${base}?waits#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .thread-row')`);
-  const lines = `[...document.querySelectorAll('.cabal-members > *')].map((e) => e.classList[0] + (e.matches('.cabal-gone') ? ' ' + e.getAttribute('href') + ' ' + e.textContent : ''))`;
+  const lines = `[...document.querySelectorAll('.cabal-members > *')].map((e) => (e.matches('a[href]:not(.thread-row)') ? [e.getAttribute('href'), ...[...e.children].map((x) => x.textContent)].join(' | ') : e.classList[0]))`;
   assert.deepEqual(await page.eval(lines), ['thread-row'], 'shut: the started member only');
   await page.eval(`document.querySelector('.cabal-toggle').click()`);
   // H1 merged and has no open row: dismissed. H2 (#21) is open, so it keeps its row and gets no second line.
-  assert.deepEqual(await page.eval(lines), ['thread-row', 'cabal-planned', 'cabal-gone #/p/1/t/20 #20 H1 H1 workmerged']);
+  assert.deepEqual(await page.eval(lines), ['thread-row', 'cabal-planned', '#/p/1/t/20 | #20 H1 H1 work | merged']);
 });
 
 // Cara, 2026-11-27, picked "Always purple": the outline is the Plot's colour at rest, hovered or not, open or shut.

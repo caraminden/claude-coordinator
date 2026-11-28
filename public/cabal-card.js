@@ -59,8 +59,9 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
   const members = rows.filter((t) => t.id !== c.lead && (open || !sealed(t)));
   const unstarted = c.members.filter((m) => m.id == null || m.scheme); // another scheme's members aren't in this list: named here
   // Open also lists the members dismissed since, under the not-started ones (Cara, 2026-11-27: "below the not started minions,
-  // you also see the dismissed minions from that build"): finished or closed, with no open row left in the list.
-  const gone = c.members.filter((m) => m.id != null && !m.scheme && m.id !== c.lead && ['merged', 'shipped', 'closed'].includes(m.state) && !mine.some((t) => t.id === m.id));
+  // you also see the dismissed minions from that build"): finished or closed, and no longer open. Read from every minion
+  // the page holds, not the rows a filter left: a merged member the filter hides is still open, not dismissed.
+  const gone = c.members.filter((m) => m.id != null && !m.scheme && m.id !== c.lead && ['merged', 'shipped', 'closed'].includes(m.state) && (tickets.get(m.id)?.status ?? 'closed') === 'closed');
   const project = leadTicket?.project_id;
   const started = c.members.some((m) => m.state !== 'roster');
   const toggle = () => {

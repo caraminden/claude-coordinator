@@ -22,7 +22,7 @@ function facts(over: Omit<Partial<TurnChoiceFacts>, 'ticket'> & { ticket?: Parti
     codexSwitch: () => false,
     codexWhy: () => null,
     codexPlace: () => box('codex-7'),
-    keepaliveLight: false,
+    keepaliveLight: () => false,
     ...over,
     ticket: { kind: 'ticket', model: 'claude-opus-5-5', effort: null, ...over.ticket },
   };
@@ -52,8 +52,8 @@ const rows: [string, TurnChoiceFacts, Omit<Partial<ReturnType<typeof turnChoice>
   ['a resume keeps its effort', facts({ batch: [{ light: true }], resumed: true }), { light: false }],
   ['a Taskmaster never runs light', facts({ ticket: { kind: 'coordinator' }, batch: [{ light: true }] }), { light: false, effort: 'high' }],
   ['a Codex turn never runs light', facts({ ticket: { model: ASTRA }, batch: [{ light: true }] }), { codex: true, light: false }],
-  ['a keepalive replays a light turn', facts({ keepalive: true, keepaliveLight: true, batch: [{}] }), { light: true, effort: 'low' }],
-  ['a keepalive replays a full turn, whatever its batch', facts({ keepalive: true, keepaliveLight: false, batch: [{ light: true }] }), { light: false, effort: 'medium' }],
+  ['a keepalive replays a light turn', facts({ keepalive: true, keepaliveLight: () => true, batch: [{}] }), { light: true, effort: 'low' }],
+  ['a keepalive replays a full turn, whatever its batch', facts({ keepalive: true, keepaliveLight: () => false, batch: [{ light: true }] }), { light: false, effort: 'medium' }],
 ];
 
 for (const [name, f, want] of rows) {
@@ -70,4 +70,8 @@ test('the Codex lookups are asked only when a rule needs them', () => {
   turnChoice(facts({ codexWhy: never, codexPlace: never }));
   turnChoice(facts({ ticket: { model: ASTRA }, codexWhy: () => NOT_LINKED, codexPlace: never }));
   turnChoice(facts({ ticket: { model: ASTRA }, claude: box('claude-7'), codexPlace: never }));
+  // A keepalive's series is read only for a minion's Claude turn.
+  turnChoice(facts({ keepalive: true, ticket: { kind: 'coordinator' }, keepaliveLight: never }));
+  turnChoice(facts({ keepalive: true, ticket: { model: ASTRA }, keepaliveLight: never }));
+  turnChoice(facts({ keepaliveLight: never }));
 });

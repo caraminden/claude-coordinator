@@ -700,8 +700,8 @@ export interface TurnChoiceFacts {
   codexSwitch: (person: number) => boolean;
   codexWhy: (person: number | null) => string | null;
   codexPlace: (person: number) => TurnPlace | null;
-  /** A keepalive's: whether the turn it keeps warm ran light. */
-  keepaliveLight: boolean;
+  /** A keepalive's series: whether the turn it keeps warm ran light. */
+  keepaliveLight: () => boolean;
 }
 
 /**
@@ -714,14 +714,15 @@ export interface TurnChoiceFacts {
 export function turnChoice(f: TurnChoiceFacts): { place: TurnPlace; model: string | null; effort: string | null; codex: boolean; light: boolean; note: string | null } {
   const { person, claude, ticket } = f;
   const { model: picked, effort: itsEffort } = turnSettings(ticket, f.project);
-  const wantsCodex = isCodexModel(picked) || (person !== null && f.codexSwitch(person));
+  const switched = person !== null && f.codexSwitch(person);
+  const wantsCodex = isCodexModel(picked) || switched;
   let why = wantsCodex ? f.codexWhy(person) : null;
   const codexPlace = wantsCodex && !why && claude.host && person !== null ? f.codexPlace(person) : null;
   if (wantsCodex && !why && claude.host && !codexPlace) why = "Codex's container isn't there yet (sign in to Codex in Settings → Your account)";
   const codex = wantsCodex && !why;
   const name = CODEX_MODELS.find(([id]) => id === picked)?.[1];
   const note = !why ? null : name ? `This minion is set to ${name}, but ${why}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${why}, so this turn runs on Claude.`;
-  const light = !codex && ticket.kind !== 'coordinator' && (f.keepalive ? f.keepaliveLight : !f.resumed && f.batch.length > 0 && f.batch.every((m) => m.light));
+  const light = !codex && ticket.kind !== 'coordinator' && (f.keepalive ? f.keepaliveLight() : !f.resumed && f.batch.length > 0 && f.batch.every((m) => m.light));
   return {
     place: codexPlace ?? claude,
     model: isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, f.project).model : picked,

@@ -3061,8 +3061,8 @@ export class Runner {
     // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.
     const machines = ticket.kind === 'coordinator' ? [] : this.machines(project, askers.length ? [asker!] : []);
     // Codex or Claude, the model and the effort: turnChoice's rules (#337, #951), from these facts and lookups.
-    const lookups = { codexSwitch: (p: number) => !!this.store.getSetting<boolean>(codexSwitchKey(p)), codexWhy: (p: number | null) => this.codexWhy(p), codexPlace: (p: number) => this.codexPlaceFor?.(p) ?? null };
-    const { place, model, effort, codex, light, note } = turnChoice({ ticket, project, person, claude: claudePlace, keepalive, resumed, batch, keepaliveLight: keepalive && !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light, ...lookups });
+    const lookups = { codexSwitch: (p: number) => !!this.store.getSetting<boolean>(codexSwitchKey(p)), codexWhy: (p: number | null) => this.codexWhy(p), codexPlace: (p: number) => this.codexPlaceFor?.(p) ?? null, keepaliveLight: () => !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light };
+    const { place, model, effort, codex, light, note } = turnChoice({ ticket, project, person, claude: claudePlace, keepalive, resumed, batch, ...lookups });
     if (note) this.emit(ticket.id, 'note', { text: note });
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a

@@ -1,6 +1,6 @@
 // A cabal's board (#2090, src/cabal-board.ts): every column read from facts (state, merged into build/<n> from git, claims
 // from build-claims.md on the branch, start_after, spend, risk), the doubled-file flag of a goal cabal, and a read with
-// Build 7's shape staying under 6k tokens.
+// Plot 7's shape staying under 6k tokens.
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -45,7 +45,7 @@ const cost = (id: number, usd: number) => store.db.prepare('INSERT INTO turns (t
 
 test('a build cabal: each column comes from facts', async () => {
   git(repo, 'branch', 'build/7', 'main');
-  const lead = minion('Build 7 lead', 7, 'build/7', 0);
+  const lead = minion('Plot 7 lead', 7, 'build/7', 0);
   const merged = minion('Running turn: one interface', 7, 'build/7', 2);
   const blocked = minion('Machine roles in the data', 7, 'build/7', 1);
   const chained = minion('Connect a machine', 7, null, 0);
@@ -59,7 +59,7 @@ test('a build cabal: each column comes from facts', async () => {
   git(repo, 'checkout', '-q', 'build/7');
   git(repo, 'merge', '-q', '--no-ff', '-m', 'merge', `ticket/${merged.id}`);
   git(repo, 'checkout', '-q', 'main');
-  store.addEvent(merged.id, 'note', { text: `Merged into Build 7: one interface. Risk low: small.` });
+  store.addEvent(merged.id, 'note', { text: `Merged into Plot 7: one interface. Risk low: small.` });
   cost(merged.id, 4.62);
   cost(lead.id, 30);
   for (const t of [merged, blocked, chained, building, dismissed]) store.joinCabal(t.id, lead.id, p.id, t.title);
@@ -73,7 +73,7 @@ test('a build cabal: each column comes from facts', async () => {
   store.addCabalRow(lead.id, { label: 'T7', title: 'Pilot', after: 'everything' });
 
   const b = (await readBoard(store, lead.id, deps))!;
-  assert.equal(b.name, 'Build 7');
+  assert.equal(b.name, 'Plot 7');
   assert.equal(b.kind, 'build');
   const row = (title: string) => b.members.find((m) => m.title === title)!;
   assert.deepEqual(
@@ -106,7 +106,7 @@ test('a build cabal: each column comes from facts', async () => {
   );
   assert.deepEqual(b.counts, { members: 6, started: 5, merged: 1, open: 4, working: 2, running: 1, spend: 34.62 }, 'at work: the blocked and the building; the sealed, merged and dismissed hold no place');
   const text = boardText(b, blocked);
-  assert.match(text, /^Build 7 cabal \(build\/7\) · Build 7's Overseer #\d+/);
+  assert.match(text, /^Plot 7 cabal \(build\/7\) · Plot 7's Overseer #\d+/);
   assert.match(text, /ask \d+ BLOCKING from M1 #\d+ .*Lend src\/machines\.ts/);
   assert.match(text, /M1 #\d+ Machine roles in the data \(you\) \| blocked \| Go given\. \| claims src\/machine-roles\.ts/);
   assert.match(text, /\| merged \| \$4\.62 \| risk low \| claims src\/running-turn\.ts src\/turns\//);
@@ -138,7 +138,7 @@ test("parseClaims reads land.sh's lines and doubledFiles matches folders", () =>
   assert.deepEqual(doubledFiles([['a.ts', 'src/x.ts'], ['src/'], ['b.ts']]), [['src/x.ts'], ['src/'], []]);
 });
 
-test("Build 7's shape (18 rows, 1 ask) reads under 6k tokens", async () => {
+test("Plot 7's shape (18 rows, 1 ask) reads under 6k tokens", async () => {
   const lead = minion('Big lead', null, null, 0);
   const files = ['src/machine-roles.ts', 'src/machine-lend.ts', 'src/routes/machines.ts', 'public/settings-machines.js'];
   for (let i = 0; i < 18; i++) {
@@ -149,7 +149,7 @@ test("Build 7's shape (18 rows, 1 ask) reads under 6k tokens", async () => {
     store.addEvent(t.id, 'note', { text: 'Shipped #1: x. Risk high: wide.' });
     if (i === 3) store.addCabalAsk(lead.id, t.id, 'Lend src/machines.ts and src/routes/machines.ts for one merge, please: my line needs them', true);
   }
-  for (let i = 0; i < 20; i++) store.addCabalLog(lead.id, '#1935 Build 7', `Josh, 21:${i}: "Lend it for one merge" — gave M1 the lend of src/machines.ts`);
+  for (let i = 0; i < 20; i++) store.addCabalLog(lead.id, '#1935 Plot 7', `Josh, 21:${i}: "Lend it for one merge" — gave M1 the lend of src/machines.ts`);
   const text = boardText((await readBoard(store, lead.id, deps))!);
   const tokens = Math.ceil(text.length / 4); // about 4 characters a token for this English and paths
   assert.ok(tokens < 6000, `${tokens} tokens`);

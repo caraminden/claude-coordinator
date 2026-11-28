@@ -97,7 +97,7 @@ test('the forming card approves the roster with who and when; an unapproved row 
   assert.equal(rowOf('A').approved_at, null, 'Not yet approves nothing');
   assert.ok(answer);
 
-  const { answer: go } = await form('Start the cabal', 1);
+  const { answer: go } = await form('Start the Plot', 1);
   assert.match(JSON.parse(go.data).text, /Approved: A, B; width 1\./, 'the lead reads what its go approved');
   const a = rowOf('A');
   assert.equal(a.approved_by, 'Cara');
@@ -111,12 +111,12 @@ test('the forming card approves the roster with who and when; an unapproved row 
   assert.match(String((await start('C')).data.error), /add it with a card/);
   assert.equal((await board(lead.id, { action: 'row', row: rowOf('B').id, effort: 'high' })).status, 200);
   assert.equal(rowOf('B').approved_at, null, 'a changed row needs a new card');
-  await form('Start the cabal', 1);
+  await form('Start the Plot', 1);
   assert.ok(rowOf('B').approved_at && rowOf('C').approved_at);
 
   // A row changed between the card and its go isn't approved: people said go to what the card showed.
   assert.equal((await board(lead.id, { action: 'row', label: 'E', title: 'Do e', handoff: 'handoffs/d.md', model: 'claude-sonnet-5-5', effort: 'low' })).status, 200);
-  const { answer: stale } = await form('Start the cabal', 1, () => board(lead.id, { action: 'row', row: rowOf('E').id, model: 'claude-opus-5-5' }));
+  const { answer: stale } = await form('Start the Plot', 1, () => board(lead.id, { action: 'row', row: rowOf('E').id, model: 'claude-opus-5-5' }));
   assert.match(JSON.parse(stale.data).text, /Not approved, changed after the card was posted: E/);
   assert.equal(rowOf('E').approved_at, null);
   assert.equal((await board(lead.id, { action: 'row', row: rowOf('E').id, remove: true })).status, 200);
@@ -188,11 +188,11 @@ test("cabal_member unseals, stops and reseals only the lead's own members; a mem
 test("a started member's turn waits for a worker like any minion's; a row after an open member's label chains on it", async () => {
   // B is open, so C is past width 1: widen it on a new card, with D after B (the answer wakes the lead, so before the pause).
   assert.equal((await board(lead.id, { action: 'row', label: 'D', title: 'Do d', handoff: 'handoffs/d.md', model: 'claude-sonnet-5-5', effort: 'low', after: 'B' })).status, 200);
-  await form('Start the cabal', 3);
+  await form('Start the Plot', 3);
   const d = await start('D');
   assert.equal(d.status, 200, JSON.stringify(d.data));
   assert.equal(minion('Do d')!.state, 'parked', 'chained on B, which is open');
-  assert.match(String((await s.call(`/api/tickets/${minion('Do d')!.id}`)).data.ticket.note), new RegExp(`#${minion('Do b')!.number} is merged into Build 7`), "a build member waits for its leader's merge");
+  assert.match(String((await s.call(`/api/tickets/${minion('Do d')!.id}`)).data.ticket.note), new RegExp(`#${minion('Do b')!.number} is merged into Plot 7`), "a build member waits for its leader's merge");
   assert.match(String((await s.call(`/api/tickets/${lead.id}/cabal?text=1`)).data.text), /· 1 at work, up to 3 at once ·/, 'D, sealed on its chain, holds no place: only B is at work');
   assert.equal((await s.call('/api/workers', { pause: true }, 'PUT')).status, 200);
   try {
@@ -219,7 +219,7 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   assert.equal((await board(one.id, { action: 'ask', text: 'May I take x.ts?', blocking: false })).status, 200);
   assert.equal((await board(chief.id, { action: 'red', text: 'full run red' })).status, 200);
   assert.equal((await board(chief.id, { action: 'red', text: null })).status, 200);
-  const asked = async () => (await events(chief.id)).filter((e) => e.kind === 'user_message' && /Write the cabal's retro/.test(e.data)).length;
+  const asked = async () => (await events(chief.id)).filter((e) => e.kind === 'user_message' && /Write the Plot's retro/.test(e.data)).length;
   await dismiss(one.id);
   await dismiss(two.id);
   await until('the lead is asked for the retro', async () => (await asked()) === 1);

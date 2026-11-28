@@ -1,9 +1,8 @@
 // What POST /api/tickets/:ticket/answer decides before it acts (#2324): which card an answer is for, whether the card can still be
 // answered, and the words the minion reads. No server, so a table test reaches them.
 import { HttpError } from './http.ts';
-import type { App } from './http.ts';
 
-type Store = Pick<App['store'], 'eventsOfKinds'>;
+type Store = { eventsOfKinds(ticketId: number, kinds: string[], afterId?: number): { id: number; data: string }[] };
 type Question = { question: string };
 type Answer = { selected: string[]; other?: string };
 

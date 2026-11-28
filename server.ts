@@ -102,6 +102,7 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
+import { poolOn } from './src/runner-pool.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import { heavyNow } from './src/heavy-now.ts';
 import { appOwners } from './src/host-load.ts';
@@ -1922,6 +1923,8 @@ const ciHealth = new CiHealth(store, {
   shipTimes: (p, times) => ciNumbers.own(p, times),
   // Read only once requests come in, after ciLoad is set up below.
   asleep: () => ciLoad.asleep(),
+  // A scheme on the runner pool (Build 11 P3) is fine while a machine can take its jobs; read once requests come in, after runnerPool is set up below.
+  pool: (p) => (poolOn(store, p.id) ? runnerPool.able(p.id) : null),
   get: withoutHeld(ghGet, (run) => ciHold.isHeld(run)),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
@@ -2251,6 +2254,8 @@ const ciAuto = new CiAuto({
     if (taskmaster) postCard(app, taskmaster, { questions: [noMachineCard(store, project, os, could)] });
   },
   settle: (card, line) => settleCard(card, APP_NAME, line),
+  // A scheme on the runner pool (Build 11 P3) gets no standing runners, and those it had come off.
+  pooled: (project) => poolOn(store, project.id),
 });
 if (!BOOT_CHECK && !PREVIEW) every('ci runners by themselves', CI_AUTO_PASS_MS, () => ciAuto.pass(), CI_AUTO_PASS_MS);
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
@@ -2338,7 +2343,22 @@ const runnerPool = new RunnerPool({
   store,
   log: (line) => console.log(line),
   now: Date.now,
+  // P3: a scheme switched to the pool has its jobs started here, one one-job runner each, once its standing runners are off every PC.
+  pooled: (id) => poolOn(store, id),
+  standing: (repo) => (['windows', 'linux'] as const).some((os) => machines.runnerMachines(os).some((m) => ciLoad.reposOn(m.id, os).has(repo.toLowerCase()))),
+  // A preview runs on a copy of the data: it watches, and never starts a runner on a person's PC.
+  ...(PREVIEW || BOOT_CHECK
+    ? {}
+    : {
+        start: async (ask: { scheme: number; machine: number; os: 'windows' | 'linux'; slot: number; labels: string[]; job: number }) => {
+          const project = store.getProject(ask.scheme);
+          const machine = store.getMachine(ask.machine);
+          if (!project || !machine) throw new Error('its scheme or machine is gone');
+          return runnerSlots.start(project, machine, { os: ask.os, slot: ask.slot, labels: ask.labels, job: ask.job });
+        },
+      }),
 });
+runnerSlots.onReport = (r) => runnerPool.onSlot(r);
 const shipWatch = new ShipWatch({
   repos: runnerRepos,
   as: asScheme,

@@ -28,6 +28,12 @@ export const cabalHref = (projectId, number) => `#/p/${projectId}/cabal/${number
 /** "Build 7 cabal" and "Build 7's Overseer #1935": the names people read (code says lead). */
 const overseer = (/** @type {Board} */ b) => `${b.name}${/s$/i.test(b.name) ? "'" : "'s"} Overseer${b.lead.number ? ` #${b.lead.number}` : ''}`;
 
+/** Where a segment sits in a meter: 0 finished, 1 at work, 2 not started. Both meters (the Plot card's and the chat strip's) sort by it. */
+export const stage = (/** @type {string} */ state) => (state === 'merged' || state === 'shipped' ? 0 : ['running', 'blocked', 'idle'].includes(state) ? 1 : 2);
+
+/** Items in the meter's fill order, finished then at work then not started, roster order within each (Cara, 2026-11-28: "both should have the green on the left"). @template T @param {T[]} items @param {(item: T) => string} state */
+export const inMeterOrder = (items, state) => [...items].sort((a, b) => stage(state(a)) - stage(state(b)));
+
 /** The header line and the meter: one segment a member, in its state's colour. @param {Board} b @param {number} projectId */
 function boardHead(b, projectId) {
   const k = b.counts;
@@ -44,7 +50,7 @@ function boardHead(b, projectId) {
         ` · ${k.merged} ${done} · ${k.open} open · ${k.running} running · ${money(k.spend)} spent`,
       ),
     ),
-    h('div', { class: 'cabal-meter', 'aria-hidden': 'true' }, ...b.members.map((m) => h('i', { 'data-s': m.state }))),
+    h('div', { class: 'cabal-meter', 'aria-hidden': 'true' }, ...inMeterOrder(b.members, (m) => m.state).map((m) => h('i', { 'data-s': m.state }))),
   ];
 }
 

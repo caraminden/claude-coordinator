@@ -238,9 +238,12 @@ test('when: "proof" waits for a green flake proof on its commit, then ships with
   const turns = ownTurns(m);
   await armedFor(m, 'proof', PROOF_NOTE);
   assert.ok(!m.texts().some((x) => x.startsWith('Shipped')), 'nothing shipped yet');
-  await proofRun(m, head(m), 'success');
+  // Its commit, read before it closes: once closed, the reaper (src/reaper.ts) stops anything run in its worktree, a git
+  // of the test's own too, which came back as a SIGTERM'd `git rev-parse HEAD` under load (#2298).
+  const sha = head(m);
+  await proofRun(m, sha, 'success');
   await until('it ships and closes', () => m.state().status === 'closed');
-  assert.ok(m.texts().some((x) => x.startsWith(`The flake proof on ${head(m).slice(0, 7)} went green`)));
+  assert.ok(m.texts().some((x) => x.startsWith(`The flake proof on ${sha.slice(0, 7)} went green`)));
   assert.equal(ownTurns(m), turns, 'no turn');
 });
 

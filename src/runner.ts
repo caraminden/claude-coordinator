@@ -50,7 +50,7 @@ import { dropTurnDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
 import { endFiles, STEER_PENDING, steerLater, unsentSteers, unsentSteersAtBoot, type EndFiles, type TurnFiles } from './turn-files.ts';
 import { size } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
-import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, type CodexThread, type CodexUsage } from './codex.ts';
+import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { Holds } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
@@ -63,7 +63,7 @@ import { type AwayEnd, MachineTurn, placedAt, placeTurn } from './machine-turn.t
 import { hostReach, writesLine } from './host-reach.ts';
 import type { Block, MachineHost, MachinePools } from './machine-pools.ts';
 import { RunsOn, type runsOnCard } from './runs-on.ts';
-import { alive, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, TURN_NODE, wrapperSpec } from './turn-launch.ts';
+import { alive, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnChoice, turnSettings, USAGE_LIMIT, TURN_NODE, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets } from './secrets.ts';
 import type { StatusFields } from './status-trailer.ts';
@@ -3060,27 +3060,10 @@ export class Runner {
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
     // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.
     const machines = ticket.kind === 'coordinator' ? [] : this.machines(project, askers.length ? [asker!] : []);
-    // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
-    // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why. The server
-    // login's Codex turns run in its own container, never on the host (#341): only there is Codex's hook.
-    const { model: picked, effort: itsEffort } = turnSettings(ticket, project);
-    const switched = person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person));
-    const wantsCodex = isCodexModel(picked) || switched;
-    let codexWhy = wantsCodex ? this.codexWhy(person) : null;
-    const codexPlace = wantsCodex && !codexWhy && claudePlace.host && person !== null ? (this.codexPlaceFor?.(person) ?? null) : null;
-    if (wantsCodex && !codexWhy && claudePlace.host && !codexPlace) codexWhy = "Codex's container isn't there yet (sign in to Codex in Settings → Your account)";
-    const codex = wantsCodex && !codexWhy;
-    const place: TurnPlace = codexPlace ?? claudePlace;
-    if (codexWhy) {
-      const name = CODEX_MODELS.find(([id]) => id === picked)?.[1];
-      this.emit(ticket.id, 'note', { text: name ? `This minion is set to ${name}, but ${codexWhy}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${codexWhy}, so this turn runs on Claude.` });
-    }
-    const model = isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, project).model : picked;
-    // A minion's turn whose whole batch is machine notices of success runs at low effort (#951): it relays news or
-    // checks state. A person's or Taskmaster's message, a failure or a resume keeps its own. A keepalive replays
-    // the effort of the turn whose cache it keeps warm, so its launch matches that turn's.
-    const light = !codex && ticket.kind !== 'coordinator' && (keepalive ? !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light : !resumed && batch.length > 0 && batch.every((m) => m.light));
-    const effort = light ? 'low' : itsEffort;
+    // Codex or Claude, the model and the effort: turnChoice's rules (#337, #951), from these facts and lookups.
+    const lookups = { codexSwitch: (p: number) => !!this.store.getSetting<boolean>(codexSwitchKey(p)), codexWhy: (p: number | null) => this.codexWhy(p), codexPlace: (p: number) => this.codexPlaceFor?.(p) ?? null };
+    const { place, model, effort, codex, light, note } = turnChoice({ ticket, project, person, claude: claudePlace, keepalive, resumed, batch, keepaliveLight: keepalive && !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light, ...lookups });
+    if (note) this.emit(ticket.id, 'note', { text: note });
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
     // schedule, a wake, a relay or a batch mixing people, which fall back to someone who didn't ask.

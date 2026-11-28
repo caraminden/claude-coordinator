@@ -12,6 +12,7 @@ import { linkTree, pinSparesAt, takeSpare } from './pin-spares.ts';
 import { thrown } from './thrown.ts';
 import { cp, rm } from 'node:fs/promises';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
+import { CODEX_MODELS, isCodexModel } from './codex.ts';
 import { androidEnvLater, AUTH_VARS, resolveClaudeLater, type TurnPlace } from './claude-link.ts';
 import type { Project, Ticket } from './db.ts';
 import { GLOBAL_OWNER } from './properties.ts';
@@ -681,6 +682,53 @@ export function turnSettings(ticket: Pick<Ticket, 'kind' | 'model' | 'effort'>, 
   return {
     model: ticket.model ?? (taskmaster ? 'opus' : null),
     effort: ticket.effort ?? (taskmaster ? 'high' : project.default_effort || null),
+  };
+}
+
+/** What turnChoice decides from: the turn's facts, and the lookups it asks only when its rules need them. */
+export interface TurnChoiceFacts {
+  ticket: Pick<Ticket, 'kind' | 'model' | 'effort'>;
+  project: Pick<Project, 'default_effort'>;
+  /** Whose turn it is (turnPayer), and the Claude place placeFor gave them, a refusal already handled. */
+  person: number | null;
+  claude: TurnPlace;
+  keepalive: boolean;
+  resumed: boolean;
+  /** Each batch message's light flag (#951): a machine notice of success. */
+  batch: { light?: boolean }[];
+  /** The person's "Enable Codex override"; why their turns can't run on Codex (null: they can); their Codex container for a host turn. */
+  codexSwitch: (person: number) => boolean;
+  codexWhy: (person: number | null) => string | null;
+  codexPlace: (person: number) => TurnPlace | null;
+  /** A keepalive's: whether the turn it keeps warm ran light. */
+  keepaliveLight: boolean;
+}
+
+/**
+ * Codex or Claude, the model and the effort a turn starts with (#2323), the rules launchTurn used to hold inline.
+ * Codex (#337): a Codex pick, or the person's switch (which maps a Claude pick by tier), once they are signed in
+ * to Codex; the server login's Codex turns run in its own container, never on the host (#341). Otherwise the turn
+ * runs on Claude, a Codex pick on Claude's default, and `note` says why. A minion's turn whose whole batch is
+ * machine notices of success runs at low effort (#951); a keepalive replays the effort of the turn it keeps warm.
+ */
+export function turnChoice(f: TurnChoiceFacts): { place: TurnPlace; model: string | null; effort: string | null; codex: boolean; light: boolean; note: string | null } {
+  const { person, claude, ticket } = f;
+  const { model: picked, effort: itsEffort } = turnSettings(ticket, f.project);
+  const wantsCodex = isCodexModel(picked) || (person !== null && f.codexSwitch(person));
+  let why = wantsCodex ? f.codexWhy(person) : null;
+  const codexPlace = wantsCodex && !why && claude.host && person !== null ? f.codexPlace(person) : null;
+  if (wantsCodex && !why && claude.host && !codexPlace) why = "Codex's container isn't there yet (sign in to Codex in Settings → Your account)";
+  const codex = wantsCodex && !why;
+  const name = CODEX_MODELS.find(([id]) => id === picked)?.[1];
+  const note = !why ? null : name ? `This minion is set to ${name}, but ${why}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${why}, so this turn runs on Claude.`;
+  const light = !codex && ticket.kind !== 'coordinator' && (f.keepalive ? f.keepaliveLight : !f.resumed && f.batch.length > 0 && f.batch.every((m) => m.light));
+  return {
+    place: codexPlace ?? claude,
+    model: isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, f.project).model : picked,
+    effort: light ? 'low' : itsEffort,
+    codex,
+    light,
+    note,
   };
 }
 

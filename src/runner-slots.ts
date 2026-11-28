@@ -9,7 +9,7 @@
 // What decides where and when a runner starts is the pool's (src/runner-pool.ts, P1); this is the start and the end.
 import { randomBytes } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { Listed, RunnerOs, RunnerTokens } from './ci-runner.ts';
+import { hostsCi, type Listed, type RunnerOs, type RunnerTokens } from './ci-runner.ts';
 import type { Machine, Project, Store } from './db.ts';
 import { HttpError } from './http.ts';
 import type { MachineRelay } from './machines.ts';
@@ -141,7 +141,8 @@ export class RunnerSlots {
   report(machine: Machine, body: Record<string, unknown>) {
     const r = slotReport(machine, body);
     const project = this.store.getProject(r.scheme);
-    if (!project) throw new HttpError(404, `No scheme ${r.scheme}`);
+    // A PC that hosts CI: one that just stopped lending there still reports its last end.
+    if (!project || !hostsCi(this.store, machine, project)) throw new HttpError(404, `No scheme ${r.scheme} that machine ${machine.name} runs CI for`);
     this.log(`${machine.name} ${r.os} slot ${r.slot} of ${project.name}: ${r.event}${r.job ? ` (${r.job})` : ''}${r.code !== undefined ? `, exit ${r.code}` : ''}`);
     this.onReport(r);
     if (r.event === 'ended' || r.event === 'stopped') void this.cleanUp(project, machine.id, r.os, r.slot, r.at);

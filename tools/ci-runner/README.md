@@ -566,6 +566,37 @@ the shared folder): Peek's `windows` workflow runs its steps in Git Bash, Git Ba
 jobs allowed it, and every cargo it started left the slot for a job of its own (the keeper's "was in another job
 already" lines: cargo, cargo-fmt, rustfmt, sccache) that the squeeze never touched. Refusing breakaway keeps them in.
 
+## One-job runners in slot folders (runner pool P2, #2269)
+
+Cara picked one-job runners, started on demand (2026-11-27, #2264's card: "One-job runners, on demand"). Citadel starts one
+just-in-time runner per CI job, in a warm slot folder that keeps the last job's build. The standing runners above are
+left as they are.
+
+- **Start.** Citadel mints the runner's config with the scheme owner's GitHub login. It does so only for a machine whose
+  CI role is on and lent to that scheme (`lendsCi`, `src/ci-runner.ts`). It holds the config under a one-time id for
+  2 minutes (`src/runner-slots.ts`) and sends the agent `{op: 'start', scheme, slot, once}`. The agent runs
+  `runner-slot.ps1 -Op Start` (or `runner-slot.sh start`) as SYSTEM or root. That makes the slot folder
+  `C:\citadel-pool\<repo>\slot-<n>` (Linux: `/opt/citadel-pool/<repo>/slot-<n>`) and starts the slot's task or unit
+  as the low-rights account: NETWORK SERVICE on Windows, the scheme's `ci-<repo>-<hash>` user on Linux. The launcher
+  (`launch-slot.ps1` or `.sh`) running as that account swaps the id for the config at `POST /api/machines/runner-jit`.
+  It passes the config to the runner only in `ACTIONS_RUNNER_INPUT_JITCONFIG`, never in a file, a log or a command line.
+  The task's or unit's stored arguments hold only the spent id.
+- **Never from the copy's folder.** Each machine keeps one copy of the runner program in `<pool>\runner\<version>`.
+  Windows slots link `bin` and `externals` to it with junctions and copy its root files. Linux slots get `cp -al` hard
+  links, made in a root-only folder and renamed in. SYSTEM and root never run or read a job-writable file as
+  themselves. The config turns the runner's own self-update off; the agent updates the copy instead, a day apart and
+  only while no slot runs.
+- **Watch.** Every 15 seconds the agent reads the state op for the slots it started (`slots.json` beside it). It tells
+  Citadel when a runner took a job, ended (with the launcher's exit code) or was stopped: a runner with no job after
+  2 minutes is stopped and its `.runner`, `.credentials` and `.credentials_rsaparams` wiped. The launcher wipes them
+  again before every start.
+- **Leftovers.** GitHub keeps a one-job runner that never ran a job. After an end or a stop, Citadel removes the
+  slot's runners (named `pool-m<machine>-<w|l><slot>-…`) that were minted by then and aren't busy. It tries again
+  for one GitHub still calls busy. An agent killed mid-job picks the slot up again from `slots.json` at its next start,
+  and reports the end when the runner ends.
+- **Proven** on Windows 11 (as SYSTEM, the runner as NETWORK SERVICE) and on Fedora with systemd (as root, the runner as
+  the scheme's user). Two jobs ran in a row in one slot, and the second found the first's build folder.
+
 ## Point the workflows at it
 
 Each job's `runs-on`, with the scheme's label:

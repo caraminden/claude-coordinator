@@ -172,6 +172,13 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     assert.equal((await post('ccm_1_nope', {})).status, 401);
     const laptop = await srv.call('/api/machines', { name: 'a-laptop' });
     assert.equal((await post(laptop.data.token, { os: 'windows', host: 'x', cores: 1, cpu: 5, mem_total: 1, mem_free: 1, runners: [] })).status, 403);
+    // One-job runners (P2, #2269): a config only for a live one-time id, which no guess is; a slot report needs a machine token.
+    const jit = (body: unknown) => fetch(`${srv.base}/api/machines/runner-jit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await jit({ once: 'ab'.repeat(24) })).status, 410);
+    assert.equal((await jit({ once: 'nope' })).status, 410);
+    const slotPost = (token: string) => fetch(`${srv.base}/api/machines/runner-slot`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scheme: 1, slot: 1, os: 'windows', event: 'ended' }) });
+    assert.equal((await slotPost('ccm_1_nope')).status, 401);
+    assert.equal((await slotPost(laptop.data.token)).status, 404);
 
     for (const name of [
       'install-runner-agent.ps1',

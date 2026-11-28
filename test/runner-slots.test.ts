@@ -95,7 +95,9 @@ function slots(agentOk = true) {
   const store = new Store(':memory:');
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const project = store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras.git', cara.id);
-  const machine = store.createMachine('desk', 'x', 'Cara', cara.id);
+  const desk = store.createMachine('desk', 'x', 'Cara', cara.id);
+  store.writeMachineRoles(desk.id, (roles) => roles.map((r) => (r.role === 'ci' ? { ...r, on: true, projects: [project.id] } : r)));
+  const machine = store.getMachine(desk.id)!;
   const listed: Listed[] = [];
   const removed: number[] = [];
   const sent: RunnerJob[] = [];
@@ -191,4 +193,7 @@ test("an agent's ended report cleans up the slot; one for a scheme that's gone i
   await until('the ended runner is gone', () => w.listed.length === 0);
   assert.deepEqual(seen, ['took', 'ended0']);
   assert.throws(() => w.rs.report(w.machine, { scheme: 999, slot: 3, os: 'windows', event: 'ended' }), { status: 404 });
+  // A machine that hosts no CI can't make Citadel list a scheme's runners.
+  const laptop = w.store.createMachine('laptop', 'x', 'Cara', w.store.getProject(w.project.id)!.owner_id!);
+  assert.throws(() => w.rs.report(laptop, { scheme: w.project.id, slot: 3, os: 'windows', event: 'ended' }), { status: 404 });
 });

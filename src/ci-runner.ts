@@ -93,6 +93,15 @@ export function lendsCi(store: Store, machine: Machine, project: Project): boole
 }
 
 /**
+ * Whether this machine hosts CI (its role on, or a runner agent connected) and its owner is in the scheme: enough to report
+ * a slot's end there, so a PC that just stopped lending to the scheme still gets its last runner cleaned up (#2269).
+ */
+export function hostsCi(store: Store, machine: Machine, project: Project): boolean {
+  const role = store.machineRoles(machine.id).find((r) => r.role === 'ci');
+  return Boolean(role?.on || role?.setup?.runner_agent) && ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
+}
+
+/**
  * The config with the runner's own self-update off: slots link to one shared copy of the runner program, which an update
  * from inside a job would rewrite under every slot, so the agent updates the copy between jobs instead (runner-slot.ps1
  * Update). The runner reads `disableUpdate` from `.runner`, one of the config's base64 files. A config in a shape this

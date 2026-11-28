@@ -21,5 +21,7 @@ Status: accepted, 2026-11-24; the gap train built and off, 2026-11-27 (#2243). M
   "Re-read this count after a week, with #1896's failing test looked up, before the quick lane skips CI for real." So it
   ships switched off, and with it off the line ships exactly as before (`test/land-quick-train.test.ts`). A person turns
   it on after that recount, on perigee: `touch "$(git -C ~/claude-coordinator rev-parse --absolute-git-dir)/cc-deploy/quick-train-on"`;
-  removing that file turns it off again, and `LAND_QUICK=0` turns it off for one ship. Until piece 4's full run behind
-  it, the only full suite over a quick top is the next full train's, and at most one quick train ships between full ones.
+  removing that file turns it off again, and `LAND_QUICK=0` turns it off for one ship. The plan pairs each quick train
+  with a full run on main behind it (piece 4, not built): turned on before that, the only full suite over a quick top is
+  the next full train's, so at most one quick train ships between full ones. Whether to turn it on before piece 4 is
+  part of that go.

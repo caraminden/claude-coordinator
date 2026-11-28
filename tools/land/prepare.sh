@@ -73,7 +73,7 @@ rerere_on() {
 # <onto> <commit>: the stack early_next or tools/own-check.sh made of that commit on that one, if still there.
 stacked_of() {
   local c
-  c=$({ cat "$state/stacked" "$state/own-checked" 2>/dev/null || true; } | awk -v k="$1 $2" '$1 " " $2 == k { print $3; exit }') && [ -n "$c" ] && git cat-file -e "$c^{commit}" 2>/dev/null && echo "$c"
+  c=$({ cat "$state/stacked" "$state/own-checked" "$state/quick-stacked" 2>/dev/null || true; } | awk -v k="$1 $2" '$1 " " $2 == k { print $3; exit }') && [ -n "$c" ] && git cat-file -e "$c^{commit}" 2>/dev/null && echo "$c"
 }
 
 # <onto>: whether the rebase onto <onto>, which trial() says stops, goes through with the fixes git rerere recorded.

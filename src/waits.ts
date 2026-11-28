@@ -304,7 +304,7 @@ function queueFrom(order: number[], tickets: { name: string; text: string | null
     const l = text.split('\n');
     const [proc = '', got = '0', label = '', phase = ''] = l;
     if (!alive(proc)) continue;
-    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' || l[7] === 'order', ...((l[5] === 'hold' || l[8] === 'hold') && { holds: true }) });
+    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' || l[7] === 'order', ...((l[5] === 'hold' || l[5] === 'quick' || l[8] === 'hold') && { holds: true }) });
   }
   for (const t of line) if (t.got === 0 && t.orders && pins.includes(t.seq)) lastPin = Math.max(lastPin, order.indexOf(t.seq));
   const old = line.filter((t) => t.got === 0 && !t.orders).map((t) => t.seq);

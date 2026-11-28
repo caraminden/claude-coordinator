@@ -150,7 +150,7 @@ if [ -z "$resumed" ]; then
   land_mark start line
   trap 'land_timing $? || true' EXIT # until queue_lock's: its own check, or the build's lock, can end it first (#1864, LA8)
 fi
-QUEUE_EXIT='land_timing $? || true; queue_done' # queue_lock's EXIT trap here (deploy-queue.sh)
+QUEUE_EXIT='land_timing $? || true; quick_end; queue_done' # queue_lock's EXIT trap here (deploy-queue.sh)
 # A rider's side of the ship train (#1166). The landing at the front writes <state>/train/<this ticket>, one line:
 #   riding <front's branch> [pulled <tests>]    it is on the train being tested; with pulled, taken off it on a guess from
 #                                                the red <tests> (#1918), waiting for the verdict
@@ -193,6 +193,7 @@ if [ -z "$resumed" ]; then
       local now
       [ "$mode" != land ] || train_verdict || return 0 # riding: the train's top decides, not main
       [ "$mode" != land ] || prep_check
+      quick_wait # tools/land/quick.sh
       [ "$mode" != full ] && now=$(git rev-parse -q --verify refs/heads/main) && [ "$now" != "$waited_on" ] || return 0
       waited_on=$now under=$(under_of)
       early_check main "waiting in line"
@@ -203,10 +204,11 @@ if [ -z "$resumed" ]; then
     queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
     unset -f queue_wait_check
     [ "$mode" != land ] || train_verdict held # its train's front let go of the lock before this read the verdict
+    quick_at_lock # tools/land/quick.sh
   fi
   land_mark lock rebase
 fi
-trap 'land_timing $? || true; queue_done' EXIT
+trap 'land_timing $? || true; quick_end; queue_done' EXIT
 if [ -n "$build" ]; then
   # Under its lock only land.sh moves it, so this is what a merge into it compares and swaps against.
   base=$(git rev-parse -q --verify "refs/heads/$build") || refuse "$build doesn't exist (a build that landed is deleted), so nothing merged"
@@ -247,7 +249,7 @@ land_checks # tools/land/gate.sh
 land_settings # tools/land/settings.sh
 
 # The line and the lock go before the clean-up on GitHub (#553): a hung gh or push held the lock up to 60 s more.
-trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done; early_end' EXIT
+trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; quick_end; queue_done; exec 9>&- 7>&- 6>&-; ci_done; early_end' EXIT
 land_gate # tools/land/gate.sh
 land_verdict # tools/land/gate.sh
 if [ "$mode" = full ]; then
@@ -284,7 +286,7 @@ trap 'main_back; exit 129' HUP
 bad_check # again: a rollback may have come while this one waited for CI
 # Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
 { echo "$old $tip"; echo "$train_owner"; train_others; } >"$state/moving"
-trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; rm -f "$state/riders-$$"; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
+trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; rm -f "$state/riders-$$"; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; quick_end; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 moved=1
 ship_main # tools/land/ship.sh
 trap - INT TERM HUP

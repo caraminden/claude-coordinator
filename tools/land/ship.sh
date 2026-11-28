@@ -61,6 +61,7 @@ ship_main() {
     done
     [ -z "$late" ] || say "ship train:$late didn't move to its train commit within 10 s, so the release row may leave it out"
   fi
+  quick_ready # the quick train planned on this top has its front next in line
   # In the background, so set -e still holds inside it, but a slip there can't stop this deploy with main moved.
   early_drop "$tip" "the train ahead changed after its run started"
   early_kept || { early_next 'this one deploys' </dev/null 9>&- 7>&- 6>&- & wait $!; } || say "early next train: it stopped part way (exit $?), so the next ship's CI waits for its turn"
@@ -76,6 +77,7 @@ ship_main() {
 
 ship_landed() {
   land_mark landed
+  quick_landed
   if [ ${#train_n[@]} -gt 0 ]; then
     for ((i = 0; i < ${#train_n[@]}; i++)); do train_landed "$i"; done
     say "ship train: ${train_br[*]} shipped with $branch, each with its own shipped line"

@@ -140,7 +140,7 @@ queue_order() {
   QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY="" QUEUE_HOLD=" " QUEUE_PIN=0
   for t in "$1"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
-    [ "${l[5]:-}" != hold ] && [ "${l[8]:-}" != hold ] || QUEUE_HOLD+="${t##*/} " # the core's (kit template's) is its 9th line
+    [ "${l[5]:-}" != hold ] && [ "${l[5]:-}" != quick ] && [ "${l[8]:-}" != hold ] || QUEUE_HOLD+="${t##*/} " # the core's (kit template's) is its 9th line; quick: a quick train's front (tools/land/quick.sh)
     [ "${l[1]:-0}" != 0 ] || [ "${l[4]:-}" = order ] || [ "${l[7]:-}" = order ] || QUEUE_OLD+=("${t##*/}") # the core's "order" is line 8
   done
   [ -f "$1/.order" ] || return 0

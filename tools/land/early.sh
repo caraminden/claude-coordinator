@@ -10,6 +10,7 @@ early_next() {
   [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && { [ -e "$state/hold-off" ] || [ -n "${1:-}" ]; } && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
   [ -z "$split_of" ] || return 0 # a red train being split (train_bisect): its next ships may be the red one's, and a red early run runs again
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
+  ! quick_planned "$tip" || return 0 # a quick train goes next; its own deploy stacks the next full train (tools/land/quick.sh)
   local -A QUEUE_RANK=()
   local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' QUEUE_PIN=0 regen_attrs='' # another ship's merges get no Regenerate files of this one's
   queue_order "$q"
@@ -112,6 +113,7 @@ top_gate() {
   local x
   early_drop "$tip" "the train ahead was built again"
   rm -f "$state/early-stop.$$"
+  quick_plan # before the early next train, which then stays off this top (tools/land/quick.sh)
   if ! early_kept; then
     early_next </dev/null 9>&- 7>&- 6>&- & # not the lock's fds: a land.sh killed mid-gate mustn't leave it held
     early_pid=$!
@@ -123,6 +125,7 @@ top_gate() {
   early_pid=''
   rm -f "$state/early-stop.$$"
   [ "$rc" != 1 ] || early_drop '' "the train ahead went red"
+  [ "$rc" = 0 ] || ! quick_planned "$tip" || quick_void "the full train ahead wasn't green"
   return "$rc"
 }
 

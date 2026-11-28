@@ -73,13 +73,14 @@ land_gate() {
       done
       no_verdicts=0
     }
-    early_look
-    pull_look
+    if [ -n "${quick_go:-}" ]; then train_only=$quick_only; else early_look; pull_look; quick_alone; fi # quick_go: a quick train's front (tools/land/quick.sh)
     # shellcheck disable=SC2086 # ticket numbers
     train_build $train_only
     # None of a pulled front's kept ships rides now: a run of this one by itself says nothing of the held.
-    [ ${#train_n[@]} -gt 0 ] || [ -z "${train_only// /}" ] || train_release
+    [ ${#train_n[@]} -gt 0 ] || [ -z "${train_only// /}" ] || [ -n "${quick_go:-}" ] || train_release
     train_guards
+    if quick_gate; then quick_pick=''; return 0; fi
+    [ -z "${quick_go:-}" ] || quick_pick='' quick_go='' train_only=''
     top_say
     early_gate
     top_gate || rc=$?
@@ -102,6 +103,9 @@ land_verdict() {
   land_mark gate
   if [ "$rc" = light ]; then
     say "no CI: the server reads nothing in this change (tools/lanes)"
+    tested=$tip
+  elif [ "$rc" = quick ]; then
+    say "no CI run: a quick train, green on its quick check on CI's side runner (tools/land/quick.sh)"
     tested=$tip
   elif [ "$rc" = 0 ]; then
     ci_done

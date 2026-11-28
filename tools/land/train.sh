@@ -160,6 +160,7 @@ train_landed() { # <rider index>
   local kind=restart through=''
   ! grep -q '^live ' "$times" 2>/dev/null || kind=live
   [ -z "${through_by[$tip]:-}" ] || through="shipped through main's red on ${through_by[$tip]}" # (an apostrophe in a :+ word opens a quote)
+  [ "${rc:-}" != quick ] || through="it was a quick train: no CI run, only its quick check on CI's side runner (tools/land/quick.sh)"
   train_say "$1" "landed ${train_tip[$1]} $kind $branch ${train_was[$1]} $((${#train_n[@]} + 1))" "${known_by[$tip]:+shipped past known flakes ${known_by[$tip]}}" "$through"
 }
 
@@ -188,7 +189,7 @@ train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1
 
 # [<ticket>...]: those first, in that order, then the rest of the line in its order (what is left of a red train takes nobody else: train_only).
 train_build() {
-  local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x half
+  local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x y half
   local -A tried=()
   [ "$mode" = land ] && [ "$lane" != light ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] && [ "${QUEUE_TRAIN:-}" != hold ] || return 0
   [[ $max =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || return 0
@@ -217,8 +218,9 @@ train_build() {
     tried[${t##*/}]=1
     # A waiting ship that holds the line (QUEUE_TRAIN=hold): nobody behind it rides ahead of it.
     { [ "${l[5]:-}" = hold ] || [ "${l[8]:-}" = hold ]; } && [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && break
-    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused || $x = alone ]] && continue # still on the train before this one, refused by this one, or sent to ship alone (#2098)
-    [ -z "${early_memo:-}" ] || [ "$x" != riding ] || continue # early_next: on the train before this one
+    x='' y=''
+    read -r x y _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused || $x = alone ]] && continue # still on the train before this one, refused by this one, or sent to ship alone (#2098)
+    [ -z "${early_memo:-}" ] || [ "$x" != riding ] || [ "$y" = "$branch" ] || continue # early_next: on the train before this one (quick_stack: one riding the quick train it stacks)
     [ -z "$train_only" ] || [[ $train_only == *" ${t##*/} "* ]] || continue # early_look: the riders its early run has; train_suspects, pull_look: what is left of a red train
     if [[ $split_rest == *" ${t##*/} "* ]]; then [ -n "$split_of" ] || continue; else [ -z "$split_of" ] || continue; fi # the split's ships ride together only
     [[ $train_refused != *" ${t##*/} "* ]] || continue # refused as a suspect, though its rider already read the verdict
@@ -226,6 +228,7 @@ train_build() {
     [[ $(queue_state "${l[0]%% *}") != [Tt] ]] || continue
     b=${l[2]:-}
     [ -n "$b" ] && [ "$b" != "$branch" ] && [[ $b != build/* ]] && r=$(git rev-parse -q --verify "refs/heads/$b^{commit}") || continue
+    [ -z "${quick_pick:-}" ] || quick_ok "$b" "$r" || continue # a quick train takes qualifying ships only (tools/land/quick.sh)
     skip=''
     base=$(git merge-base main "$r") || continue
     [ -z "$(git rev-list --merges "$base..$r")" ] || skip="it has merge commits"
@@ -344,8 +347,12 @@ quick_train_line() (
   set +e
   { [ "$mode" = land ] || [ "$mode" = build ]; } && [ -f "$tools/quick-train.ts" ] || exit 0
   base=$(under_of) && [ -n "$base" ] || base=$(git merge-base main HEAD)
-  out=$(timeout 10 "$tools/citadel-node" "$tools/quick-train.ts" --main main --base "$base" --risk "${LAND_RISK:-}" --mode "$mode")
+  judge=("$tools/citadel-node" "$tools/quick-train.ts")
+  [ -z "${LAND_QUICK_JUDGE:-}" ] || read -ra judge <<<"$LAND_QUICK_JUDGE" # stands in for it in tests
+  out=$(timeout 10 "${judge[@]}" --main main --base "$base" --risk "${LAND_RISK:-}" --mode "$mode")
   retro_log "quick train · $label · ${out:-not: could not be judged}"
+  # With the gap train on (tools/land/quick.sh), the answer is kept for the front that plans one.
+  ! quick_on || { mkdir -p -m 700 "$state/quick" && echo "$(git rev-parse HEAD) ${out:-not:}" >"$state/quick/${branch//\//-}"; }
 ) >/dev/null 2>&1 9>&- 7>&- 6>&- 5>&- </dev/null || true
 
 # <a red run's log>: what a refused rider hears of it, its last 40 lines, after the test it skipped, if any (the wake's

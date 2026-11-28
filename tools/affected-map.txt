@@ -17,7 +17,9 @@
 @inheritmax 10
 # Pinning tests too slow for tools/always-tests.txt (#2037, Josh 2026-11-25 "Run when their code changes"): the narrow pick
 # (citadel-test --affected) and land.sh's smoke run these when a rule below picks them, though they skip other rules' tests.
-@pinned test/access-matrix.test.ts test/list-reads.test.ts test/boot-check.test.ts test/exit-with-parent.test.ts test/ci-leftovers.test.ts
+# test/land-verdicts.test.ts ends with a guard that fails when a new tools/land/ function reads CI's log unbenched; it is pinned so a
+# ship-script change meets it before CI does (effort retro #2294: #2244 was refused at CI on it, a whole queue and CI cycle).
+@pinned test/access-matrix.test.ts test/list-reads.test.ts test/boot-check.test.ts test/exit-with-parent.test.ts test/ci-leftovers.test.ts test/land-verdicts.test.ts
 
 # The database: its schema, its secrets list, and the first-run commit budget.
 src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts

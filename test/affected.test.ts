@@ -339,3 +339,12 @@ test('the command with --narrow says how many more tests the wide pick would run
   assert.doesNotMatch(r.stdout, /^unmapped/m);
   assert.match(r.stdout, /^wide\t[1-9]\d*$/m);
 });
+
+// Effort retro #2294: #2244 added a tools/land/ function and CI refused it on land-verdicts' unbenched-reader guard,
+// which the narrow pick had skipped. A ship-script change must meet that guard before CI does.
+test('the narrow pick for a ship-script change runs test/land-verdicts.test.ts', () => {
+  for (const p of ['tools/land.sh', 'tools/land/quick.sh']) {
+    const picked = affected(map, [p], tracked, repo, true).run.map((r) => r.test);
+    assert.ok(picked.includes('test/land-verdicts.test.ts'), `${p}: narrow pick skips land-verdicts`);
+  }
+});

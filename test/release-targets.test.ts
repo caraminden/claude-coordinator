@@ -915,6 +915,24 @@ test('the CI package reader: a run waiting for a runner waits, with no estimate'
   assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta], ['ci', 'waiting for a CI runner', null]);
 });
 
+test('the CI package reader: pending (held behind the run before it), waiting (a gate) and queued (no runner) read differently (#2328)', async () => {
+  const now = Date.now();
+  const read = async (runs: Run[], jobs: Record<number, Job[]>) => {
+    const store = new Store(join(root, `c-${++n}.db`));
+    const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+    const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release' };
+    const { actions } = fakeActions(runs, jobs);
+    const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => now });
+    await reader.refresh();
+    return reader.read()[0].next?.waitingOn;
+  };
+  assert.equal(await read([run(2, 'queued', null, now - 60_000)], { 2: [] }), 'waiting for a CI runner');
+  assert.equal(await read([run(2, 'waiting', null, now - 60_000)], { 2: [] }), 'waiting for approval');
+  assert.equal(await read([run(2, 'pending', null, now - 60_000)], { 2: [] }), 'waiting for the run before it to finish');
+  const older = { ...run(1, 'in_progress', null, now - 120_000), head_sha: 'abcdef0123456789' };
+  assert.equal(await read([run(2, 'pending', null, now - 60_000), older], { 2: [], 1: [job(1, 'e2e', 'queued', null, null, null)] }), 'waiting for the run on abcdef0 to finish');
+});
+
 test('gradleVersion reads Groovy and Kotlin build files', () => {
   assert.deepEqual(gradleVersion('defaultConfig {\n  versionCode 5\n  versionName "1.4"\n}'), { code: 5, name: '1.4' });
   assert.deepEqual(gradleVersion('defaultConfig {\n  versionCode = 12\n  versionName = "2.0.1"\n}'), { code: 12, name: '2.0.1' });
@@ -2193,6 +2211,69 @@ test('a CI package with release.needs: a build that passed its own job is not li
     ['Build 1275'],
   );
   assert.equal(store.countReleases(p.id, t.id), 2);
+});
+
+test('a needed workflow run held by its concurrency group says what it is behind, not that no runner exists (#2328)', async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `peek-gate-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  const now = Date.now(),
+    m = 60_000;
+  const base = landOne(repo, now - 120 * m, 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const minion = (title: string, branch: string) => {
+    const t = store.createTicket({ project_id: p.id, title, permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(t.id, root, branch);
+    return t;
+  };
+  minion('Sound tab', 'ticket/1-sound');
+  minion('Panel drag', 'ticket/2-drag');
+  const at = Date.now() + 1000;
+  const one = landOne(repo, at, 'crates/app/sound.rs', 'ticket/1-sound');
+  const two = landOne(repo, at + 1000, 'crates/app/drag.rs', 'ticket/2-drag');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', numbering: { name: 'Build {n}', number: 'run' }, needs: ['desktop.yml'] };
+  // Tonight's shape: three windows runs whose release job passed; desktop.yml green on the oldest only, cancelled on the
+  // next, and queued for a runner for 22 minutes on the newest.
+  const win: Run[] = [
+    { ...run(1291, 'completed', 'success', now - 30 * m, now - 25 * m), head_sha: two },
+    { ...run(1289, 'completed', 'success', now - 40 * m, now - 35 * m), head_sha: one },
+    { ...run(1275, 'completed', 'success', now - 110 * m, now - 100 * m), head_sha: base },
+  ];
+  const desk: Run[] = [
+    { ...run(1000, 'pending', null, now - 22 * m), name: 'desktop', head_sha: two },
+    { ...run(998, 'in_progress', null, now - 40 * m), name: 'desktop', head_sha: one },
+    { ...run(984, 'completed', 'success', now - 110 * m, now - 60 * m), name: 'desktop', head_sha: base },
+  ];
+  const jobs: Record<number, Job[]> = {
+    1291: [job(1291, 'release', 'completed', 'success', now - 28 * m, now - 25 * m)],
+    1289: [job(1289, 'release', 'completed', 'success', now - 38 * m, now - 35 * m)],
+    1275: [job(1275, 'release', 'completed', 'success', now - 105 * m, now - 100 * m)],
+    1000: [],
+    998: [job(998, 'e2e', 'queued', null, null, null)],
+    984: [job(984, 'screen', 'completed', 'success', now - 100 * m, now - 90 * m), job(984, 'e2e', 'completed', 'success', now - 90 * m, now - 60 * m)],
+  };
+  const actions: Actions = {
+    async workflowRuns(_p, workflow) {
+      return workflow === 'desktop.yml' ? desk : workflow === 'windows.yml' ? win : [];
+    },
+    async runJobs(_p, r) {
+      return jobs[r.id] ?? [];
+    },
+  };
+  let clock = now;
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => clock });
+  await reader.refresh();
+  let [v] = reader.read();
+  named(v);
+  assert.equal(v.current?.name, 'Build 1275', 'what people have: the newest build whose desktop tests all passed, not the newest whose release job did');
+  assert.deepEqual(
+    v.next?.stages.map((s) => s.name),
+    ['ci', 'package', 'desktop', 'live'],
+    'the workflows it needs are stages of their own',
+  );
+  assert.equal(v.next?.waitingOn, `desktop waiting for the run on ${one.slice(0, 7)} to finish (behind e2e, waiting for a runner)`);
 });
 
 test('a CI package with release.needs: a needed workflow that skipped a job, or failed, keeps the build from going out (#1019)', async () => {

@@ -328,13 +328,34 @@ function runUsual(runs: RunJobs[]): (stage: string) => number | null {
   return (stage) => median(ok.flatMap((r) => (typeof r.stages[stage] === 'number' ? [r.stages[stage]] : [])));
 }
 
+/**
+ * Why a run that hasn't started isn't running, in words (#2328). GitHub's `pending` is a run held by its workflow's
+ * concurrency group behind the one before it, `waiting` is a deployment or approval gate, `queued` and `requested` are
+ * waiting for a runner. "behind" is an earlier unfinished run of the same workflow already read (no extra call).
+ */
+function holdText(run: Run, behind?: RunJobs): string | null {
+  if (run.status === 'pending') {
+    if (!behind) return 'waiting for the run before it to finish';
+    const job = behind.jobs.find((j) => j.status !== 'completed');
+    const sha = behind.run.head_sha.slice(0, 7);
+    return job ? `waiting for the run on ${sha} to finish (behind ${job.name}, ${job.status === 'in_progress' ? 'running' : 'waiting for a runner'})` : `waiting for the run on ${sha} to finish`;
+  }
+  if (run.status === 'waiting') return 'waiting for approval';
+  if (run.status === 'queued' || run.status === 'requested') return 'waiting for a CI runner';
+  return null;
+}
+
+/** The unfinished run of the same workflow that a pending run waits behind: the newest older one. */
+const behindOf = (r: Run, list: RunJobs[]): RunJobs | undefined => list.filter((x) => x.run.id !== r.id && x.run.status !== 'completed' && x.run.head_branch === r.head_branch && (ms(x.run.created_at) ?? 0) <= (ms(r.created_at) ?? 0)).sort((a, b) => (ms(b.run.created_at) ?? 0) - (ms(a.run.created_at) ?? 0))[0];
+
 /** A run in flight as the lead of a next release: waiting for a runner, in CI, or packaging. */
-function runProgress(r: RunJobs, usual: (stage: string) => number | null, now: number): Progress {
+function runProgress(r: RunJobs, usual: (stage: string) => number | null, now: number, all: RunJobs[] = []): Progress {
   const s = span(r);
   const j = r.jobs[0];
   if (j?.status === 'in_progress') return { stage: 'package', since: s.started ?? now, usual: usual('package'), waitingOn: null, text: `${j.name} running` };
-  const queued = r.run.status === 'queued' || r.run.status === 'waiting' || r.run.status === 'pending';
-  const text = queued ? 'waiting for a CI runner' : `${r.run.name} running`;
+  const held = holdText(r.run, behindOf(r.run, all));
+  const queued = held != null;
+  const text = held ?? `${r.run.name} running`;
   return { stage: 'ci', since: s.start ?? now, usual: queued ? null : usual('ci'), waitingOn: queued ? text : null, text };
 }
 
@@ -454,7 +475,8 @@ class RunsCache {
     const wait = (text: string, since: number): Progress => ({ stage: name, since, usual: null, waitingOn: text, text });
     if (!d) return wait(`${name} not started yet`, span(r).end ?? now);
     const st = d.run.status;
-    if (st === 'queued' || st === 'waiting' || st === 'pending' || st === 'requested') return wait(`${name} waiting for a CI runner`, ms(d.run.created_at) ?? now);
+    const held = holdText(d.run, behindOf(d.run, need?.get(w) ?? []));
+    if (held) return wait(`${name} ${held}`, ms(d.run.created_at) ?? now);
     if (st !== 'completed') {
       const done = d.jobs.filter((j) => j.status === 'completed').length;
       return { stage: name, since: ms(d.run.run_started_at ?? d.run.created_at) ?? now, usual: null, waitingOn: null, text: `${name} running`, ...(d.jobs.length ? { done, total: d.jobs.length } : {}) };
@@ -757,7 +779,7 @@ export class CiPackageReader implements Reader {
       const top = runs.find((r) => this.cache.released(t, r));
       const toPublish = gated && top && top !== cur && this.cache.followed(t) !== top.run.id ? top : null;
       const moving = runs.slice(0, top ? runs.indexOf(top) + 1 : undefined).find((r) => newer(r) && (r.run.status !== 'completed' || (r === top ? r === toPublish && !publishFailed(r) : !!t.needs?.length && shipped(r))));
-      const running = !moving ? null : moving.run.status !== 'completed' ? runProgress(moving, usual, now) : moving === toPublish ? publishing(span(moving).end ?? now, '') : this.cache.needProgress(t, moving, now);
+      const running = !moving ? null : moving.run.status !== 'completed' ? runProgress(moving, usual, now, runs) : moving === toPublish ? publishing(span(moving).end ?? now, '') : this.cache.needProgress(t, moving, now);
       // On main past the current release and not in a run in flight (#764): waiting for CI to build it, or for a fix
       // when the newest run after the current release failed.
       const ahead = this.pending.get(tkey(t));
@@ -952,7 +974,7 @@ export class ApkReader implements Reader {
       const moving = runs.find((r) => r.run.status !== 'completed');
       /** The run in flight, signing; waiting while no runner has it. */
       const signing = (r: RunJobs): Progress => {
-        const p = runProgress(r, usual, now);
+        const p = runProgress(r, usual, now, runs);
         return { ...p, stage: 'sign', usual: p.waitingOn ? null : usual('sign'), text: p.waitingOn ? p.text : 'signing on CI' };
       };
       if (!feed) {

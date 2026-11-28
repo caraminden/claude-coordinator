@@ -79,7 +79,7 @@ test('a member sets its note and files; a non-blocking ask is held mail to the l
 });
 
 test('a call with a ask or note but no action is refused, not read as a read', async () => {
-  for (const args of [{ ask: 'Which helper?', blocking: true }, { note: 'built' }, { text: 'a question' }, { files: ['a.ts'] }]) {
+  for (const args of [{ ask: 'Which helper?', blocking: true }, { note: 'built' }, { text: 'a question' }, { files: ['a.ts'] }, { ask: 3 }, { blocking: true }]) {
     const r = await tool(M1.id, args);
     assert.ok(r.error, JSON.stringify(args));
     assert.match(r.text, /[Nn]othing was sent/);

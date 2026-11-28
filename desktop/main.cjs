@@ -168,7 +168,7 @@ function shortcuts() {
   let icon = join(app.getPath('userData'), 'icon.ico');
   try { copyFileSync(ICON, icon); } catch { icon = ICON; }
   const link = { target, cwd: dirname(target), icon, iconIndex: 0, appUserModelId: AUMID, description: 'Citadel' };
-  shell.writeShortcutLink(join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Citadel.lnk'), 'replace', link);
+  shell.writeShortcutLink(join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Citadel.lnk'), 'create', link); // 'create' also overwrites; 'replace' made none where none was (#2274)
   const made = join(app.getPath('userData'), 'desktop-shortcut-made');
   if (!existsSync(made)) {
     shell.writeShortcutLink(join(app.getPath('desktop'), 'Citadel.lnk'), 'create', link);

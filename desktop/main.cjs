@@ -7,7 +7,7 @@
 // Settings and the sign-in cookie live in %APPDATA%\Citadel (Electron's userData), never in the read-only build folder.
 // Closing the window keeps it in the tray, so notifications (core.js desktopNotify) still come; Quit is the tray's menu.
 const { app, BrowserWindow, Menu, Tray, nativeTheme, safeStorage, screen, shell, ipcMain } = require('electron');
-const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+const { copyFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const { route, launcherOf } = require('./route.cjs');
 const { reloadKey, devtoolsKey } = require('./keys.cjs');
@@ -163,7 +163,11 @@ function shortcuts() {
   if (process.platform !== 'win32' || !app.isPackaged) return;
   const target = launcherOf(process.execPath, existsSync);
   if (!target) return;
-  const link = { target, cwd: dirname(target), icon: ICON, iconIndex: 0, appUserModelId: AUMID, description: 'Citadel' };
+  // The icon is copied out of the build folder (#2274): a taskbar pin is a copy of this shortcut that nothing rewrites, and
+  // versions\<n>\ goes away two builds later, taking the pin's logo with it.
+  let icon = join(app.getPath('userData'), 'icon.ico');
+  try { copyFileSync(ICON, icon); } catch { icon = ICON; }
+  const link = { target, cwd: dirname(target), icon, iconIndex: 0, appUserModelId: AUMID, description: 'Citadel' };
   shell.writeShortcutLink(join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Citadel.lnk'), 'replace', link);
   const made = join(app.getPath('userData'), 'desktop-shortcut-made');
   if (!existsSync(made)) {

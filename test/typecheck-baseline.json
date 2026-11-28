@@ -125,7 +125,7 @@
   "test/land-handoff.test.ts": [12, 6],
   "test/land-queue.test.ts": [1, 0],
   "test/land-recover-fixture.ts": [0, 1],
-  "test/land-train-2.test.ts": [6, 0],
+  "test/land-train-2.test.ts": [3, 0],
   "test/land-train-3.test.ts": [2, 0],
   "test/live-facts.test.ts": [0, 1],
   "test/loop-guard.test.ts": [0, 3],

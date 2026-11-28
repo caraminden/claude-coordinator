@@ -319,7 +319,7 @@ function Test-RunnerTookJob($dir) {
       [void]$f.Seek([math]::Max(0, $f.Length - 256KB), 'Begin')
       $text = (New-Object IO.StreamReader($f)).ReadToEnd()
     } finally { $f.Dispose() }
-  } catch { return $false }
+  } catch { return $true } # unreadable counts as busy: awake costs nothing, a stop mid-job loses the job
   $states = [regex]::Matches($text, 'JobState: (\w+)')
   return $states.Count -gt 0 -and $states[$states.Count - 1].Groups[1].Value -eq 'Busy'
 }

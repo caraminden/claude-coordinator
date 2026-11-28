@@ -7,7 +7,7 @@
 // every 30 seconds (#534, the samples below): read-only, through sample-load.ps1 on Windows and /proc on Linux. The scripts fetch their own
 // GitHub tokens from Citadel and never keep them; this file never sees one. It serves no MCP server, no workspace,
 // no shell, and never restarts the PC. On Windows it also keeps keep-runners.ps1 running (#552, below), which holds every
-// runner on the PC at below-normal priority and all CI under a CPU cap.
+// runner on the PC at below-normal priority (no CPU cap since #2262).
 //
 //   node runner-agent.mjs <machines url> --token-file <file> [--log <file>]
 //
@@ -746,13 +746,19 @@ export class RunnerWake {
  * @param {string} dir
  */
 export function tookJob(dir) {
+  const diag = join(dir, '_diag');
+  let newest;
   try {
-    const diag = join(dir, '_diag');
-    const newest = readdirSync(diag)
+    newest = readdirSync(diag)
       .filter((f) => /^Runner_.*\.log$/.test(f))
       .sort()
       .at(-1);
-    if (!newest) return false;
+  } catch {
+    return false;
+  }
+  if (!newest) return false;
+  // A log there but unreadable counts as busy: a runner left awake costs nothing, one stopped mid-job loses the job.
+  try {
     const fd = openSync(join(diag, newest), 'r');
     try {
       const size = fstatSync(fd).size;
@@ -763,7 +769,7 @@ export function tookJob(dir) {
       closeSync(fd);
     }
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -871,7 +877,14 @@ async function main() {
   // No ship squeezes a runner (#2262; Cara, 2026-11-27: "if a machine doesnt have room, we can wait and load balance,
   // not run the job starved"): a ship goes first through the plan's sleep only. The empty list lifts what an older agent left.
   if (os === 'linux') new LinuxSqueeze({ log, percent: caps.squeeze }).next().catch((err) => log(`Couldn't clear the ship squeeze: ${err.message}`));
-  else writeShips(jobs.dir, []);
+  else {
+    // An older ships.json expires by itself in SHIP_HOLD_MS, so a failed clear is only logged.
+    try {
+      writeShips(jobs.dir, []);
+    } catch (err) {
+      log(`Couldn't clear the ship squeeze: ${err.message}`);
+    }
+  }
   let lastShips = [];
   let shipError = '';
   const ships = async (raw) => {

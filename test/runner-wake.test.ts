@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -222,6 +222,9 @@ test("a runner's listener holds a job from the JobState: Busy its newest Runner 
     assert.equal(tookJob(join(dir, 'r')), true, "a Worker's log is not the listener's");
     writeFileSync(join(diag, 'Runner_20261127-090000-utc.log'), line('Busy') + line('Online'));
     assert.equal(tookJob(join(dir, 'r')), false, 'the newest Runner log counts: its job is done');
+    // A log it can't open (here a link to nothing) counts as busy: left awake costs nothing, stopped mid-job loses it.
+    symlinkSync(join(dir, 'gone'), join(diag, 'Runner_20261127-100000-utc.log'));
+    assert.equal(tookJob(join(dir, 'r')), true, 'an unreadable newest log counts as busy');
   } finally {
     // timing-ok: own temp dir
     rmSync(dir, { recursive: true, force: true });

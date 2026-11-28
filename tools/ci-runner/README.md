@@ -457,7 +457,7 @@ the others get while Citadel's own ship runs comes down with `squeeze_percent` b
 - **Windows:** nothing to set since #2262 (no cap, no squeeze). The file is `C:\ProgramData\citadel-runner-agent\caps.json`, written as administrator. Then restart the task
   **Citadel runner agent** (end it and run it, in Task Scheduler).
 - **Linux:** `/opt/citadel-runner-agent/caps.json`, written as root. Then `systemctl restart citadel-runner-agent`.
-- **WSL:** the same file, for `squeeze_percent` only: `.wslconfig`'s `processors` is what holds the VM down (below).
+- **WSL:** nothing to set since #2262 (`squeeze_percent` is read and unused): `.wslconfig`'s `processors` is what holds the VM down (below).
 
 A restart of the agent leaves the runners and their jobs going. Installing again keeps the file.
 

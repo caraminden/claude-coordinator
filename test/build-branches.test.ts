@@ -37,13 +37,13 @@ test("an Overseer gets the skill in place of the build steps, a member the board
   assert.match(owner, /You are Build 8's Overseer/);
   assert.match(owner, /citadel:cabal/);
   assert.match(owner, /which you make first/);
-  assert.match(owner, /to the member who made it while it is open, else to the cabal's fixer/, 'fixes are routed');
+  assert.match(owner, /to the member who made it while it is open, else to the Plot's fixer/, 'fixes are routed');
   assert.match(owner, /answer them together/, 'asks in batches');
   assert.match(owner, /A full run waits until no member is still merging/);
   assert.ok(owner.includes('https://x.example/p/'), 'the preview link stays');
   assert.ok(!owner.includes('You are the build minion'), 'the old build steps are gone');
   const old = turn({ build: 7, branch: 'build/7', owner: true }, null);
-  assert.ok(old.includes('You are the build minion of Build 7') && !old.includes('Overseer'), "Build 7's minion keeps today's steps");
+  assert.ok(old.includes('You are the build minion of Plot 7') && !old.includes('Overseer'), "Build 7's minion keeps today's steps");
   const feeder = turn({ build: 7, branch: 'build/7', owner: false }, null);
   assert.ok(feeder.includes('You are a feeder in Build 7') && !feeder.includes('cabal_board'), "Build 7's feeders keep today's text");
   const inBuild = turn({ build: 8, branch: 'build/8', owner: false }, member);

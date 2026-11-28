@@ -228,7 +228,7 @@ test('a feeder merged into its build and dismissed is merged for a chain, and li
   }
   assert.equal(await w.check(), 1);
   assert.deepEqual([started.map((s) => s.c.ticket), held.length], [[afterMerged], 0], 'merged starts, live waits, nothing held');
-  assert.match(started[0].why, /work is merged into Build 7$/, 'in its build, not landed');
+  assert.match(started[0].why, /work is merged into Plot 7$/, 'in its build, not landed');
   live.git('merge', '-q', '--ff-only', 'build/7'); // the build lands
   assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
   assert.deepEqual(
@@ -269,7 +269,7 @@ test('a merged chain on a build owner waits for the build to ship to main; a fee
   const follower = minion().id;
   w.chain({ ticket: follower, after: owner.id, when: 'merged', message: 'part two', from: 'Taskmaster', base: f.base, since: f.since });
   assert.equal(await w.check(), 0, 'later: still waiting');
-  assert.match(w.heldFor(follower) ?? '', /waits for Build 8 to ship/);
+  assert.match(w.heldFor(follower) ?? '', /waits for Plot 8 to ship/);
   live.git('merge', '-q', '--ff-only', 'build/8'); // the build ships
   assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
   assert.equal(started[0].c.ticket, follower);

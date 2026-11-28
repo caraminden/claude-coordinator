@@ -315,7 +315,7 @@ function runRelease(r: RunJobs, outcome: string, changes: Release['changes'] = [
 
 /** The build a desktop feed names when it is none of the target's listed runs: a by-hand one as itself, a CI one by its commit. */
 function feedRelease(b: DesktopBuild, link: string): Release {
-  const name = ciRun(b.source) === null ? { name: `Plot ${b.build}, by hand` } : {};
+  const name = ciRun(b.source) === null ? { name: `Build ${b.build}, by hand` } : {};
   return { version: b.commit ?? b.version ?? '', number: null, ...name, link, changes: [], started: null, live: b.at, outcome: 'live', stages: {}, ...(b.commit && SHA.test(b.commit) ? { commit: b.commit } : {}) };
 }
 

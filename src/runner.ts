@@ -3965,7 +3965,7 @@ export class Runner {
             ? `${text}\nIt was already retried once after a failed turn, so it stopped, and its Taskmaster was told: send a message to carry on.`
             : text,
     });
-    this.setFailNote(ticketId, { note: netTries ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
+    this.setFailNote(ticketId, { note: netTries ? `Network: stopped retrying after ${netTries} resumes` : short(twice ? `Taskmaster told: ${first}` : first) });
     this.onTurnError(ticketId, text, event.id);
     if (twice) this.onRetryFailed(ticketId, retryFailedText('it was retried once a minute later, and the retry failed too', text));
   }

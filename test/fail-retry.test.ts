@@ -108,7 +108,7 @@ test("a second failure in a row stops, stays in error and wakes the owner's Task
   await until('the failed retry', () => turnsRun() === before + 2 && !runner.isRunning(id) && alerts.some((a) => a.ticket === id));
   const t = store.getTicket(id)!;
   assert.equal(t.status, 'error');
-  assert.equal(t.note, BOOM);
+  assert.equal(t.note, `Taskmaster told: ${BOOM}`);
   assert.equal(runner.failWait(id), null);
   const mine = alerts.filter((a) => a.ticket === id);
   assert.equal(mine.length, 1);

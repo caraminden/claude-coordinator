@@ -338,7 +338,7 @@ function holdText(run: Run, behind?: RunJobs): string | null {
     if (!behind) return 'waiting for the run before it to finish';
     const job = behind.jobs.find((j) => j.status !== 'completed');
     const sha = behind.run.head_sha.slice(0, 7);
-    return job ? `waiting for the run on ${sha} to finish (behind ${job.name}, ${job.status === 'in_progress' ? 'running' : 'waiting for a runner'})` : `waiting for the run on ${sha} to finish`;
+    return job ? `waiting for the run on ${sha} to finish (behind ${job.name}, ${job.status === 'in_progress' ? 'running' : job.status === 'queued' ? 'waiting for a runner' : job.status})` : `waiting for the run on ${sha} to finish`;
   }
   if (run.status === 'waiting') return 'waiting for approval';
   if (run.status === 'queued' || run.status === 'requested') return 'waiting for a CI runner';

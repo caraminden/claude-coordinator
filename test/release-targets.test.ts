@@ -2142,7 +2142,7 @@ test('a CI package with release.needs: a build that passed its own job is not li
   const two = landOne(repo, at + 1000, 'crates/app/drag.rs', 'ticket/2-drag');
   const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', numbering: { name: 'Build {n}', number: 'run' }, needs: ['desktop.yml'] };
   // Tonight's shape: three windows runs whose release job passed; desktop.yml green on the oldest only, cancelled on the
-  // next, and queued for a runner for 22 minutes on the newest.
+  // next, and held for 22 minutes on the newest.
   const win: Run[] = [
     { ...run(1291, 'completed', 'success', now - 30 * m, now - 25 * m), head_sha: two },
     { ...run(1289, 'completed', 'success', now - 40 * m, now - 35 * m), head_sha: one },
@@ -2235,7 +2235,7 @@ test('a needed workflow run held by its concurrency group says what it is behind
   const two = landOne(repo, at + 1000, 'crates/app/drag.rs', 'ticket/2-drag');
   const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', numbering: { name: 'Build {n}', number: 'run' }, needs: ['desktop.yml'] };
   // Tonight's shape: three windows runs whose release job passed; desktop.yml green on the oldest only, cancelled on the
-  // next, and queued for a runner for 22 minutes on the newest.
+  // next, and held for 22 minutes on the newest.
   const win: Run[] = [
     { ...run(1291, 'completed', 'success', now - 30 * m, now - 25 * m), head_sha: two },
     { ...run(1289, 'completed', 'success', now - 40 * m, now - 35 * m), head_sha: one },

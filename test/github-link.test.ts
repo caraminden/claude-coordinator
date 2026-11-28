@@ -441,7 +441,7 @@ test("a turn the line puts on a machine is told what that worker's GitHub sign-i
   // The line has it on machine 7 (w1), whose worker says whether gh is signed in there. The person's token never goes there (machineEnv).
   let signedIn: boolean | null = false;
   (r.turnLine as { placeOf: (id: number) => number }).placeOf = () => 7;
-  const pools: Partial<MachinePools> = { accountsAt: () => [1], nameOf: () => 'w1', github: (id) => (id === 7 ? signedIn : null) };
+  const pools: Partial<MachinePools> = { launch: (at) => ({ id: at, name: 'w1' }), accountsAt: () => [1], nameOf: () => 'w1', github: (id) => (id === 7 ? signedIn : null) };
   r.pools = pools as MachinePools;
   const githubLine = async () => {
     const dir = await until('the turn placed on w1', () => (r.isRunning(t.id) && store.getSetting<{ dir?: string }>(`turn:${t.id}`)?.dir) || null);

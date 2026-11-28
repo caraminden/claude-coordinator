@@ -290,6 +290,13 @@ export class Closing {
       this.d.emit(ticketId, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
       return false;
     }
+    const work = this.d.store.cabalOpenWork(ticketId);
+    if (work.length) {
+      this.d.store.updateTicket(ticketId, { state: null });
+      this.d.broadcastTicket(ticketId);
+      this.d.emit(ticketId, 'note', { text: `The deploy is live, but its Plot is still open (${work.join('; ')}), so this minion stays open.` });
+      return false;
+    }
     const held = this.d.ciHold(ticketId);
     if (held) {
       this.d.store.updateTicket(ticketId, { state: 'outside', note: 'live; waiting on the CI re-run on main' });
@@ -327,6 +334,9 @@ export class Closing {
       const card = atCall && this.d.cardLinks(this.d.store.getTicket(ticketId)!)[0];
       return card ? `${card.kind === 'approval' ? 'an' : 'a'} ${cardText(card)} is still waiting on people` : 'a question, plan or approval card is still waiting on people';
     }
+    // A Plot's lead stays open until its last member is dismissed (#2325): its Plot card, and the starts it still owns, live on it.
+    const work = this.d.store.cabalOpenWork(ticketId);
+    if (work.length) return `its Plot still has open work (${work.join('; ')}): it seals and waits, and closes once every member is dismissed`;
     const state = this.d.store.getTicket(ticketId)?.state;
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
     // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.

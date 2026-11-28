@@ -250,6 +250,23 @@ test("a goal cabal's lead is woken once, for its retro, when its last member is 
   await until('asked once the piece is dropped', async () => (await asked()) === 3);
 });
 
+test("a Plot lead with an open member can't close itself; a build Plot's lead is woken for its close once its retro is logged and the last member is dismissed", async () => {
+  const make = async (title: string, build?: number) => (await s.call(`/api/projects/${p.id}/tickets`, { title, message: 'Go.', model: 'claude-sonnet-5-5', effort: 'medium', ...(build ? { build } : {}) })).data as { id: number; number: number };
+  const chief = await make('Keep lead', 21);
+  const m = await make('Keep member');
+  assert.equal((await board(chief.id, { action: 'row', label: 'K1', title: 'K1', minion: m.number })).status, 200);
+  const closed = await as(chief.id, `/api/tickets/${chief.id}/close`, {});
+  assert.equal(closed.status, 409, JSON.stringify(closed.data));
+  assert.match(String(closed.data.error), new RegExp(`#${m.number}`));
+  const woke = async () => (await events(chief.id)).filter((e) => e.kind === 'user_message' && /Log how it ended and close/.test(e.data)).length;
+  await dismiss(m.id);
+  await s.call(`/api/tickets/${m.id}/status`, { status: 'idle' });
+  assert.equal(await woke(), 0, 'no retro logged yet: its own ship wakes a build lead');
+  assert.equal((await board(chief.id, { action: 'log', text: 'Retro: docs/retros/cabal-keep.md' })).status, 200);
+  await dismiss(m.id);
+  await until('the lead is woken to close', async () => (await woke()) === 1);
+});
+
 test("a row's start reads in words: now, after another piece by its title (labels with spaces too, an approved row too), once #N is live", () => {
   const all = [
     { label: 'H1', title: 'Owners piece' },

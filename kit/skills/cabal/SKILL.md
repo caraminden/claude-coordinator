@@ -134,9 +134,13 @@ A Plot gets **one retro**, yours; no separate build retro, and the server starts
   retro-log lines and the diff only where the timeline raises a question. A Plot's also says whether the claims
   helped (refusals, moved claims, conflicts they missed). Write `cabal-<slug>.md` in the retro folder CLAUDE.md's
   Project facts name (the retro skill's default otherwise), linking the board by the address on the timeline's first
-  line, and ship it by the scheme's usual route for a doc change (a Plot with a branch: its lead ships straight to main now). Then
+  line, and ship it by the scheme's usual route for a doc change with `stay_open` (a Plot with a branch: its lead ships straight to main now). Then
   log `Retro: <its path>` on the board: a Plot whose lead is dismissed without that line gets the server's effort
   retro instead.
+- **Stay till the last member:** a member can still be running or unstarted after your retro ships (a straight-to-main
+  ship, a start that waited), and your Plot card and the starts you still own go when you close. So after the retro, seal
+  until every member on your board is dismissed (Citadel wakes you then), and start what is left. The server refuses
+  `close_self` while a member is open or unstarted, and your own ship doesn't dismiss you.
 - **Then close:** every open ask answered, the log's last line says how it ended, and your handoffs deleted from the
   shared folder. The board stays, read-only. A retro that posts a start card keeps you open until it is answered.
 - A member closes as "merged into Plot <n>" in a Plot, as today.

@@ -76,6 +76,20 @@ test('an idle minion in pending-deploy is dismissed when its deploy is live', ()
   assert.equal(store.getTicket(id)!.state, null);
 });
 
+test('a Plot lead with a member still open stays open when its deploy is live; it goes once the member is dismissed', () => {
+  const lead = newTicket();
+  const member = newTicket(null);
+  store.joinCabal(member, lead, project.id, 'Member');
+  assert.equal(runner.deployLive(lead), false);
+  assert.equal(status(lead), 'idle');
+  assert.match(runner.keptOpen(lead, true) ?? '', new RegExp(`#${store.getTicket(member)!.number}`), 'close_self is refused, naming the open member');
+  assert.match(store.listEvents(lead).at(-1)!.data, /still open/);
+  store.updateTicket(lead, { state: 'pending-deploy' });
+  store.updateTicket(member, { status: 'closed' });
+  assert.equal(runner.keptOpen(lead, true), null);
+  assert.equal(runner.deployLive(lead), true);
+});
+
 test('other states are left alone, but the interim "outside / pending deploy" counts', () => {
   for (const s of ['ready', 'outside', null] as const) {
     const id = newTicket(s);

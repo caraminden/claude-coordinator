@@ -80,6 +80,23 @@ export const cabalQueries = {
     return (this.db.prepare("SELECT c.lead_id AS id FROM cabals c JOIN tickets t ON t.id = c.lead_id WHERE c.project_id = ? AND t.status != 'closed' ORDER BY c.lead_id").all(projectId) as { id: number }[]).map((r) => r.id);
   },
 
+  /**
+   * What keeps a lead from being done (#2325): its members still open (by #N), and the roster rows not started that aren't
+   * fixers (by label). A fixer never needed doesn't hold it. Empty: every member is dismissed. The lead's own row never counts.
+   */
+  cabalOpenWork(this: Store, leadId: number): string[] {
+    const out: string[] = [];
+    for (const r of this.cabalRows(leadId)) {
+      if (r.ticket_id == null) {
+        if (r.role.trim().toLowerCase() !== 'fixer') out.push(`${r.label || r.title || 'a planned piece'} is not started`);
+      } else if (r.ticket_id !== leadId) {
+        const t = this.getTicket(r.ticket_id);
+        if (t && t.status !== 'closed') out.push(`#${t.number} is open`);
+      }
+    }
+    return out;
+  },
+
   /** The lead's board, made the first time it is needed. */
   ensureCabal(this: Store, leadId: number, projectId: number, at = Date.now()): CabalRow {
     this.db.prepare('INSERT INTO cabals (lead_id, project_id, created_at) VALUES (?, ?, ?) ON CONFLICT (lead_id) DO NOTHING').run(leadId, projectId, at);

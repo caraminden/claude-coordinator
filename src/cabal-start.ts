@@ -330,9 +330,10 @@ const isFixer = (r: CabalMemberRow) => r.role.trim().toLowerCase() === 'fixer';
 export const retroKey = (leadId: number) => `cabal-retro:${leadId}`;
 
 /**
- * A goal cabal's last member was dismissed: its lead is woken to write the cabal's retro (#2096), once, and again only
- * if members it started after that are all dismissed too. A build cabal's lead is woken by its own ship instead. A fixer
- * never needed doesn't hold it.
+ * A cabal's last member was dismissed: its lead is woken to write the cabal's retro (#2096), once, and again only
+ * if members it started after that are all dismissed too. A fixer never needed doesn't hold it. A cabal with a branch is
+ * woken by its own ship for the retro, and by this only once that retro is logged (#2325): its members are dismissed
+ * before the branch is live, and the lead stays open for them, so it is told to log how it ended and close.
  */
 export function retroWake(app: App, ticketId: number): void {
   const leadId = app.store.cabalRowOf(ticketId)?.lead_id;
@@ -343,7 +344,9 @@ export function retroWake(app: App, ticketId: number): void {
 export function retroCheck(app: App, leadId: number): void {
   const { store } = app;
   const lead = store.getTicket(leadId);
-  if (!lead || lead.status === 'closed' || lead.build != null) return;
+  if (!lead || lead.status === 'closed') return;
+  const written = store.cabalLog(lead.id, 1000).some((l) => l.text.startsWith('Retro:'));
+  if (lead.build != null && !written) return;
   const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || !isFixer(r));
   if (!rows.every((r) => r.ticket_id != null && (store.getTicket(r.ticket_id)?.status ?? 'closed') === 'closed')) return;
   const asked = store.getSetting<number[]>(retroKey(lead.id)) ?? [];
@@ -352,8 +355,9 @@ export function retroCheck(app: App, leadId: number): void {
     retroKey(lead.id),
     rows.map((r) => r.ticket_id),
   );
-  store.addCabalLog(lead.id, 'Citadel', 'Every member is dismissed: the retro is next');
-  app.runner.send(lead.id, APP_NAME, `Every member of ${name(app, lead)}'s Plot has been dismissed. Write the Plot's retro now and then close: the citadel:cabal skill, "Closing". If you are about to start more members, do that first and write it once they are done too.`);
+  store.addCabalLog(lead.id, 'Citadel', written ? 'Every member is dismissed: closing is next' : 'Every member is dismissed: the retro is next');
+  const next = written ? 'its retro is logged. Log how it ended and close' : "Write the Plot's retro now and then close";
+  app.runner.send(lead.id, APP_NAME, `Every member of ${name(app, lead)}'s Plot has been dismissed${written ? ' and ' : '. '}${next}: the citadel:cabal skill, "Closing". If you are about to start more members, do that first${written ? '' : ' and write it once they are done too'}.`);
 }
 
 const filling = new Set<number>();

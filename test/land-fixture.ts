@@ -182,7 +182,7 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // GitHub's exit 137 line); FAKE_LOG=killed-red: killed from outside, but after a test had failed (a verdict);
 // FAKE_LOG=killed-rerun: as after-real, but test/busy.test.ts's rerun alone was killed from outside (no label, #1393);
 // FAKE_CI_GATE: every run stays in progress until that file exists; FAKE_RUNNERS_FILE: how many runners are online, read at each ask, or GitHub's runners
-// JSON, which the --jq filter is run on.
+// JSON, which the --jq filter is run on; FAKE_REGISTERED: how many are registered, asleep ones included, when that isn't JSON (default: as many as online).
 // FAKE_CI_SLOW: a run's first ask finds it in progress; FAKE_RUNNERS_ODD: every second check before a push finds no runner online.
 // FAKE_UNLISTED="<path> <file> [<asks>]": past the first <asks> questions (default none), no run is listed for a commit whose own change is <path>
 // until that file exists, and it is in progress from then on (#1894); FAKE_RUN_BRANCH: the branch a run was started by, which an ask that names another branch doesn't get;
@@ -207,6 +207,10 @@ case "$*" in *citadel-ci-linux-side*) echo "\${FAKE_SIDE_RUNNERS:-0}"; exit 0 ;;
 # What is left of the hour (#1722, land.sh's gh_quota): "<remaining> <limit> <reset epoch>", FAKE_QUOTA's when set,
 # "down" for no answer; never logged, so every other land test is asked exactly what it was before.
 case "$*" in "api rate_limit "*) [ "\${FAKE_QUOTA:-}" != down ] || exit 1; echo "\${FAKE_QUOTA:-4321 5000 \$((\$(date +%s) + 1500))}"; exit 0 ;; esac
+# The runner checks that ask for "<online> <registered>" (#2299: Citadel's plan keeps idle runners asleep, offline on GitHub):
+# a plain number n (FAKE_RUNNERS, FAKE_RUNNERS_WAIT, a FAKE_RUNNERS_FILE that isn't JSON) answers "n <FAKE_REGISTERED, else n>".
+jqx=\${4:-}
+runners() { case "$jqx" in *'\\(length)'*) echo "$1 \${FAKE_REGISTERED:-$1}" ;; *) echo "$1" ;; esac; }
 echo "$*" >>"${calls}"
 case "$*" in
   *"/actions/runs?head_sha="*)
@@ -283,8 +287,8 @@ case "$*" in
     fi ;;
   *citadel-ci-linux-check*) echo "\$FAKE_CHECK_RUNNERS" ;;
   *"/actions/runs?status="*) echo "\${FAKE_ACTIVE:-0}" ;;
-  *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { echo "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
-  *"/actions/runners "*) [ -z "\${FAKE_RUNNERS_ODD:-}" ] || [ $(($(grep -c '/actions/runners ' "${calls}") % 2)) = 1 ] || { echo >>"${calls}.gone"; echo 0; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq "$4" "\$FAKE_RUNNERS_FILE"; else cat "\$FAKE_RUNNERS_FILE"; fi; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { runners "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq -r "$4" "\$FAKE_RUNNERS_FILE"; else runners "$(cat "\$FAKE_RUNNERS_FILE")"; fi; else runners "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runners "*) [ -z "\${FAKE_RUNNERS_ODD:-}" ] || [ $(($(grep -c '/actions/runners ' "${calls}") % 2)) = 1 ] || { echo >>"${calls}.gone"; runners 0; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq -r "$4" "\$FAKE_RUNNERS_FILE"; else runners "$(cat "\$FAKE_RUNNERS_FILE")"; fi; else runners "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs"*'shard ('*) [ "\${FAKE_GH_JOBS:-}" != down ] || exit 1; echo "\${FAKE_GH_JOBS:-0 20 0}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"burn in new and changed tests"*) printf '%b' "\${FAKE_BURN:-}" ;;

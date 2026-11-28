@@ -9,7 +9,7 @@ import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
 import { cabalSplit, threadMatches, threadSections } from './threadgroups.js';
-import { cabalCard, openCabals } from './cabal-card.js';
+import { cabalCard, openCabals, plainTitle } from './cabal-card.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { othersIn, presenceChip } from './presence.js';
@@ -213,7 +213,8 @@ function cabalSection({ cabal, rows, mine }, current) {
   return h(
     'section',
     { class: 'thread-group g-cabal' },
-    h('h3', {}, cabal.name, current ? h('span', { class: 'muted' }, ' current') : ''),
+    // "Plot 11: One runner pool" (Cara, 2026-11-28); a Plot with no number is its title. The title shortens, "current" never does.
+    h('h3', {}, h('span', { class: 'cabal-h', title: cabal.title }, cabal.build != null ? `${cabal.name}: ${plainTitle(cabal.title)}` : plainTitle(cabal.title)), current ? h('span', { class: 'muted' }, ' current') : ''),
     cabalCard(cabal, {
       rows: rows.sort((a, b) => Number(b.id === cabal.lead) - Number(a.id === cabal.lead) || byUrgency(a, b, usage)),
       mine,

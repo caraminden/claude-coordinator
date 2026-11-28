@@ -61,18 +61,22 @@
 /* A cabal's card (#2092, public/cabal-card.js): a summary whose name opens the Overseer's chat and whose arrow opens the box, its members' rows under it. */
 .cabal-card { border: 1px solid var(--gc); border-radius: var(--radius-sm); margin: var(--space-1) 0; } /* always in the Plot's colour (Cara, 2026-11-27: "Always purple"): the card isn't a click target, and nothing on it may change or fade on hover, since every redraw makes a new card (#2280) */
 .sidebar .cabal-sum { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-2); }
-.cabal-top { display: flex; align-items: flex-start; gap: var(--space-2); }
-.sidebar .cabal-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); color: inherit; text-decoration: none; }
-.sidebar .cabal-name:is(a):hover .cabal-title b { text-decoration: underline; }
+.cabal-top { display: flex; align-items: center; gap: var(--space-2); }
+.sidebar .cabal-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-1); color: inherit; text-decoration: none; }
+.sidebar .cabal-name:is(a):hover .num { text-decoration: underline; }
 /* The arrow opens and shuts the box; a phone-sized hit area around a small chevron. */
 .sidebar .cabal-toggle { flex: none; display: grid; place-items: center; width: 44px; height: 44px; margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .sidebar .cabal-toggle:hover { color: var(--gc); }
 .cabal-arrow { width: 0.5rem; height: 0.5rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-25%) rotate(45deg); transition: transform 0.15s; }
 .cabal-toggle[aria-expanded="true"] .cabal-arrow { transform: translateY(25%) rotate(-135deg); }
 .cabal-card[data-open] .cabal-sum { background: color-mix(in srgb, var(--gc) 8%, transparent); }
-.cabal-tag { align-self: flex-start; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gc); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
-.cabal-title { overflow-wrap: anywhere; }
-.cabal-title .num { color: var(--muted); font-size: 0.8rem; }
+.cabal-tag { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gc); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; }
+.cabal-top .card-badge { flex: none; }
+.g-cabal > h3 { display: flex; min-width: 0; }
+.g-cabal > h3 .cabal-h { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-cabal > h3 .muted { flex: none; white-space: pre; }
+.cabal-state .cabal-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cabal-name .num { color: var(--muted); font-size: 0.8rem; }
 /* The meter is the board's (project.css), a little taller so a segment is easier to point at. */
 .sidebar .cabal-card .cabal-meter { order: 0; flex: none; margin: 0; height: 8px; }
 .sidebar .cabal-card .cabal-meter i:is([data-s="roster"], [data-s="sealed"], [data-s="closed"]) { background: color-mix(in srgb, var(--muted) 35%, var(--panel)); }
@@ -85,7 +89,7 @@
 .cabal-members > .thread-row:last-child { border-bottom-color: transparent; } /* the card's own edge closes the list */
 :is(.cabal-planned, .cabal-gone).opening { animation: cabal-open 0.15s ease-out; } /* the click that opens it only: the list redraws on every tick (#2181) */
 .cabal-lead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: 0.75rem; }
-.cabal-state { display: inline-flex; align-items: center; gap: 4px; font-weight: 650; color: var(--muted); }
+.cabal-state { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; gap: 4px; font-weight: 650; color: var(--muted); }
 .cabal-state i { width: 6px; height: 6px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; }
 .cabal-state[data-s="running"] { color: var(--running); }
 .cabal-state[data-s="running"] i { background: currentColor; animation: pulse 1.6s ease-in-out infinite; }

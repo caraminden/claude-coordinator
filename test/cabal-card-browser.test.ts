@@ -20,10 +20,15 @@ const STUB = pageStub(
   const lead = { id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'Build 10: one kind of machine', status: location.search === '?works' ? 'running' : 'idle', build: 10, updated_at: 0, created_at: 0 };
   const other = { id: 102, project_id: 1, kind: 'ticket', number: 8, title: 'Another minion', status: 'idle', type: 'feature', updated_at: 0, created_at: 0 };
   const member = (label, state, word) => ({ id: null, number: null, label, title: label + ' work', state, word });
-  const cabals = [{ lead: 101, number: 7, title: lead.title, overseer: "Build 10's Overseer", name: 'Build 10', build: 10, members: [member('H1', 'merged', 'merged'), member('H2', 'running', 'building')], finished: 1, done: 'merged', next: 0, spend: 12 }];
+  const cabals = [{ lead: 101, number: 7, title: lead.title, overseer: "Build 10's Overseer", name: 'Plot 10', build: 10, members: [member('H1', 'merged', 'merged'), member('H2', 'running', 'building')], finished: 1, done: 'merged', next: 0, spend: 12 }];
   cabals[0].members.forEach((m, i) => { m.id = 200 + i; m.number = 20 + i; });
   if (location.search === '?bare') cabals[0].members.shift(); // no dismissed member: open shows nothing more than shut
   if (location.search === '?waits') cabals[0].members.push({ id: null, number: null, label: 'H3', title: 'Not yet', state: 'roster', word: 'next up' });
+  // ?goal: a Plot with no branch; ?clean: a numbered Plot whose Overseer carries no prefix (#2282).
+  if (location.search === '?goal') { delete cabals[0].build; lead.build = null; lead.title = 'Build 3 · Goal work'; cabals[0].title = lead.title; }
+  if (location.search === '?clean') { lead.title = 'One runner pool'; cabals[0].title = lead.title; }
+  // ?note: the Overseer's own status note follows the state word (#2282).
+  if (location.search === '?note') lead.note = 'P3 #2275 building; ships switched off after P5';
   window.stubCabals = cabals;
   // ?waits: a member with a question card waiting on people (#2277).
   const waiter = { id: 201, project_id: 1, kind: 'ticket', number: 21, title: 'H2 work', status: 'idle', build: 10, updated_at: 0, created_at: 0, open_cards: [{ minion: 201, kind: 'question', what: 'question', label: 'Q', href: '#/p/1/t/21?e=5' }] };
@@ -134,13 +139,44 @@ test("a chat click in the scheme keeps the Plot's card (#2274)", { skip }, async
 // lines. A member's waiting card shows as the header's chip too, and one click opens it.
 test("a shut card lists its started members and the header's chip opens a waiting card; open adds the not-started lines", { skip }, async () => {
   const page = await browser.page(`${base}?waits#/p/1`, { width: 1280, height: 800 });
-  await waitFor(page, 'the chip to draw', `document.querySelector('.cabal-lead .card-badge')`);
+  await waitFor(page, 'the chip to draw', `document.querySelector('.cabal-top .card-badge')`);
   const count = (sel: string) => page.eval<number>(`document.querySelectorAll('.cabal-card ${sel}').length`);
   assert.deepEqual([await count('.thread-row'), await count('.cabal-planned'), await count('.cabal-lead + * .thread-row')], [1, 0, 0], 'shut: the started member, no Overseer row, no not-started line');
   await page.eval(`document.querySelector('.cabal-toggle').click()`);
   assert.deepEqual([await count('.thread-row'), await count('.cabal-planned')], [1, 1], 'open: adds the not-started line');
-  await page.eval(`window.hashes = []; addEventListener('hashchange', (e) => hashes.push(new URL(e.newURL).hash)); document.querySelector('.cabal-lead .card-badge').click()`);
+  await page.eval(`window.hashes = []; addEventListener('hashchange', (e) => hashes.push(new URL(e.newURL).hash)); document.querySelector('.cabal-top .card-badge').click()`);
   await waitFor(page, 'the card', `hashes.includes('#/p/1/t/21?e=5')`);
+});
+
+// #2282 (Cara, 2026-11-28): the section heading is "Plot 10: <title>" (an old "Build 10:" prefix dropped; a Plot with no number is its title), "current"
+// after it; the card's first line is the Overseer chip and its #N.
+for (const [what, search, heading, name] of [
+  ['an old "Build 10:" title loses its prefix', '?waits', 'Plot 10: one kind of machine', 'Overseer #7'],
+  ['a title with no prefix reads as it is', '?clean', 'Plot 10: One runner pool', 'Overseer #7'],
+  ['a Plot with no branch is headed by its title alone', '?goal', 'Goal work', 'Overseer #7'],
+]) {
+  test(`the section heading and the card's first line: ${what}`, { skip }, async () => {
+    const page = await browser.page(`${base}${search}#/p/1`, { width: 1280, height: 800 });
+    await waitFor(page, 'the card to draw', `document.querySelector('.cabal-name')`);
+    const text = (sel: string) => page.eval<string>(`document.querySelector('${sel}').textContent.replace(/\\s+/g, ' ').trim()`);
+    assert.equal(await text('.g-cabal > h3 .cabal-h'), heading);
+    assert.equal(await text('.g-cabal > h3'), `${heading}${search === '?goal' ? '' : ' current'}`);
+    assert.equal(await text('.cabal-name'), name);
+  });
+}
+
+// #2282 (Cara, 2026-11-28, "Show what it waits on"): the state line says the Overseer's note after the word, one line, full text in a tooltip.
+test("the state line adds the Overseer's note after the word, and is the word alone with none", { skip }, async () => {
+  const state = `document.querySelector('.cabal-state').textContent.replace(/\\s+/g, ' ').trim()`;
+  let page = await browser.page(`${base}?note#/p/1`, { width: 390, height: 800 });
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-state')`);
+  assert.equal(await page.eval<string>(state), 'Idle · P3 #2275 building; ships switched off after P5');
+  assert.equal(await page.eval<string>(`document.querySelector('.cabal-note').title`), 'P3 #2275 building; ships switched off after P5');
+  assert.equal(await page.eval<string>(`getComputedStyle(document.querySelector('.cabal-note')).whiteSpace`), 'nowrap');
+  page = await browser.page(`${base}#/p/1`, { width: 390, height: 800 });
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-state')`);
+  assert.equal(await page.eval<string>(state), 'Idle');
+  assert.equal(await page.eval<number>(`document.querySelectorAll('.cabal-note').length`), 0);
 });
 
 // Cara, 2026-11-27: "I am still getting the flickering" (#2280). The list rebuilds the card on every bit of news, and a

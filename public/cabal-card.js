@@ -24,6 +24,9 @@ export function overseerRow(lead, mine) {
   return theirs.length ? { ...lead, open_cards: [...(lead.open_cards ?? []), ...theirs].sort((a, b) => age(a) - age(b)) } : lead;
 }
 
+/** The Overseer's title without the "Build 11:", "Plot 11:" or "Build 11 ·" prefix older ones carry: the header says the Plot itself (Cara, 2026-11-27). */
+export const plainTitle = (/** @type {string} */ title) => title.replace(/^\s*(?:Build|Plot)\s+\d+\s*[:·–-]\s*/i, '').trim() || title;
+
 /** A member's state now: its row's own news moves it between building and open before the cards are read again. */
 /** @param {CabalCard['members'][number]} m @param {Row | undefined} t */
 function liveMember(m, t) {
@@ -79,7 +82,9 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
         'div',
         { class: 'cabal-top' },
         // The name opens the Overseer's chat as its row does; only the arrow opens and shuts the box (Cara, 2026-11-27: "Name opens its chat").
-        h(leadTicket ? 'a' : 'span', { class: 'cabal-name', ...(leadTicket ? { href: threadHref(leadTicket), title: "Open the Overseer's chat" } : {}) }, h('span', { class: 'cabal-tag' }, 'Overseer'), h('span', { class: 'cabal-title' }, h('b', {}, c.title), ' ', h('span', { class: 'num' }, `#${c.number}`))),
+        h(leadTicket ? 'a' : 'span', { class: 'cabal-name', ...(leadTicket ? { href: threadHref(leadTicket), title: "Open the Overseer's chat" } : {}) }, h('span', { class: 'cabal-tag' }, 'Overseer'), ' ', h('span', { class: 'num' }, `#${c.number}`)),
+        // The Overseer's waiting cards sit beside its name, as chips (Cara, 2026-11-28: "followed by the question or whatever chips").
+        cards.length && leadTicket ? badge(cards, !cardsYours({ ...leadTicket, open_cards: cards }).length) : '',
         h('button', { type: 'button', class: 'cabal-toggle', 'aria-expanded': String(open), 'aria-label': open ? 'Shut the box of members' : 'Open the box of members', title: open ? 'Shut the box of members' : 'Open the box of members', onclick: toggle }, h('span', { class: 'cabal-arrow', 'aria-hidden': 'true' })),
       ),
       leadTicket
@@ -87,8 +92,13 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
             'div',
             { class: 'cabal-lead' },
             // The working dot rejoins the shared pulse on a redraw, as a building segment does below (#2280).
-            h('span', { class: 'cabal-state', 'data-s': leadTicket.status === 'running' ? 'running' : 'idle' }, leadTicket.status === 'running' ? phase(h('i', { 'aria-hidden': 'true' }), 1600) : h('i', { 'aria-hidden': 'true' }), leadTicket.status === 'running' ? 'Working' : 'Idle'),
-            cards.length ? badge(cards, !cardsYours({ ...leadTicket, open_cards: cards }).length) : '',
+            h(
+              'span',
+              { class: 'cabal-state', 'data-s': leadTicket.status === 'running' ? 'running' : 'idle' },
+              leadTicket.status === 'running' ? phase(h('i', { 'aria-hidden': 'true' }), 1600) : h('i', { 'aria-hidden': 'true' }),
+              leadTicket.status === 'running' ? 'Working' : 'Idle',
+              leadTicket.note ? h('span', { class: 'cabal-note', title: leadTicket.note }, ` · ${leadTicket.note}`) : '',
+            ),
           )
         : '',
       c.members.length

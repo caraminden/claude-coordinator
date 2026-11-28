@@ -2,60 +2,27 @@
 // serves /app-api/read; a stand-in `claude -p` calls contraption_read's route mid-turn with its thread token,
 // as the MCP tool does.
 import assert from 'node:assert/strict';
-import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { bootServer, jsonLines, tempRoot, until, type Booted } from './helpers.ts';
 import { mcpOnce } from './mcp-agent.ts';
+import { planClaude, standInMandate } from './mandate-stand-in.ts';
 
 const tmp = tempRoot('contraption-read-');
 const root = tmp.dir;
 
-// Each turn runs the calls in plan.json, then logs what came back.
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync } = require('node:fs');
-require('node:readline').createInterface({ input: process.stdin }).once('line', async (prompt) => {
-  const planFile = ${JSON.stringify(join(root, 'plan.json'))};
-  const plan = existsSync(planFile) ? JSON.parse(readFileSync(planFile, 'utf8')) : [];
-  const api = readFileSync(${JSON.stringify(join(root, 'api'))}, 'utf8');
-  const out = [];
-  for (const c of plan) {
-    const r = await fetch(api + '/api/contraption-read/' + c.app, {
-      method: 'POST', body: JSON.stringify(c.body ?? {}),
-      headers: { Authorization: 'Bearer ' + process.env.COORDINATOR_TOKEN, 'Content-Type': 'application/json' },
-    });
-    out.push({ status: r.status, data: await r.json() });
-  }
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), out }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fakeClaude = planClaude(root, { route: '/api/contraption-read/', field: 'app', bodyDefault: {} });
 
 const LIST = [{ name: 'today', description: "Today's items", input_schema: { type: 'object', properties: { day: { type: 'string' } } } }];
 // The stand-in Mandate's read commands: today answers, big floods, tick isn't read-only, the rest don't exist.
-// Only app-api calls are recorded: Citadel also GETs an app's page to read its manifest and icons (server.ts's static-paths
-// backfill, 20 s after boot), which would break the counts on a loaded box (#1666, as #1660).
-const seen: { method: string; path: string; headers: IncomingHttpHeaders; body: string }[] = [];
-const mandate = createServer((req, res) => {
-  let body = '';
-  req.on('data', (c) => (body += c));
-  req.on('end', () => {
-    if (req.url!.startsWith('/apps/mandate/app-api/')) seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
-    const send = (status: number, data: unknown) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(data));
-    if (req.method === 'GET' && req.url === '/apps/mandate/app-api/read') return send(200, LIST);
-    if (req.method === 'POST' && req.url === '/apps/mandate/app-api/read/today') return send(200, { items: [{ title: 'Review PR #13' }], asked: JSON.parse(body) });
-    if (req.method === 'POST' && req.url === '/apps/mandate/app-api/read/big') return send(200, { blob: 'x'.repeat(200_000) });
-    if (req.method === 'POST' && req.url === '/apps/mandate/app-api/read/tick') return send(403, { error: 'not_read_only' });
-    send(404, { error: 'unknown_command' });
-  });
+const { server: mandate, seen } = standInMandate('/apps/mandate/app-api/', ({ method, url }, body) => {
+  if (method === 'GET' && url === '/apps/mandate/app-api/read') return [200, LIST];
+  if (method === 'POST' && url === '/apps/mandate/app-api/read/today') return [200, { items: [{ title: 'Review PR #13' }], asked: JSON.parse(body) }];
+  if (method === 'POST' && url === '/apps/mandate/app-api/read/big') return [200, { blob: 'x'.repeat(200_000) }];
+  if (method === 'POST' && url === '/apps/mandate/app-api/read/tick') return [403, { error: 'not_read_only' }];
 });
 // A contraption with no read commands at all.
 const peek: Server = createServer((req, res) => res.writeHead(404).end('Not found'));
@@ -77,11 +44,11 @@ const idle = () =>
 type ReadOut = { status: number; data: { error: string; truncated: number; answer: string } };
 /** Runs `plan` in the turn `start` begins; returns what the calls answered. */
 async function turn(plan: object[], start: () => Promise<unknown> = () => srv.call(`/api/tickets/${minion.id}/messages`, { text: 'what is on my list?' })): Promise<ReadOut[]> {
-  writeFileSync(join(root, 'plan.json'), JSON.stringify(plan));
+  writeFileSync(join(root, `plan-${minion.id}.json`), JSON.stringify(plan));
   const n = turns().length;
   await start();
   const t = await until('the turn', () => turns().length > n && turns().at(-1));
-  writeFileSync(join(root, 'plan.json'), '[]');
+  writeFileSync(join(root, `plan-${minion.id}.json`), '[]');
   await idle();
   return t.out;
 }

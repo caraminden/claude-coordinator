@@ -3,7 +3,6 @@
 // mandate_item's route mid-turn with its thread token, as the MCP tool does.
 import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { messagePerson } from '../src/access.ts';
@@ -11,52 +10,21 @@ import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, jsonLines, tempRoot, until, type Booted, testPins } from './helpers.ts';
+import { planClaude, standInMandate } from './mandate-stand-in.ts';
 import { json, type Refused } from './typed.ts';
 testPins();
 
 const tmp = tempRoot('mandate-items-');
 const root = tmp.dir;
 
-// Each turn runs the calls in plan-<ticket id>.json, then logs what came back.
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(
-  fakeClaude,
-  `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync } = require('node:fs');
-require('node:readline').createInterface({ input: process.stdin }).once('line', async (prompt) => {
-  const planFile = ${JSON.stringify(root)} + '/plan-' + process.env.COORDINATOR_TICKET + '.json';
-  const plan = existsSync(planFile) ? JSON.parse(readFileSync(planFile, 'utf8')) : [];
-  const api = readFileSync(${JSON.stringify(join(root, 'api'))}, 'utf8');
-  const out = [];
-  for (const c of plan) {
-    const r = await fetch(api + '/api/mandate/items/' + c.key, {
-      method: c.method, body: c.body && JSON.stringify(c.body),
-      headers: { Authorization: 'Bearer ' + process.env.COORDINATOR_TOKEN, ...(c.body ? { 'Content-Type': 'application/json' } : {}) },
-    });
-    out.push({ status: r.status, data: await r.json() });
-  }
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ ticket: Number(process.env.COORDINATOR_TICKET), prompt: JSON.parse(prompt), out }) + '\\n');
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-});
-`,
-);
-chmodSync(fakeClaude, 0o755);
+const fakeClaude = planClaude(root, { route: '/api/mandate/items/', field: 'key' });
 
 // The stand-in Mandate: a key ending in "off" is switched off; anything else is taken.
-// Only item calls are recorded: Citadel also GETs its page to read an app's manifest and icons (server.ts's
-// static-paths backfill, 20 s after boot), and that landed between a put and `seen.at(-1)` on a loaded box (#1660).
 const ITEMS = '/apps/mandate/app-api/items/';
-const seen: { method: string; path: string; headers: IncomingHttpHeaders; body: string }[] = [];
-const mandate = createServer((req, res) => {
-  let body = '';
-  req.on('data', (c) => (body += c));
-  req.on('end', () => {
-    if (req.url!.startsWith(ITEMS)) seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
-    const key = req.url!.split('/').at(-1)!;
-    if (key.endsWith('off')) return void res.writeHead(403, { 'Content-Type': 'application/json' }).end('{"error":"off","message":"She switched P off"}');
-    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(req.method === 'DELETE' ? { key, state: 'cleared' } : { key, state: 'open', mine: [] }));
-  });
+const { server: mandate, seen } = standInMandate(ITEMS, ({ method, url }) => {
+  const key = url.split('/').at(-1)!;
+  if (key.endsWith('off')) return [403, { error: 'off', message: 'She switched P off' }];
+  return [200, method === 'DELETE' ? { key, state: 'cleared' } : { key, state: 'open', mine: [] }];
 });
 
 let srv: Booted;

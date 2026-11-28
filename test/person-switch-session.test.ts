@@ -7,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { ticketWorktree } from '../src/build-output.ts';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { projectSlug, restoreAhead, restoreSession, saveSession, transcriptPath } from '../src/sessions.ts';
+import { hostAccountDir, projectSlug, restoreAhead, restoreSession, saveSession, sessionFiles, transcriptPath } from '../src/sessions.ts';
 import { jsonLines, holds, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
@@ -363,4 +363,62 @@ test("a memory folder that became a link out of the volume isn't read, and its s
   mkdirSync(join(d.slugDir, 'memory'));
   await saveSession(store, d.ticket, project, joshPlace.configDir, new Set(paths()));
   assert.ok(!paths().includes(note));
+});
+
+test("a session on the server login's second account, whose folder links to the host's own, goes with a turn and into the database (#2252)", async () => {
+  // As ClaudeLink.hostFolder makes it: dataDir/claude-accounts/<uid>/<n>, its projects folder a link to the host's.
+  const account = hostAccountDir(join(root, 'data'), cara.id, 2);
+  mkdirSync(account, { recursive: true });
+  mkdirSync(join(hostConfig, 'projects'), { recursive: true });
+  symlinkSync(join(hostConfig, 'projects'), join(account, 'projects'));
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(root, 'wt-2252-account');
+  mkdirSync(cwd);
+  store.setTicketDir(t.id, cwd, null);
+  store.updateTicket(t.id, { session_id: 'sess-938', person_id: cara.id });
+  const ticket = store.getTicket(t.id)!;
+  mkdirSync(join(hostConfig, 'projects', projectSlug(cwd)), { recursive: true });
+  writeFileSync(join(hostConfig, 'projects', projectSlug(cwd), 'sess-938.jsonl'), '{"turn":1}\n');
+  const transcript = join('projects', projectSlug(cwd), 'sess-938.jsonl');
+  // What a turn on a connected machine is sent, and what the database keeps.
+  assert.deepEqual(await sessionFiles(ticket, project, account), [transcript]);
+  await saveSession(store, ticket, project, account, null);
+  assert.deepEqual(
+    store.listClaudeState(project.id, t.id).map((row) => row.path),
+    [transcript],
+  );
+  // A person's own volume with the same link is still refused: its container could have planted it.
+  const theirs = join(volume, '.claude-3');
+  mkdirSync(theirs, { recursive: true });
+  symlinkSync(join(hostConfig, 'projects'), join(theirs, 'projects'));
+  assert.deepEqual(await sessionFiles(ticket, project, theirs), []);
+});
+
+test('a resume that fails where the turn ran starts fresh from the note, instead of leaving the minion in error (#2252)', async () => {
+  rmSync(seen, { force: true });
+  // The runner sees the transcript, but claude runs where it isn't (as a connected machine sent nothing).
+  const away = { ...joshPlace, configDir: join(volume, '.claude-seen'), env: { ...joshPlace.env, CLAUDE_CONFIG_DIR: join(volume, '.claude-run') } };
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
+  const cwd = join(root, 'wt-2252-away');
+  mkdirSync(cwd);
+  store.setTicketDir(t.id, cwd, null);
+  store.updateTicket(t.id, { session_id: 'sess-away', person_id: josh.id, note: 'waiting on the merge mail' });
+  mkdirSync(join(away.configDir, 'projects', projectSlug(cwd)), { recursive: true });
+  writeFileSync(join(away.configDir, 'projects', projectSlug(cwd), 'sess-away.jsonl'), '{"turn":1}\n');
+  const r = runner();
+  r.placeFor = (uid) => (uid === josh.id ? away : { host: true });
+  r.send(t.id, 'Josh', 'merged #989');
+  await until("turns().length === 2 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
+  const [first, second] = turns();
+  assert.equal(first.resume, 'sess-away');
+  assert.equal(second.resume, null, 'the rerun starts a fresh session');
+  assert.match(second.prompt, /merged #989/, 'with the message it was woken by');
+  assert.match(second.prompt, /waiting on the merge mail/, 'and its status note');
+  const after = store.getTicket(t.id)!;
+  assert.equal(after.status, 'idle');
+  assert.ok(after.session_id && after.session_id !== 'sess-away', 'a new session');
+  assert.ok(
+    notes(t.id).some((n) => n.includes('sess-away') && /fresh session/.test(n)),
+    notes(t.id).join('\n'),
+  );
 });

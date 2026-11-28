@@ -53,6 +53,10 @@ const rows: [string, TurnEnd, Partial<ReturnType<typeof outcome>>][] = [
   ['network', end({ turn: { result: { error: true, text: "API Error: Can't reach the API server (EAI_AGAIN)" } } }), { kind: 'net', retry: { via: 'net', retries: { net: 1 } } }],
   ['network from stderr, with no words of its own', end({ turn: {}, exit: { code: 1, signal: null }, stderr: ['x', 'connect ECONNREFUSED'] }), { kind: 'net' }],
   ['network, the third in a row', end({ turn: { result: { error: true, text: 'stream disconnected' }, netTries: 3 } }), { kind: 'net', spent: { via: 'net', tries: 3 } }],
+  ['a resume claude found no conversation for', end({ turn: { result: { error: true, text: 'No conversation found with session ID: fbebd8df-fae5' } } }), { kind: 'no-session', noSession: 'fbebd8df-fae5' }],
+  ['the same words on stderr only', end({ turn: {}, exit: { code: 1, signal: null }, stderr: ['No conversation found with session ID: abc-1'] }), { kind: 'no-session', noSession: 'abc-1' }],
+  ['a warm-up that found no conversation just fails', end({ turn: { keepalive: true, result: { error: true, text: 'No conversation found with session ID: abc-1' } } }), { kind: 'failed' }],
+  ['a fresh start that found no conversation just fails', end({ turn: { fresh: 'step', result: { error: true, text: 'No conversation found with session ID: abc-1' } } }), { kind: 'failed' }],
   ['failed', end({ turn: { result: { error: true, text: 'boom' } } }), { kind: 'failed', reason: 'boom' }],
   ['exited with no result', end({ turn: {}, exit: { code: 0, signal: null } }), { kind: 'failed' }],
   ['could not start', end({ turn: null, exit: { code: null, signal: null, error: 'ENOENT' } }), { kind: 'failed', reason: 'Could not start claude: ENOENT' }],
@@ -77,7 +81,7 @@ for (const [name, input, want] of rows) {
 
 test('every kind has a row', () => {
   const kinds = new Set(rows.map(([, input]) => outcome(input).kind));
-  for (const k of ['ok', 'stopped', 'paused', 'closing', 'limit', 'net', 'switch-account', 'account-error', 'killed', 'failed']) assert.ok(kinds.has(k as any), k);
+  for (const k of ['ok', 'stopped', 'paused', 'closing', 'limit', 'net', 'switch-account', 'account-error', 'killed', 'no-session', 'failed']) assert.ok(kinds.has(k as any), k);
 });
 
 test("today's caps are unchanged, and an account switch has one", () => {

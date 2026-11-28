@@ -21,7 +21,7 @@ export function isNetworkFailure(text: string): boolean {
   return NETWORK_ERROR.test(text) && !isAuthFailure(text) && !/\b(status|API Error:) [1-5]\d\d\b/i.test(text);
 }
 
-export type Kind = 'ok' | 'stopped' | 'paused' | 'away' | 'card' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'failed';
+export type Kind = 'ok' | 'stopped' | 'paused' | 'away' | 'card' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'no-session' | 'failed';
 
 /**
  * What an ending sets off besides its kind. A turn that ended well: `cleared` (its failure note, the limits it proved
@@ -133,7 +133,12 @@ export interface Outcome {
   spent?: { via: RetryKind; tries: number };
   /** Another account was ready, but it had already switched this many times in a row, so it didn't. */
   switchesSpent?: number;
+  /** The session claude couldn't open where the turn ran: the runner reruns the batch fresh when it's the minion's own (#2252). */
+  noSession?: string;
 }
+
+/** Claude's words for a --resume of a session it has no transcript of. */
+const NO_CONVERSATION = /No conversation found with session ID: ([\w-]+)/;
 
 /** What claude's stderr says when it was refused a thread or process, or memory. */
 const NO_THREADS = /pthread|resource temporarily|EAGAIN/i;
@@ -195,6 +200,9 @@ export function outcome(end: TurnEnd): Outcome {
   if (killed) return { kind: 'killed', ...failed };
   if (limit) return { kind: 'limit', ...failed, ...retry(r, 'limit') };
   if (reason && ACCOUNT_ERROR.test(reason)) return { kind: 'account-error', ...failed };
+  // A resume of a transcript that isn't where claude ran: rerun fresh, unless it was a warm-up, a Codex turn or already a fresh start.
+  const gone = NO_CONVERSATION.exec(reason || end.stderr.slice(-10).join('\n'));
+  if (gone && turn && !turn.codex && !turn.keepalive && !turn.fresh) return { kind: 'no-session', ...failed, noSession: gone[1] };
   // Claude's own result words decide when it has them; its last stderr lines only when it has none.
   if (isNetworkFailure(reason || end.stderr.slice(-10).join('\n'))) return { kind: 'net', ...failed, ...retry(r, 'net') };
   return { kind: 'failed', ...failed };

@@ -16,7 +16,7 @@ import { Containers, specHash, type CmdResult, type ContainerSpec, type Mount } 
 import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
 import { accountReady, accountUsageKey, pickAccount, WARM_MS, type Meter, type Pick } from './account-pick.ts';
-import { claudeConfigDir, projectSlug } from './sessions.ts';
+import { claudeConfigDir, hostAccountDir, projectSlug } from './sessions.ts';
 import { ensureGradleInit } from './build-cache.ts';
 import { thrown } from './thrown.ts';
 import { TASKMASTER_SLICE } from './turn-launch.ts';
@@ -483,7 +483,7 @@ export class ClaudeLink {
 
   /** An account's config folder as the host sees it; the server login's account 1 is the host's own. */
   configDir(uid: number, n: number): string | null {
-    if (this.serverLogin(uid)) return n === 1 ? claudeConfigDir(process.env) : join(this.dataDir, 'claude-accounts', String(uid), String(n));
+    if (this.serverLogin(uid)) return n === 1 ? claudeConfigDir(process.env) : hostAccountDir(this.dataDir, uid, n);
     const home = this.meta(uid)?.home ?? null;
     return home && join(home, accountDir(n));
   }

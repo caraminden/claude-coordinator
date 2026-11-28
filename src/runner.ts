@@ -94,7 +94,7 @@ import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { describeActivity, guessWindow, pushKind, slimEvent } from './stream-events.ts';
 import { type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type Usage } from './turn-messages.ts';
-import { contextKey, windowKey, freshKey, handoffKey, failNoteKey, closeCancelledKey, turnKey, warmKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
+import { contextKey, windowKey, freshKey, handoffKey, failNoteKey, unreachedKey, closeCancelledKey, turnKey, warmKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
 import { sleepKey, type Sleep } from './needs.ts';
 import { argInProc, claudePidNow } from './wrapper-alive.ts';
 
@@ -147,6 +147,8 @@ export interface TurnState {
   secretPerson?: number;
   startedAt?: number;
   configDir?: string;
+  /** Its session couldn't be put back from the database, so it resumed anyway: a resume that fails then says so, never reruns fresh (#2252). */
+  restoreFailed?: true;
   /** The ticket had an effort of its own when the turn started. */
   chosenEffort?: boolean;
   /** Its result event, once seen. */
@@ -2642,6 +2644,19 @@ export class Runner {
     return this.ranTurn(this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, this.waiting(ticket.id))));
   }
 
+  /**
+   * Claude found no transcript of the minion's own session where the turn ran (a machine sent none, #2252): rather
+   * than fail every turn from now on, its batch runs again as a fresh session from the note and the chat (#899).
+   */
+  private sessionUnreached(ticketId: number, sessionId: string): boolean {
+    if (this.store.getTicket(ticketId)?.session_id !== sessionId || this.store.getSetting<string>(unreachedKey(ticketId)) === sessionId) return false;
+    if (!this.queue.giveBack(ticketId, false, true).length) return false;
+    this.store.setSetting(unreachedKey(ticketId), sessionId);
+    this.emit(ticketId, 'note', { text: `Claude couldn't open this minion's conversation (session ${sessionId}) where this turn ran, so its messages run again in a fresh session.` });
+    this.turnLine.join(ticketId);
+    return true;
+  }
+
   /** A turn a pause stopped waits in the line to carry on; one stopped before claude had its prompt runs its batch again. */
   private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }, away?: AwayEnd) {
     const rerun = !turn.offset && this.queue.giveBack(ticketId, false, true).length > 0;
@@ -3129,7 +3144,9 @@ export class Runner {
     // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
     // A restore that failed (disk full, say) still resumes and fails loudly: the database's copy may be fine.
     const transcript = ticket.session_id ? transcriptPath(configDir, ticket.cwd, ticket.session_id) : null;
-    if (ticket.session_id && transcript && (restoreFailed || (await exists(transcript)))) {
+    // One claude couldn't open where its last turn ran, though it looked to be there (#2252), isn't tried again.
+    const unreached = !!ticket.session_id && this.store.getSetting<string>(unreachedKey(ticket.id)) === ticket.session_id;
+    if (ticket.session_id && transcript && !unreached && (restoreFailed || (await exists(transcript)))) {
       if (!codex) args.push('--resume', ticket.session_id);
     } else if (keepalive) {
       // No session to keep warm: its next real turn says so.
@@ -3140,9 +3157,10 @@ export class Runner {
     } else if (ticket.session_id) {
       lost = lostSessionText(ticket.session_id, ticket.note, this.chatDigest(ticket.id, batch));
       this.emit(ticket.id, 'note', {
-        text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from ${lost.entries ? `its status note and its last ${lost.entries} chat entries` : 'its status note'}.`,
+        text: `This minion's conversation (session ${ticket.session_id}) ${unreached ? "couldn't be opened where its last turn ran" : "isn't on this Claude login or in the database"}, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from ${lost.entries ? `its status note and its last ${lost.entries} chat entries` : 'its status note'}.`,
       });
       this.store.updateTicket(ticket.id, { session_id: null });
+      this.store.deleteSetting(unreachedKey(ticket.id));
     }
     // The Taskmaster's auto-memory moved to the repo memory (#98); bring its old notes along once.
     // shortcut: mergeMemory's own calls are sync, but a merge renames the old folder away, so after the first turn this off-thread look is all that runs.
@@ -3275,6 +3293,7 @@ export class Runner {
       offset: 0,
       startedAt: Date.now(),
       configDir,
+      ...(restoreFailed ? { restoreFailed: true as const } : {}),
       chosenEffort: !!ticket.effort || codex || light,
       ...(light ? { light: true as const } : {}),
       ...(codex ? { codex: true as const } : {}),
@@ -3679,7 +3698,8 @@ export class Runner {
       else row(false);
     }
     const cleared = out.followUps.includes('cleared');
-    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' || out.kind === 'away' || out.kind === 'card' ? 'idle' : 'error';
+    const unreached = out.kind === 'no-session' && !turn?.restoreFailed && this.sessionUnreached(ticketId, out.noSession!);
+    const status: 'idle' | 'error' = cleared || unreached || out.kind === 'stopped' || out.kind === 'paused' || out.kind === 'away' || out.kind === 'card' ? 'idle' : 'error';
     if (out.kind === 'paused' || out.kind === 'away') this.waitOutPause(ticketId, turn!, out.retry!, out.kind === 'away' ? exit!.away : undefined);
     if (status === 'error') {
       out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);

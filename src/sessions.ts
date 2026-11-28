@@ -111,6 +111,24 @@ function scope(ticket: Ticket, project: Project): Scope {
 
 const under = (root: string | null, path: string) => root !== null && (path === root || path.startsWith(root + sep));
 
+// The folders the server makes for its own login's extra accounts (ClaudeLink.hostFolder). Their shared parts are links
+// into the host's own config dir, put there by the server, not by a container, so listFiles may follow them (#2252).
+const hostAccounts = new Set<string>();
+
+/** The server login's account `n` folder under the app's data dir; a link from it into the host's own config dir is followed. */
+export function hostAccountDir(dataDir: string, uid: number, n: number): string {
+  const top = join(dataDir, 'claude-accounts');
+  hostAccounts.add(top);
+  return join(top, String(uid), String(n));
+}
+
+/** Whether `real` is in the host's own config dir, reached from one of the server login's own account folders. */
+async function hostLink(configDir: string, real: string): Promise<boolean> {
+  if (![...hostAccounts].some((top) => configDir.startsWith(top + sep))) return false;
+  const host = await realpath(claudeConfigDir(process.env)).catch(() => null);
+  return host !== null && real.startsWith(host + sep);
+}
+
 /** The files under a root; null when a link leads it out of the config dir, which says nothing about what was deleted. */
 async function listFiles(configDir: string, root: string): Promise<string[] | null> {
   const abs = join(configDir, root);
@@ -118,7 +136,8 @@ async function listFiles(configDir: string, root: string): Promise<string[] | nu
   try {
     // A person's container owns its volume and can plant links there: none is followed, as the last name or on
     // the way to it, or the server would read a host file into the database and a restore would hand it over.
-    if (!(await realpath(abs)).startsWith((await realpath(configDir)) + sep)) return null;
+    const real = await realpath(abs);
+    if (!real.startsWith((await realpath(configDir)) + sep) && !(await hostLink(configDir, real))) return null;
     st = await lstat(abs);
   } catch (err) {
     // Only "not there" is a missing folder: one that can't be read says nothing about what was deleted.

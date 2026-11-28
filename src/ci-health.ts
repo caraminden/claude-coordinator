@@ -340,6 +340,8 @@ export class CiHealth {
   private cache = new Map<string, { etag: string | null; body: unknown }>();
   // Finished runs' jobs and annotations don't change.
   private jobsOf = new Map<string, Job[]>();
+  /** Each scheme's self-hosted runners GitHub listed at its last read, by name. */
+  private registered = new Map<number, string[]>();
   private reasons = new Map<number, string | null>();
   private pausedUntil = 0;
   private busy = false;
@@ -622,6 +624,11 @@ export class CiHealth {
     const listed = await this.read(`repos/${slug}/actions/runners?per_page=100`, as, true);
     const runners: Runner[] | null = Array.isArray(listed?.runners) ? listed.runners : null;
     if (runners) trackOffline(runners, saved.offline, now);
+    if (runners)
+      this.registered.set(
+        p.id,
+        runners.map((r) => r.name),
+      );
     else this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so work stuck on offline runners there goes unseen.`);
     this.wakeParked(p, runners);
 
@@ -708,6 +715,11 @@ export class CiHealth {
   }
 
   /** Every scheme with CI that `canSee` allows, with its last view and its open problems (the land gate's in the live checkout's scheme), for GET /api/ci. */
+  /** The scheme's standing runners GitHub listed at the last read (the runner pool's one-job ones left out); [] when unread. */
+  standingRegistered(projectId: number): string[] {
+    return (this.registered.get(projectId) ?? []).filter((n) => !/^pool-/i.test(n));
+  }
+
   snapshot(canSee: (projectId: number) => boolean) {
     const land = this.store.getSetting<LandWatch>(LAND_WATCH);
     // `deps` is absent where a reader thread calls this on a bare { store } (src/reader.ts).

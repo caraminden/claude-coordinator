@@ -10,6 +10,7 @@ import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { GithubLink } from '../src/github-link.ts';
 import { MachineRelay } from '../src/machines.ts';
+import { poolKey } from '../src/runner-pool.ts';
 
 /** A job as the hub writes it to an agent. */
 type AgentJob = { id: string; op: string; scheme: number; count: number | null; os?: string };
@@ -505,4 +506,13 @@ test("#2064: Citadel's own add needs no member asking; a PC unticked from a sche
   w.answer(true, 'removed');
   assert.equal((await w.jobs.wait(w.scheme.id, 5000))!.ok, true);
   assert.equal(w.notes.length, 1, "Citadel's own job that went through is plumbing: no note; only the failed add above has one");
+});
+
+test('a scheme on the runner pool takes no standing runners by hand: an add is refused, saying how to switch back; a remove still runs (Build 11 P3)', async () => {
+  const w = world();
+  w.store.setSetting(poolKey(w.scheme.id), true);
+  await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows' }), { status: 409, message: /on the runner pool.*switch the pool off/ });
+  assert.equal(w.agent.sent.filter((m) => m.runners).length, 0, 'nothing went to the agent');
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null, os: 'windows' });
+  assert.equal(w.agent.sent.filter((m) => m.runners).at(-1)?.runners.op, 'remove');
 });

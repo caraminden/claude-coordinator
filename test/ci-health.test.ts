@@ -2629,3 +2629,14 @@ test('the chat search for a red reads events by id, not minion by minion, and in
   assert.deepEqual(mark.chat.ids, [t.id]);
   assert.equal(mark.chat.upTo, (prepare('SELECT max(id) AS id FROM events').get() as { id: number }).id);
 });
+
+test("a scheme's standing runners as GitHub last listed them, the runner pool's one-job runners left out (Build 11 P3: the pool starts nothing while any is there)", async () => {
+  const w = world();
+  assert.deepEqual(w.health.standingRegistered(w.peek.id), [], 'unread: none known');
+  w.gh.runners = [desk('offline'), desk('online', 'pool-m1-l1-j42')];
+  await w.health.tick(NOW);
+  assert.deepEqual(w.health.standingRegistered(w.peek.id), ['DESKTOP-G248IJ8-desktop']);
+  w.gh.runners = [];
+  await w.health.tick(NOW + 60_000);
+  assert.deepEqual(w.health.standingRegistered(w.peek.id), []);
+});

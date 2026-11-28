@@ -2347,7 +2347,7 @@ const runnerPool = new RunnerPool({
   now: Date.now,
   // P3: a scheme switched to the pool has its jobs started here, one one-job runner each, once its standing runners are off every PC.
   pooled: (id) => poolOn(store, id),
-  standing: (repo) => (['windows', 'linux'] as const).some((os) => machines.runnerMachines(os).some((m) => ciLoad.standingOn(m.id, os).has(repo.toLowerCase()))),
+  standing: (repo, scheme) => [...(['windows', 'linux'] as const).flatMap((os) => machines.runnerMachines(os).flatMap((m) => (ciLoad.standingOn(m.id, os).has(repo.toLowerCase()) ? [`on ${m.name}`] : []))), ...ciHealth.standingRegistered(scheme).map((n) => `${n} on GitHub`)],
   // A preview runs on a copy of the data: it watches, and never starts a runner on a person's PC.
   ...(PREVIEW || BOOT_CHECK
     ? {}

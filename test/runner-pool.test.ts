@@ -384,7 +384,7 @@ function poolWorld(o: { pooled?: Set<number>; standing?: Set<string>; limit?: nu
     log: (l) => logs.push(l),
     now: () => now,
     pooled: (id) => (o.pooled ?? new Set([TOC])).has(id),
-    standing: (r) => o.standing?.has(r) ?? false,
+    standing: (r) => (o.standing?.has(r) ? ['on cara-desktop'] : []),
     start: (ask) => {
       starts.push({ repo: ask.repo, slot: ask.slot, labels: ask.labels, job: ask.job, machine: ask.machine, os: ask.os });
       return new Promise((resolve, reject) => answers.push((r) => (r instanceof Error ? reject(r) : resolve({ name: '', ...r }))));
@@ -506,16 +506,40 @@ test('a pool scheme whose standing runners are still on a PC starts nothing yet,
   const w = poolWorld({ standing: new Set(['caraminden/theory-of-crafting']) });
   const v = w.pool.pass(w.sight([w.j(w.toc, 11)]));
   assert.equal(w.starts.length, 0);
-  assert.match(v.line[0].why!, /standing runners are still being taken off/);
+  assert.match(v.line[0].why!, /standing runners are still there \(on cara-desktop\); the pool starts its jobs once they're gone/);
   assert.equal(v.line[0].pool, true);
 });
 
-test("which machines could take a pool scheme's jobs: lending it CI and not off", () => {
+test("which machines could take a pool scheme's jobs: lending it CI, not off, and able to run each job it has waiting", () => {
   const w = poolWorld();
   assert.deepEqual(w.pool.able(TOC), ['cara-desktop']);
   assert.deepEqual(w.pool.able(42), []);
+  // A Windows-only PC can't take ToC's waiting Linux job, so ToC isn't fine there; nor is a job that needs a session (P6).
+  w.desk.os = ['windows'];
+  w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  assert.deepEqual(w.pool.able(TOC), []);
+  w.desk.os = ['windows', 'linux'];
+  w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  assert.deepEqual(w.pool.able(TOC), ['cara-desktop']);
+  w.pool.pass(w.sight([w.j(w.toc, 12, { labels: ['self-hosted', 'theory-of-crafting-desktop'] })]));
+  assert.deepEqual(w.pool.able(TOC), []);
+  w.pool.pass(w.sight([]));
   w.desk.off = 'is offline';
   assert.deepEqual(w.pool.able(TOC), []);
+});
+
+test('a runner that took its job but is never seen running on it (too short to read, or its end report lost) gives its room back after a while (Build 11 P3)', () => {
+  const w = poolWorld();
+  w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  assert.equal(w.starts.length, 1);
+  w.pool.onSlot({ runner: 'pool-m1-l1-j11', event: 'took' });
+  // The job is gone from the queued list and was never read in progress; the runner's record keeps its room for now.
+  w.tick(POOL.pollMs);
+  assert.equal(w.pool.pass(w.sight([])).machines[0].used, 4);
+  w.tick(POOL.tookMs);
+  const v = w.pool.pass(w.sight([]));
+  assert.equal(v.machines[0].used, 0);
+  assert.deepEqual(v.machines[0].running, []);
 });
 
 test("the pool's books in the real table: seen, placed, ran, ended, seen again, and each scheme's last start", () => {
@@ -568,7 +592,7 @@ test("/api/ci/pool shows a person only the jobs of the schemes they can see, wit
   const running = (scheme: number) => ({ repo: `r/${scheme}`, scheme, name: `tests ${scheme}`, size: 4, since: NOW, pool: true, starting: false });
   const view = { at: NOW, watching: false, line: [lineJob(1, PEEK), lineJob(2, MANDATE), lineJob(3, PEEK)], machines: [{ id: 1, name: 'cara-desktop', limit: 16, used: 8, free: 8, off: null, running: [running(PEEK), running(MANDATE)] }] };
   const settings = new Map<string, unknown>([[poolKey(PEEK), true]]);
-  const read = async (pool: { view(): typeof view } | undefined) => {
+  const read = async (pool: { view(): typeof view } | undefined, who: 'cara' | 'josh' = 'cara') => {
     const res = {
       body: '',
       headersSent: false,
@@ -580,8 +604,8 @@ test("/api/ci/pool shows a person only the jobs of the schemes they can see, wit
         this.body = b ?? '';
       },
     };
-    const app = { pool, store: { canSee: (_: unknown, scheme: number) => scheme === PEEK, listProjects: () => [{ id: PEEK }, { id: MANDATE }, { id: CITADEL }], getSetting: (k: string) => settings.get(k) ?? null } };
-    await ciPoolRoutes[0].handler({ res, app, session: { name: 'Cara', uid: 1 } } as never);
+    const app = { pool, store: { canSee: (_: unknown, scheme: number) => scheme === PEEK, listProjects: () => [{ id: PEEK }, { id: MANDATE }, { id: CITADEL }], getSetting: (k: string) => settings.get(k) ?? null, getMachine: (id: number) => ({ id, owner_id: 1 }) } };
+    await ciPoolRoutes[0].handler({ res, app, session: { name: who === 'cara' ? 'Cara' : 'Josh', uid: who === 'cara' ? 1 : 2, admin: false } } as never);
     return JSON.parse(res.body);
   };
   const got = await read({ view: () => view });
@@ -598,6 +622,7 @@ test("/api/ci/pool shows a person only the jobs of the schemes they can see, wit
     ],
   );
   assert.deepEqual(got.pooled, [PEEK]);
+  assert.deepEqual((await read({ view: () => view }, 'josh')).machines, [], 'a machine shows only to whom its Machines page does: its owner, and admins');
   assert.equal(await read(undefined), null);
 });
 

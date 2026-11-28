@@ -1,6 +1,7 @@
 // The runner pool (Build 11, src/runner-pool.ts): GET /api/ci/pool, read by the CI page beside /api/ci and by the Machines
 // page; PATCH /api/projects/:project/ci-pool, the per-scheme switch between the pool and standing runners (P3).
 import { HttpError, json, readJson, type Route } from '../http.ts';
+import { managesMachine } from '../access.ts';
 import { poolKey, poolOn } from '../runner-pool.ts';
 
 export const ciPoolRoutes: Route[] = [
@@ -9,8 +10,9 @@ export const ciPoolRoutes: Route[] = [
     path: '/api/ci/pool',
     who: ['person'],
     refuse: 'Only people read the runner pool',
-    // The jobs of the schemes they can see, each with its place in the whole line; each machine's room and what runs there,
-    // another scheme's job by its size only; the schemes they see that are on the pool. Null with no pool.
+    // The jobs of the schemes they can see, each with its place in the whole line; the room and what runs there of each
+    // machine their Machines page shows (their own; an admin's all), another scheme's job by its size only; the schemes they
+    // see that are on the pool. Null with no pool.
     handler: ({ res, app, session }) => {
       const pool = app.pool?.view();
       if (!pool) return json(res, 200, null);
@@ -19,7 +21,12 @@ export const ciPoolRoutes: Route[] = [
         ...pool,
         line: pool.line.filter((j) => sees(j.scheme)),
         total: pool.line.length,
-        machines: pool.machines.map((m) => ({ ...m, running: m.running.map((r) => (sees(r.scheme) ? r : { ...r, repo: '', scheme: 0, name: "another scheme's job" })) })),
+        machines: pool.machines
+          .filter((m) => {
+            const row = app.store.getMachine(m.id);
+            return !!row && managesMachine(session, row);
+          })
+          .map((m) => ({ ...m, running: m.running.map((r) => (sees(r.scheme) ? r : { ...r, repo: '', scheme: 0, name: "another scheme's job" })) })),
         pooled: app.store
           .listProjects()
           .filter((p) => sees(p.id) && poolOn(app.store, p.id))

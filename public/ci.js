@@ -447,6 +447,9 @@ const poolItem = (j) =>
 /** id → the switch a click asked for, shown until the save settles (a failed one rolls back with a toast and Retry). */
 /** @type {Map<number, boolean>} */
 const poolAsked = new Map();
+/** id → the newest click's number: only its answer clears what's shown, so a quick off, on, off doesn't flicker back. */
+/** @type {Map<number, number>} */
+const poolClicks = new Map();
 
 /**
  * @param {CiScheme} s
@@ -464,7 +467,9 @@ const poolSwitch = (s, pool, redraw) => {
       role: 'switch',
       'aria-checked': String(on),
       'aria-label': `Run ${s.name}'s CI jobs on the runner pool`,
-      onclick: () =>
+      onclick: () => {
+        const click = (poolClicks.get(s.id) ?? 0) + 1;
+        poolClicks.set(s.id, click);
         optimistic({
           label: `put ${s.name} on ${on ? 'its standing runners' : 'the runner pool'}`,
           key: `ci-pool:${s.id}`,
@@ -481,11 +486,12 @@ const poolSwitch = (s, pool, redraw) => {
         }).then(
           () => {
             pool.pooled = !on ? [...pool.pooled, s.id] : pool.pooled.filter((x) => x !== s.id);
-            poolAsked.delete(s.id);
+            if (poolClicks.get(s.id) === click) poolAsked.delete(s.id);
             redraw();
           },
           () => {},
-        ),
+        );
+      },
     }),
     h('span', {}, 'Run its jobs on the runner pool'),
   );

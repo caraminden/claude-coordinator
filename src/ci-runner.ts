@@ -11,6 +11,7 @@ import type { GithubLink } from './github-link.ts';
 import type { MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
+import { poolOn } from './runner-pool.ts';
 import { thrown } from './thrown.ts';
 
 /** A self-hosted runner as GitHub lists it: the fields read here, checked before use. */
@@ -451,6 +452,8 @@ export class RunnerJobs {
     if (!auto && (!asker || asker.disabled_at || !this.store.canSee({ uid: asker.id, admin: !!asker.admin }, project.id))) {
       throw new HttpError(403, `Only ${project.name}'s members can change its CI runners, and this ask isn't from one.`);
     }
+    // A scheme on the runner pool (Build 11 P3) is never on standing runners too: ci-auto takes them off, so an add would only flap.
+    if (ask.op === 'add' && poolOn(this.store, project.id)) throw new HttpError(409, `${project.name} runs its CI jobs on the runner pool, so it takes no standing runners. To go back to standing runners, switch the pool off on its CI page.`);
     const by = auto ?? asker?.name ?? '';
     // What GitHub lists before an add: the runners it makes are the ones that aren't there yet, and only those get a role.
     const before = ask.op === 'add' ? await this.tokens.listed(project) : [];

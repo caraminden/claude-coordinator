@@ -41,6 +41,8 @@ export const POOL = {
   reapMs: 2 * 60_000,
   /** A pool runner neither said to have taken a job nor seen on one in this long is forgotten: the agent's reaper stopped it at reapMs. */
   forgetMs: 3 * 60_000,
+  /** A runner that took a job but was never seen on it (its job too short to be read running, or its `ended` lost) is forgotten after this. */
+  tookMs: 10 * 60_000,
   /** A job whose runner didn't start is tried again after this long. */
   startAgainMs: 60_000,
   /** A running run's jobs are read again at least this often when GitHub says the run didn't change (API budget, P0). */
@@ -365,8 +367,11 @@ export interface PoolDeps {
   now(): number;
   /** The scheme's switch is on (poolOn); left out, none is. */
   pooled?(scheme: number): boolean;
-  /** The repo still has standing runners on a PC (src/ci-auto.ts is taking them off): none of its jobs start until they're gone, so a scheme is never on both. */
-  standing?(repo: string): boolean;
+  /**
+   * Where the repo still has standing runners: on a PC, or registered on GitHub (src/ci-auto.ts is taking them off). None of
+   * its jobs start until this is empty, so a scheme is never on both.
+   */
+  standing?(repo: string, scheme: number): string[];
   /** Start one one-job runner (src/runner-slots.ts RunnerSlots.start); rejects, or answers ok false, when it didn't start. Left out, the pool only watches. */
   start?(ask: { repo: string; scheme: number; machine: number; os: Os; slot: number; labels: string[]; job: number }): Promise<{ name: string; ok: boolean; output: string }>;
 }
@@ -392,6 +397,8 @@ export class RunnerPool {
   private started = new Map<string, Started>();
   /** A job whose runner didn't start: not tried again before `until`, and `why` says what went wrong. */
   private failed = new Map<string, { until: number; why: string }>();
+  /** Each scheme's queued jobs' needs at the last look, for able(). */
+  private queued = new Map<number, Needs[]>();
   private current: PoolView = { at: 0, line: [], machines: [], watching: true };
 
   constructor(d: PoolDeps) {
@@ -402,12 +409,14 @@ export class RunnerPool {
     return this.current;
   }
 
-  /** The machines that could take the scheme's jobs now: lending it CI, online and not off. For CI health's "fine" (a pool scheme has no standing runner to be online). */
+  /**
+   * The machines that could take the scheme's jobs now: lending it CI and not off; none when one of its queued jobs fits no
+   * such machine (its OS, or a session P6 starts). For CI health's "fine" (a pool scheme has no standing runner to be online).
+   */
   able(scheme: number): string[] {
-    return this.d
-      .machines()
-      .filter((m) => m.schemes.includes(scheme) && !m.off)
-      .map((m) => m.name);
+    const can = this.d.machines().filter((m) => m.schemes.includes(scheme) && !m.off);
+    const fits = (n: Needs) => n.os !== null && !n.session && can.some((m) => m.os.includes(n.os!));
+    return (this.queued.get(scheme) ?? []).every(fits) ? can.map((m) => m.name) : [];
   }
 
   /** An agent's word on a slot (src/runner-slots.ts onReport): a runner that took its job keeps its room until it is seen running; one that ended or stopped is gone. */
@@ -435,6 +444,7 @@ export class RunnerPool {
     const listed = new Set<string>();
     /** A pool scheme's job that won't start for a reason of its own (the reason shown instead of a place). */
     const held = new Map<string, string>();
+    const queued = new Map<number, Needs[]>();
     for (const j of sight.jobs) {
       const s = this.d.scheme(j.repo);
       if (!s) continue;
@@ -458,9 +468,11 @@ export class RunnerPool {
       }
       if (j.status !== 'queued') continue;
       const pooled = !!this.d.start && (this.d.pooled?.(s.id) ?? false);
-      if (pooled && this.d.standing?.(j.repo)) held.set(key, "its standing runners are still being taken off; the pool starts its jobs once they're gone");
+      const left = pooled ? (this.d.standing?.(j.repo, s.id) ?? []) : [];
+      if (left.length) held.set(key, `its standing runners are still there (${left.join(', ')}); the pool starts its jobs once they're gone`);
       // shortcut: a desktop job's runner needs the owner's logon session, which a slot isn't (src/runner-slots.ts refuses it); P6 starts those.
       else if (pooled && needs.session) held.set(key, 'a desktop job needs a runner in the signed-in session, which the pool starts from P6 on');
+      queued.set(s.id, [...(queued.get(s.id) ?? []), needs]);
       waiting.push({ repo: j.repo, id: j.id, run: j.run, name: j.name, scheme: s.id, ship, first: ship && j.repo === first, since: Number.isFinite(j.created) ? j.created : now, needs, standing: !pooled || held.has(key) });
     }
     // A job no longer listed ended: its run is gone from the queued and running lists, or its run's jobs were read without
@@ -479,8 +491,9 @@ export class RunnerPool {
     const covered = new Map<string, Started>();
     for (const r of [...this.started.values()]) {
       const running = onJob.has(r.name);
-      // Seen on a job that has since ended, or never on one long after the agent's own reaper would have stopped it.
-      if ((r.ran && !running) || (!running && !r.took && now - r.at >= POOL.forgetMs)) {
+      // Seen on a job that has since ended; or never on one long after the agent's own reaper would have stopped it, or (it
+      // took one) after the running jobs' re-reads would have shown it, as for a job too short to be seen or a lost `ended`.
+      if ((r.ran && !running) || (!running && now - r.at >= (r.took ? POOL.tookMs : POOL.forgetMs))) {
         this.started.delete(r.name);
         continue;
       }
@@ -550,6 +563,7 @@ export class RunnerPool {
     });
     const after = usedNow();
     const startingJobs = waiting.filter((j) => covered.has(`${j.repo}#${j.id}`));
+    this.queued = queued;
     this.current = {
       at: now,
       watching: !this.d.start,

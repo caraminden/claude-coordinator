@@ -231,12 +231,12 @@ test('a member with a merged commit reads merged only once its work is finished 
 });
 
 test("a Plot whose branch has shipped and is gone reads a member's own Merged note as shipped, unless it is still at work", async () => {
-  const lead = minion('Plot 8 lead', 8, null, 0); // build/8 never exists: it shipped to main and was deleted
-  const done = minion('Merged then dismissed', 8, null, 0);
-  const dropped = minion('Dismissed without merging', 8, null, 0);
-  const working = minion('Merged but running', 8, null, 0);
-  store.addEvent(done.id, 'note', { text: 'Merged into Plot 8: it. Risk low: small.' });
-  store.addEvent(working.id, 'note', { text: 'Merged into Plot 8: it. Risk low: small.' });
+  const lead = minion('Plot 98 lead', 98, null, 0); // build/8 never exists: it shipped to main and was deleted
+  const done = minion('Merged then dismissed', 98, null, 0);
+  const dropped = minion('Dismissed without merging', 98, null, 0);
+  const working = minion('Merged but running', 98, null, 0);
+  store.addEvent(done.id, 'note', { text: 'Merged into Plot 98: it. Risk low: small.' });
+  store.addEvent(working.id, 'note', { text: 'Merged into Plot 98: it. Risk low: small.' });
   for (const t of [done, dropped, working]) store.joinCabal(t.id, lead.id, p.id, t.title);
   store.updateTicket(done.id, { status: 'closed' });
   store.updateTicket(dropped.id, { status: 'closed' });

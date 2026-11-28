@@ -43,7 +43,8 @@ const OTHER: Record<string, string> = {
 const IN_FLIGHT = new Set(['strayWaits']);
 
 test('every per-minion Map or Set in the runner is saved with its turn, rebuilt, or dropped on purpose', () => {
-  const fields = [...src.matchAll(/^\s+(?:private |readonly )*(\w+) = new (?:Map|Set)<number\b/gm)].map((m) => m[1]);
+  // DeployWaits is a Set<number> that also keeps each entry in settings (#2312).
+  const fields = [...src.matchAll(/^\s+(?:private |readonly )*(\w+)(?: = new (?:Map|Set)<number\b|: DeployWaits;)/gm)].map((m) => m[1]);
   assert.ok(fields.length > 10, `found the fields (${fields.join(', ')})`);
   const unnamed = fields.filter((f) => !(f in SAVED) && !(f in OTHER));
   assert.deepEqual(unnamed, [], 'a per-minion Map or Set a restart would lose: add it to TurnState through saveTurn and restore it in recover(), or say here why it may go');

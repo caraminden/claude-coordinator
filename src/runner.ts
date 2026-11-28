@@ -25,7 +25,7 @@ import { claudeConfigDir, lastEffortLater, mergeTaskmasterMemory, projectSlug, r
 import { Fresh, roleWord, type FreshState } from './fresh.ts';
 import { HeldMail } from './held-mail.ts';
 import { KeepaliveRun } from './keepalive-run.ts';
-import { Closing } from './closing.ts';
+import { Closing, DeployWaits } from './closing.ts';
 import { TurnEvents } from './turn-events.ts';
 import { containerFiles, TurnLaunches } from './launch-build.ts';
 import { TurnRefs } from './turn-refs.ts';
@@ -357,7 +357,7 @@ export class Runner {
   /** Tickets that asked to close when their current turn ends, with the reason they gave. */
   private closing = new Map<number, string | null>();
   /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
-  private deployedMidTurn = new Set<number>();
+  private deployedMidTurn: DeployWaits;
   /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
   private turnFrom = new Map<number, number>();
   /** A sealed minion's state and note when a turn answering a message started: put back at its end, while still sealed (#261). */
@@ -654,6 +654,7 @@ export class Runner {
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
+    this.deployedMidTurn = new DeployWaits(store);
     this.killWaves = new KillWaves(store);
     const self = this;
     this.resumes = new Resumes({

@@ -19,6 +19,8 @@ export const turnKey = (ticketId: number) => `turn:${ticketId}`;
 export const warmKey = (ticket: Ticket) => (ticket.session_id ? `ticket:${ticket.id}` : undefined);
 /** Set when a person writes to a minion waiting in pending-deploy: its deploy then leaves it open. */
 export const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
+/** A minion whose live deploy waits for a turn to end (deployLive): kept so a restart before that end doesn't lose it (#2312). */
+export const DEPLOY_WAIT_PREFIX = 'deploy-live-wait:';
 /** A turn's end-of-turn session save that hasn't finished yet: the config dir it reads, so a restart redoes it (#259). */
 export const savingKey = (ticketId: number) => `saving:${ticketId}`;
 export const commandsKey = (ticketId: number) => `commands:${ticketId}`;

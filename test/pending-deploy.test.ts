@@ -58,12 +58,12 @@ function newTicket(state: Parameters<Store['updateTicket']>[1]['state'] = 'pendi
 }
 
 /** End the running turn: waits for that turn, not for nothing to run, since a queued one may start right after. */
-async function endTurn(id: number, outcome: 'ok' | 'error') {
-  await until('the turn to start', () => followed(runner, id)); // its launch writes its files first (#1808)
-  const live = runnerInsides(runner).turns.get(id);
+async function endTurn(id: number, outcome: 'ok' | 'error', on = runner) {
+  await until('the turn to start', () => followed(on, id)); // its launch writes its files first (#1808)
+  const live = runnerInsides(on).turns.get(id);
   rmSync(join(root, 'release'), { force: true });
   writeFileSync(join(root, 'release'), outcome);
-  await until('the turn to change', async () => runnerInsides(runner).turns.get(id) !== live);
+  await until('the turn to change', async () => runnerInsides(on).turns.get(id) !== live);
   rmSync(join(root, 'release'), { force: true });
 }
 
@@ -161,6 +161,24 @@ test('a message queued behind the turn defers the dismissal to the end of that t
   assert.notEqual(status(id), 'closed');
   await endTurn(id, 'ok');
   assert.equal(status(id), 'closed');
+});
+
+test('a deploy that waits for a queued message outlasts restarts before that turn runs (#1855, #2312)', async () => {
+  // #1855: its deploy went live with a message queued and no turn running, so the dismissal waited for that turn; ten more
+  // deploys restarted the server before the turn ran, and its end dismissed nothing and said nothing.
+  const id = newTicket();
+  runner.queue.put(id, { author: 'Citadel', text: 'Heads-up while your ship waits in line', images: [] });
+  assert.equal(runner.deployLive(id), false, 'waits for the queued message');
+  const next = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
+  next.recover(); // the queued message starts its turn
+  await endTurn(id, 'ok', next);
+  assert.equal(status(id), 'closed');
+  next.detachAll();
 });
 
 test("a held CI run's line is the minion's note in its view, until it is dismissed", () => {

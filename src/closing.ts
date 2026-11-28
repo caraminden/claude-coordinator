@@ -22,8 +22,32 @@ import type { LinePlaces } from './line-place.ts';
 import type { TurnLine } from './turn-line.ts';
 import type { RunsOn } from './runs-on.ts';
 import type { Urgent } from './urgent.ts';
-import { contextKey, windowKey, closeCancelledKey, turnKey, talkedKey, commandsKey } from './turn-keys.ts';
+import { contextKey, windowKey, closeCancelledKey, turnKey, talkedKey, commandsKey, DEPLOY_WAIT_PREFIX } from './turn-keys.ts';
 import type { Broadcast, TurnState } from './runner.ts';
+
+/**
+ * The minions whose live deploy waits for a turn to end (deployLive), each also a setting: a deploy that waited for a
+ * queued message lost its wait to the next restart, and the turn's end dismissed nothing and said nothing (#1855, #2312).
+ */
+export class DeployWaits extends Set<number> {
+  private store: Pick<Store, 'setSetting' | 'deleteSetting' | 'settingKeys'>;
+
+  constructor(store: Pick<Store, 'setSetting' | 'deleteSetting' | 'settingKeys'>) {
+    super();
+    this.store = store;
+    for (const key of store.settingKeys(DEPLOY_WAIT_PREFIX)) super.add(Number(key.slice(DEPLOY_WAIT_PREFIX.length)));
+  }
+
+  override add(ticketId: number) {
+    if (!this.has(ticketId)) this.store.setSetting(DEPLOY_WAIT_PREFIX + ticketId, true);
+    return super.add(ticketId);
+  }
+
+  override delete(ticketId: number) {
+    if (this.has(ticketId)) this.store.deleteSetting(DEPLOY_WAIT_PREFIX + ticketId);
+    return super.delete(ticketId);
+  }
+}
 
 /** What closing a minion needs from the Runner. */
 export interface ClosingDeps {
@@ -225,6 +249,7 @@ export class Closing {
 
   private closedRows(ticketId: number) {
     // Not its budget marks: each is once ever per minion, so a reopen isn't asked and its Taskmaster woken again (2R1).
+    this.d.deployedMidTurn.delete(ticketId);
     for (const key of [contextKey(ticketId), windowKey(ticketId), commandsKey(ticketId), planKey(ticketId), pagePlanKey(ticketId), keepaliveKey(ticketId), askerKey(ticketId)]) this.d.store.deleteSetting(key);
   }
 

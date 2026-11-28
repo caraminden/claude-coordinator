@@ -4,7 +4,7 @@
 # rebased commit to land/<branch>, which starts the shards, and waits for this run on that exact commit; when GitHub hasn't
 # started every shard within LAND_CI_GH_START s or a shard fails before its tests, land.sh cancels the run and starts this
 # workflow on the desktop with where=desktop. The repo variable CI_RUNNER=desktop sends ships' pushes to the desktop
-# outright. When no desktop runner is online or it doesn't answer in time either, land.sh runs the suite on perigee itself.
+# outright. When no desktop runner is registered or none wakes in time either, land.sh runs the suite on perigee itself.
 # A ship's own check (#1567, tools/own-check.sh): before it joins the line, land.sh pushes its rebased commit to
 # check/<branch> while the check runner is free. That run is a ship's run in every step, niced and on the runner with
 # the check label only, so it is never a second land run and never on GitHub's own runners; a green one is the

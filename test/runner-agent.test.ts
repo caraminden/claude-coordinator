@@ -615,6 +615,22 @@ test('a runner with no job after 2 minutes is stopped by its repo, and an agent 
   }
 });
 
+test('a slot started again before a tick saw its last runner end reports that one ended first', async () => {
+  const { f, jobs, watch } = slotWorld();
+  try {
+    await watch.tick();
+    await jobs.handle(start(1, 'pool-m7-w1-aaaaaa'));
+    // Its runner exits within the 15 seconds before the next look, and Citadel starts the slot again.
+    await jobs.handle(start(1, 'pool-m7-w1-bbbbbb'));
+    assert.deepEqual(
+      f.posted.map((p) => `${p.event} ${p.runner}`),
+      ['started pool-m7-w1-aaaaaa', 'ended pool-m7-w1-aaaaaa', 'started pool-m7-w1-bbbbbb'],
+    );
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
 test('an agent killed during a start reports that runner ended at its next start, so Citadel takes it off GitHub', async () => {
   const { f, jobs, watch, make } = slotWorld();
   try {
@@ -663,6 +679,19 @@ test('a copy 25 days past its last good update drains the slots: no start meanwh
     assert.deepEqual(f.ran.slice(-2), ['state', 'update']);
     assert.equal(jobs.busy, null);
     assert.equal(jobs.draining, null);
+    f.ran.length = 0;
+    // With a slot busy again, a failed update's drain waits a day: starts run meanwhile.
+    await jobs.handle(start(4));
+    f.states = [{ repo: 'peek', slot: 4, running: true, job: 'build' }];
+    f.now += COPY_RETRY_MS + 1;
+    await watch.tick();
+    assert.equal(jobs.draining, null);
+    f.now += COPY_EVERY_MS;
+    await watch.tick();
+    assert.match(String(jobs.draining), /draining/);
+    f.states = [{ repo: 'peek', slot: 4, running: false, exit: 0 }];
+    await watch.tick();
+    assert.equal(jobs.draining, null, 'the update ran and failed again, ending the drain');
     f.ran.length = 0;
     f.states = [];
     f.now += COPY_RETRY_MS - 1;

@@ -290,6 +290,9 @@ export class SlotWatch {
       this.save();
       return void this.flush();
     }
+    // The script starts a slot only once its last runner stopped: one still watched here ended before a tick saw it.
+    const last = this.slots[`${repo}/${job.slot}`];
+    if (last) this.report(last, 'ended');
     this.slots[`${repo}/${job.slot}`] = e;
     this.report(e, 'started');
     this.save();
@@ -340,7 +343,8 @@ export class SlotWatch {
       if (!this.copyDue()) return;
       const idle = !Object.keys(this.slots).length && !states.some((s) => s.running);
       if (idle) await this.update();
-      else if (this.now() - this.copied > COPY_MAX_MS && !this.jobs.draining) {
+      // At most one drain a day: one whose update failed (GitHub away) lets starts run until the next day's.
+      else if (this.now() - this.copied > COPY_MAX_MS && this.now() - this.tried > COPY_EVERY_MS && !this.jobs.draining) {
         // No new start until the slots end and the copy updates. shortcut: a slot task the agent doesn't track (its
         // start lost) holds the drain until it ends or a person stops it; upgrade if one shows up.
         this.log(`The runner copy's last update was ${Math.floor((this.now() - this.copied) / 86_400_000)} days ago: draining the slots to update it.`);
@@ -356,7 +360,7 @@ export class SlotWatch {
     return this.now() - this.copied > COPY_EVERY_MS && this.now() - this.tried > COPY_RETRY_MS;
   }
 
-  /** The runner copy at GitHub's newest release, under the job lock, ending a drain; tried again in 10 minutes if it fails. */
+  /** The runner copy at GitHub's newest release, under the job lock, ending a drain; tried again in 10 minutes if it fails (a drain for it, a day later). */
   async update() {
     if (this.jobs.busy) return;
     this.jobs.busy = 'updating the runner copy';

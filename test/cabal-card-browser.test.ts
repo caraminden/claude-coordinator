@@ -12,7 +12,7 @@ const skip = !bin && skipMessage;
 type Card = { open: boolean; rows: number; preview: boolean; height: number };
 
 // Build 10's cabal with a Preview link: its Overseer is its only open minion in the list (one member merged, one
-// building with no row here), so the open card lists the Overseer alone, as the shut one does.
+// building with no row here), and it is the header, not a row (#2277), so the card lists no rows open or shut.
 const STUB = pageStub(
   `
   window.ready = true;
@@ -23,9 +23,11 @@ const STUB = pageStub(
   const cabals = [{ lead: 101, number: 7, title: lead.title, overseer: "Build 10's Overseer", name: 'Build 10', build: 10, members: [member('H1', 'merged', 'merged'), member('H2', 'running', 'building')], finished: 1, done: 'merged', next: 0, spend: 12 }];
   cabals[0].members.forEach((m, i) => { m.id = 200 + i; m.number = 20 + i; });
   window.stubCabals = cabals;
+  // ?waits: a member with a question card waiting on people (#2277).
+  const waiter = { id: 201, project_id: 1, kind: 'ticket', number: 21, title: 'H2 work', status: 'idle', build: 10, updated_at: 0, created_at: 0, open_cards: [{ minion: 201, kind: 'question', what: 'question', label: 'Q', href: '#/p/1/t/21?e=5' }] };
   function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
-    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [lead, other], seen: {}, person_notes: {}, pins: [], cabals: location.search === '?late' && !window.formed ? [] : cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
+    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: location.search === '?waits' ? [lead, other, waiter] : [lead, other], seen: {}, person_notes: {}, pins: [], cabals: location.search === '?late' && !window.formed ? [] : cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
     let m;
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: m[1] === '100' ? coordinator : lead });
@@ -71,14 +73,14 @@ test("a redraw of the list leaves a building member's segment mid-pulse, not bac
   assert.ok(began >= from - 2 && began <= to + 2, `the segment's pulse began where the clock was at the redraw (${Math.round(began)} ms into its turn; the clock was at ${from} to ${to})`);
 });
 
-test('opening a card that has only its Overseer to show moves nothing', { skip }, async () => {
+test('opening a card that has no member rows to show moves nothing', { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
-  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .thread-row')`);
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .cabal-lead')`);
   const measure = `(() => { const c = document.querySelector('.cabal-card'); return { open: c.hasAttribute('data-open'), rows: c.querySelectorAll('.thread-row').length, preview: !!c.querySelector('.cabal-build a'), height: c.getBoundingClientRect().height }; })()`;
   const shut = await page.eval<Card>(measure);
   await page.eval(`document.querySelector('.cabal-toggle').click()`);
   const open = await page.eval<Card>(measure);
-  assert.deepEqual([shut.open, open.open, shut.rows, open.rows, shut.preview], [false, true, 1, 1, true]);
+  assert.deepEqual([shut.open, open.open, shut.rows, open.rows, shut.preview], [false, true, 0, 0, true]);
   assert.equal(open.height, shut.height, 'the same rows at the same height, open or shut');
   // The row under the Preview link starts inside the link's box: the link stays on top, so its whole height takes the tap.
   const hit = `(() => { const a = document.querySelector('.cabal-build a'); const r = a.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.bottom - 2) === a; })()`;
@@ -93,7 +95,7 @@ test('a resync brings the card of a cabal formed while the stream was down', { s
   const page = await browser.page(`${base}?late#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the plain build group to draw', `document.querySelector('.g-build .thread-row') && !document.querySelector('.cabal-card')`);
   await page.eval(`(async () => { window.formed = true; await (await import('./resync.js')).resync(); })()`);
-  assert.equal(await page.eval(`!!document.querySelector('.cabal-card .thread-row') && !document.querySelector('.g-build')`), true, "the build's section is its cabal's card");
+  assert.equal(await page.eval(`!!document.querySelector('.cabal-card') && !document.querySelector('.g-build')`), true, "the build's section is its cabal's card");
 });
 
 // The answer was read before the stream's news of the cabal, and lands after it: the news is the newer of the two.
@@ -105,8 +107,8 @@ test("a resync's answer doesn't take back a card the stream brought meanwhile", 
     window.es.onmessage({ data: JSON.stringify({ type: 'cabals', projectId: 1, cabals: window.stubCabals }) });
     await asked;
   })()`);
-  await waitFor(page, 'the list to redraw', `document.querySelector('.cabal-card .thread-row') || document.querySelector('.g-build .thread-row')`);
-  assert.equal(await page.eval(`!!document.querySelector('.cabal-card .thread-row') && !document.querySelector('.g-build')`), true, 'the card the stream brought stays');
+  await waitFor(page, 'the list to redraw', `document.querySelector('.cabal-card') || document.querySelector('.g-build .thread-row')`);
+  assert.equal(await page.eval(`!!document.querySelector('.cabal-card') && !document.querySelector('.g-build')`), true, 'the card the stream brought stays');
 });
 
 // Cara, 2026-11-27: "the special overseer UI went away". The quick chat switch rebuilt the view without the Plots,
@@ -118,4 +120,13 @@ test("a chat click in the scheme keeps the Plot's card (#2274)", { skip }, async
   await waitFor(page, 'the other chat', `import('/base.js').then((m) => { window.shown = m.view.id; }) && window.shown === 102`);
   assert.equal(await page.eval(`import('/base.js').then((m) => m.view.cabals?.length ?? 0)`), 1);
   assert.ok(await page.eval(`!!document.querySelector('.cabal-card')`));
+});
+
+// #2277: the Overseer is the header, so a member's waiting card shows on the shut card as its chip, and one click opens it.
+test("a member's waiting card is the header's chip on a shut card, and a click opens it", { skip }, async () => {
+  const page = await browser.page(`${base}?waits#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the chip to draw', `document.querySelector('.cabal-lead .card-badge')`);
+  assert.equal(await page.eval(`document.querySelector('.cabal-card').hasAttribute('data-open') || !!document.querySelector('.cabal-card .thread-row')`), false, 'shut: no Overseer row');
+  await page.eval(`window.hashes = []; addEventListener('hashchange', (e) => hashes.push(new URL(e.newURL).hash)); document.querySelector('.cabal-lead .card-badge').click()`);
+  await waitFor(page, 'the card', `hashes.includes('#/p/1/t/21?e=5')`);
 });

@@ -12,8 +12,7 @@ export const openCabals = /** @type {Set<number>} */ (new Set());
 let opening = /** @type {number | null} */ (null);
 
 /**
- * The Overseer's row on a shut card: it carries its members' cards waiting on people as its own (Cara, 2026-11-26: "by
- * default it would just show the overseer"), so the chip says one waits and a click opens the oldest of them all.
+ * The Overseer with its members' cards waiting on people as its own, for the header's chip: a click opens the oldest of them all.
  * @param {Row} lead @param {Row[]} mine
  * @returns {Row}
  */
@@ -42,9 +41,10 @@ function liveMember(m, t) {
  * @param {BuildHeader | undefined} o.build its build branch's standing
  * @param {boolean} o.preview whether the build branch's preview is linked
  * @param {(t: Row) => HTMLElement} o.row
+ * @param {(cards: NonNullable<Row['open_cards']>, theirs: boolean) => Node | string} o.badge the list's chip for waiting cards, grey-violet when none is yours: a click opens the oldest
  * @param {() => void} o.redraw
  */
-export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw }) {
+export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, redraw }) {
   const open = openCabals.has(c.lead);
   const waiting = mine.filter((t) => t.open_cards?.length).length;
   const yours = mine.filter((t) => cardsYours(t).length).length;
@@ -52,6 +52,9 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
   if (fresh) opening = null;
   const lead = rows.find((t) => t.id === c.lead);
   const leadTicket = tickets.get(c.lead) ?? lead;
+  // The Overseer is the header, not a second row (Cara, 2026-11-27: "probably the header is good enough?"): its state and every waiting card show there.
+  const cards = leadTicket ? (overseerRow(leadTicket, mine).open_cards ?? []) : [];
+  const members = rows.filter((t) => t.id !== c.lead);
   const unstarted = c.members.filter((m) => m.id == null || m.scheme); // another scheme's members aren't in this list: named here
   const started = c.members.some((m) => m.state !== 'roster');
   const toggle = () => {
@@ -72,6 +75,14 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
         h(leadTicket ? 'a' : 'span', { class: 'cabal-name', ...(leadTicket ? { href: threadHref(leadTicket), title: `Open ${c.overseer}'s chat` } : {}) }, h('span', { class: 'cabal-tag' }, c.overseer), h('span', { class: 'cabal-title' }, h('b', {}, c.title), ' ', h('span', { class: 'num' }, `#${c.number}`))),
         h('button', { type: 'button', class: 'cabal-toggle', 'aria-expanded': String(open), 'aria-label': open ? 'Shut the box of members' : 'Open the box of members', title: open ? 'Shut the box of members' : 'Open the box of members', onclick: toggle }, h('span', { class: 'cabal-arrow', 'aria-hidden': 'true' })),
       ),
+      leadTicket
+        ? h(
+            'div',
+            { class: 'cabal-lead' },
+            h('span', { class: 'cabal-state', 'data-s': leadTicket.status === 'running' ? 'running' : 'idle' }, h('i', { 'aria-hidden': 'true' }), leadTicket.status === 'running' ? 'Working' : 'Idle'),
+            cards.length ? badge(cards, !cardsYours({ ...leadTicket, open_cards: cards }).length) : '',
+          )
+        : '',
       c.members.length
         ? h(
             'span',
@@ -97,16 +108,16 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
       ),
     ),
     build ? h('p', { class: 'cabal-build' }, `${build.behind} behind main`, preview ? [' · ', h('a', { href: `../preview/build/${build.build}/`, target: '_blank', rel: 'noopener', title: `build/${build.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
-    open
+    open && (members.length || unstarted.length)
       ? h(
           'div',
           { class: `cabal-members${fresh ? ' opening' : ''}` },
-          rows.map(row),
-          unstarted.map((m) => h('p', { class: 'cabal-planned' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
+          members.map(row),
+          unstarted.map((m) => h('p', { class: 'cabal-planned', title: 'Planned: not started yet' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
         )
       : // A filter that hides the Overseer but matches a member shows that member, not an empty card.
-        rows.length
-        ? h('div', { class: 'cabal-members' }, lead ? row(overseerRow(lead, mine)) : rows.map(row))
+        !lead && members.length
+        ? h('div', { class: 'cabal-members' }, members.map(row))
         : '',
   );
 }

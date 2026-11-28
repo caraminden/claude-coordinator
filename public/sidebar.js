@@ -221,6 +221,7 @@ function cabalSection({ cabal, rows, mine }, current) {
       build: view.builds?.find((b) => b.build === cabal.build),
       preview: !!view.buildPreviews,
       row: (t) => threadRow(t),
+      badge: (cards, theirs) => cardBadge(cards, null, theirs),
       redraw: renderSidebar,
     }),
   );

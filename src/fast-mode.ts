@@ -105,6 +105,8 @@ export const ESCALATE_MS = 30 * 60_000;
 /** The most commits a red's range is pinned through; a longer one goes to the Taskmaster unpinned. */
 export const PIN_MAX = 8;
 /** A quick top waits this long for the next full train's run to count before it gets one of its own, the line busy or not. */
+/** The quick scheme's files pinned at once: tools/land/behind.sh's LAND_VERIFY_MAX, as many as it runs alone in one run. */
+const ALONE_MAX = 6;
 export const QUICK_WAIT_MS = 30 * 60_000;
 // shortcut: every scheme's branch is main, as land.sh's BRANCH default; read land.local.sh's BRANCH if one moves.
 const BRANCH = 'main';
@@ -341,7 +343,7 @@ export class FastMode {
         // The next full train's run was red on these, and they fail alone on main's tip, this top: pinned with no run of its own.
         this.markDone(s, l.top);
         const known = new Set(s.reds.flatMap((e) => e.ids));
-        const fresh = l.red.filter((id) => !known.has(id));
+        const fresh = l.red.filter((id) => !known.has(id)).slice(0, ALONE_MAX); // train_main_red runs at most 6 alone
         if (!fresh.length) continue;
         s.pin = { head: l.top, shas: [l.base, ...l.tops], next: 0, ids: fresh, at: this.now(), output: `${fresh.join(', ')} failed in the next full train's CI run and alone on ${l.top.slice(0, 12)}, the quick train's top.`, quick };
         return this.start(projectId, repo, s, l.base);
@@ -458,8 +460,10 @@ export class FastMode {
     if (!fresh.length) return; // red only on known ids: blame nobody
     const named = fresh.filter((id) => !UNNAMED.includes(id));
     if (!named.length) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, a quick train's top, with no test file to name`, undefined, quick);
+    // shortcut: past ALONE_MAX files the rest go to the Taskmaster unpinned (one run alone takes that many); batch them if it's common.
+    if (named.length > ALONE_MAX) await this.open(projectId, repo, s, sha, named.slice(ALONE_MAX), output, `on ${sha.slice(0, 12)}, a quick train's top, with more than ${ALONE_MAX} files failing: the first ${ALONE_MAX} are pinned, these aren't`, undefined, quick);
     const tops = Object.keys(quick.owners);
-    s.pin = { head: sha, shas: [quick.base, ...(tops.includes(sha) ? tops : [...tops, sha])], next: 0, ids: named, at: this.now(), output: tailOf(output), quick };
+    s.pin = { head: sha, shas: [quick.base, ...(tops.includes(sha) ? tops : [...tops, sha])], next: 0, ids: named.slice(0, ALONE_MAX), at: this.now(), output: tailOf(output), quick };
   }
 
   /** A culprit's recheck: its ids that passed alone on its ship's commit leave the ledger; no verdict keeps them all

@@ -182,6 +182,18 @@ test('two failing files, each blamed on the first ship it fails on', async () =>
   assert.equal(w.runs.length, 4);
 });
 
+test('more than 6 failing files: the first 6 are pinned, the rest go to the Taskmaster at once', async () => {
+  const w = world();
+  w.quickTrain();
+  await w.tick();
+  const ids = Array.from({ length: 8 }, (_, i) => `test/f${i}.test.ts`);
+  await w.finish(red(...ids));
+  assert.equal(w.runs[1].env.LAND_VERIFY_IDS, ids.slice(0, 6).join('\n'));
+  assert.equal(w.tm.length, 1);
+  assert.match(w.tm[0], /more than 6 files failing/);
+  assert.match(w.tm[0], /test\/f7\.test\.ts/);
+});
+
 test("no pin: a red on the base was main's before the quick train, and a red naming no file, both go to the Taskmaster at once", async () => {
   const w = world();
   w.quickTrain();

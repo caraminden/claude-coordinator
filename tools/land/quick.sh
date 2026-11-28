@@ -177,7 +177,8 @@ quick_check_run() (
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "none: CI's side runner isn't registered"; exit 0; }
   wt=$(mktemp -d "${TMPDIR:-/tmp}/land-quick-check.XXXXXX") || { echo "none: no scratch folder"; exit 0; }
   done_() { git worktree remove --force "$wt" >/dev/null 2>&1 || true; rmdir "$wt" 2>/dev/null || true; rm -f "$wt.out" "$wt.why"; }
-  trap '[ -z "$pid" ] || { kill -TERM "$pid" 2>/dev/null; wait "$pid"; }; done_; exit 143' TERM INT HUP
+  # Under set -e, the killed run's wait must not end the trap before its cleanup.
+  trap '[ -z "$pid" ] || { kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null || true; }; done_; exit 143' TERM INT HUP
   git worktree add -q --detach "$wt" "$top" >/dev/null 2>&1 || { done_; echo "none: no scratch worktree"; exit 0; }
   # One at a time on the side runner, with the light checks (tools/light-check.sh).
   if ! { exec 4>"$state/light-check.lock" && flock -w "${LAND_LIGHT_CHECK_LOCK_WAIT:-300}" 4; }; then
@@ -221,7 +222,8 @@ quick_wait() {
       quick_stop
       quick_checked=$q_top
       rm -f "$state/quick-verdict"
-      (quick_check_run "$q_top" "$q_base" | sed "s/^/$q_top /" >"$state/quick-verdict.tmp$$" &&
+      # Its own TERM trap, and no pipe: a stop prints no job line into the ship's output.
+      (trap 'exit 143' TERM; v=$(quick_check_run "$q_top" "$q_base") && echo "$q_top $v" >"$state/quick-verdict.tmp$$" &&
         mv -f "$state/quick-verdict.tmp$$" "$state/quick-verdict") </dev/null 9>&- 7>&- 6>&- 5>&- 4>&- &
       quick_pid=$!
     fi

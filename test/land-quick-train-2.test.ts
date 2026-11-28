@@ -1,11 +1,13 @@
 // The gap train (#2243, tools/land/quick.sh), part 2 of 2: a red quick check, the full run kept, an empty line, and
 // at most one quick train between full ones. The shared setup is in land-quick-train-setup.ts.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { git, landAsync } from './land-fixture.ts';
 import { line } from './land-train-fixture.ts';
+import { until } from './wait.ts';
 import { retro } from './land-train-early-setup.ts';
 import { mixed, on, quick, quickCalls } from './land-quick-train-setup.ts';
 
@@ -94,5 +96,35 @@ test('gap train: LAND_QUICK_MAX caps a quick train at that many ships, its front
   assert.match(done[1].stderr, /land: quick train: ticket\/5-x goes right after this train, on a quick check/);
   assert.doesNotMatch(done[5].stderr, /it was a quick train/);
   assert.deepEqual(l.subjects().slice(0, 5), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f5.txt: 5']);
+  l.done();
+});
+
+test("gap train: a second quick check that isn't green sends what is left to CI as a full train, its riders kept on it", async () => {
+  // 5, 6 and 8 qualify (7 is sensitive): 6 changed the first red's file and leaves; 5 and 8, checked again, aren't green.
+  const l = await line([...mixed, { env: low }], (d) => ({ ...quick(d), LAND_QUICK_MAX: '3', FAKE_QUICK_OUT_1: 'light check: red: f6.txt', FAKE_QUICK_OUT_2: 'light check: red: f9.txt' }), on);
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[4].stderr, /land: quick train: checked again without the ships it pointed at, it wasn't green/);
+  assert.match(done[7].stderr, /shipped in ticket\/5-x's ship train of 2 ships/);
+  assert.doesNotMatch(done[7].stderr, /back in line on its own/);
+  assert.doesNotMatch(done[4].stderr, /no CI run: a quick train/);
+  l.done();
+});
+
+test('gap train: turned off while its front waits on a running check, the check stops, leaves nothing behind, and the front goes on as a full one', async () => {
+  const l = await line(mixed, (d) => ({ ...quick(d), FAKE_QUICK_SLEEP: '60' }), on);
+  const shipping = l.go();
+  await until('the quick check running', () => quickCalls(l.r.dir).length === 1);
+  rmSync(join(l.state, 'quick-train-on'));
+  const done = await shipping;
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.doesNotMatch(done.map((d) => d.stderr).join('\n'), /no CI run: a quick train/);
+  assert.match(done[4].stderr, /quick train: its plan went, so ticket\/5-x is back in line|land: rebasing ticket\/5-x/);
+  assert.deepEqual(
+    readdirSync(tmpdir()).filter((f) => f.startsWith('land-quick-check.')),
+    [],
+    'the stopped check left no scratch worktree',
+  );
+  assert.equal(quickCalls(l.r.dir).length, 1);
   l.done();
 });

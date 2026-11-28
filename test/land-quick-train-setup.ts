@@ -24,6 +24,7 @@ if [ -n "$s" ]; then echo "not: sensitive: test ($s)"; elif [ "$risk" != low ]; 
 n=$(($(wc -l <"${join(d, 'quick-calls')}" 2>/dev/null || echo 0) + 1))
 echo "head $(git log -1 --format=%s) $(git rev-parse HEAD) args $*" >>"${join(d, 'quick-calls')}"
 v=FAKE_QUICK_OUT_$n
+sleep "\${FAKE_QUICK_SLEEP:-0}"
 printf '%b\\n' "\${!v:-\${FAKE_QUICK_OUT:-light check: green}}"
 `,
     { mode: 0o755 },

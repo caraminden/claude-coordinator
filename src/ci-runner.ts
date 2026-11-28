@@ -11,7 +11,6 @@ import type { GithubLink } from './github-link.ts';
 import type { MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
-import { poolOn } from './runner-pool.ts';
 import { thrown } from './thrown.ts';
 
 /** A self-hosted runner as GitHub lists it: the fields read here, checked before use. */
@@ -59,6 +58,15 @@ export function schemeLabels(schemeName: string): string[] {
 }
 
 /** The scheme a caller names: its id, its name (any case) or its label's slug. Throws a 409 when that names more than one. */
+/**
+ * The per-scheme switch (Plot 11, P3): a scheme whose setting is on has its CI jobs started by the runner pool
+ * (src/runner-pool.ts), one one-job runner each, and takes no standing runners; off, the default, it keeps them. A setting,
+ * not a column: P6 moves every scheme over and P7 drops it. Here, not in runner-pool.ts, because runner-pool imports
+ * heavy-place, which imports this file: a loop that left HEAVY_SIZES unset when heavy-place loaded first.
+ */
+export const poolKey = (scheme: number) => `ci_pool:${scheme}`;
+export const poolOn = (store: { getSetting<T>(key: string): T | null }, scheme: number) => store.getSetting<boolean>(poolKey(scheme)) === true;
+
 export function findScheme(store: Store, ref: unknown): Project | undefined {
   if (typeof ref === 'number' || (typeof ref === 'string' && /^\d+$/.test(ref))) return store.getProject(Number(ref));
   if (typeof ref !== 'string' || !ref.trim()) return undefined;

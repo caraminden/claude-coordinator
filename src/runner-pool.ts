@@ -21,13 +21,8 @@ import type { PoolSight } from './ci-ships.ts';
 import type { PoolLook, PoolRow } from './db/runner-pool.ts';
 import { poolName, slotPrefix, MAX_SLOTS, type SlotReport } from './runner-slots.ts';
 
-/**
- * The per-scheme switch (P3): a scheme whose setting is on has its CI jobs started by the pool, one one-job runner each, and
- * its standing runners taken off (src/ci-auto.ts); off, the default for every scheme, it keeps its standing runners. A
- * setting, not a column: P6 moves every scheme over and P7 drops the switch.
- */
-export const poolKey = (scheme: number) => `ci_pool:${scheme}`;
-export const poolOn = (store: { getSetting<T>(key: string): T | null }, scheme: number) => store.getSetting<boolean>(poolKey(scheme)) === true;
+/** The per-scheme switch, kept in src/ci-runner.ts (out of an import loop); its callers import it from here too. */
+export { poolKey, poolOn } from './ci-runner.ts';
 
 /** The pool's numbers, in one place: starting values (#2264), changed only here. */
 export const POOL = {

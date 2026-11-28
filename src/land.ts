@@ -975,7 +975,13 @@ export class LandHandoffs {
         text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${formatted ? ` The ship script formatted ${formatted[1]} of its files in a commit of its own ${formatted[2]}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${through ? ` Shipped through main's red on ${through}: main still needs a fix for it.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}`,
       }),
     );
-    await once('ticked', () => runner.tickShipped?.(id));
+    await once('ticked', () => {
+      try {
+        runner.tickShipped?.(id);
+      } catch (err) {
+        console.error(`[land] minion ${id}: ticking its ship step failed:`, err); // cosmetic: nothing here can stop the ship (#1119)
+      }
+    });
     await faultPoint('ship-noted'); // a drill's kill between the shipped line and the hand-off's rename (C2)
     await once('woke', () => this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`));
     const t = store.getTicket(id);

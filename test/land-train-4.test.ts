@@ -67,42 +67,30 @@ test('a failing test that fails alone here pins the ship that turns it red: the 
   l.done();
 });
 
-// A guard test that scans files rather than importing them (test/one-pacific.test.ts on Nov 20, 23:03 PST): the files
-// guess can never name a ship for it, but run alone here on the train's prefixes it still names the one that turns it red.
-test('a guard that names the file behind its failure: the ship that changed that file is the suspect, not the one that changed what the guard reads (#1451)', async () => {
-  const l = await line([{}, {}, { change: ['test/flake-baseline.json', '{"a":2}\n'] }, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, {}], { FAKE_RED_PATH: 'test/loop-lag.test.ts', FAKE_RED_NAMES: 'loop-lag.test.ts:22 5 `sleep` hits, the baseline allows 3' }, (r) => {
-    mkdirSync(join(r.source, 'test'), { recursive: true });
-    writeFileSync(join(r.source, 'test', 'flake-baseline.json'), '{"a":1}\n');
-    r.commit(r.source, 'test/real.test.ts', "import { readFileSync } from 'node:fs';\nreadFileSync('test/flake-baseline.json');\n");
-  });
-  const done = await l.go();
-  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts; a guess/);
-  assert.doesNotMatch(done[1].stderr, /#3 \(|bisect/, 'the ship that changed the baseline is no suspect');
-  assert.equal(done[3].status, 1, done[3].stderr);
-  for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
-  l.done();
-});
-
-// #1538 (from #1488, bounced twice on Nov 21): test/judges.test.ts goes red when a judge's pinned code changed without a
-// re-recorded replay, and says which files are pinned. The ship that changed one of those is the suspect, not the one that
-// only edited judges.test.ts (or its replay record).
-test('a judge-replay red names the pinned code: the ship that changed it is the suspect, not the one that re-recorded the replay file the test reads (#1538)', async () => {
-  const l = await line(
-    [{}, {}, { change: ['test/judge-replays.json', '{"a":2}\n'] }, { change: ['test/pinned-judge.ts', 'export const X = 2;\n'] }, {}],
-    { FAKE_RED_PATH: 'test/pinned-judge.ts', FAKE_REAL_FILE: 'test/judges.test.ts', FAKE_RED_NAMES: 'the flake counter code changed since its last replay (pinned code: test/pinned-judge.ts)' },
-    (r) => {
+// A red that names the file behind it: the ship that changed that file is the suspect, not the one that changed only
+// what the red test reads, so no bisect runs. A guard that scans files rather than importing them (#1451:
+// test/one-pacific.test.ts on Nov 20, 23:03 PST), where the files guess can never name a ship but run alone here on the
+// train's prefixes it still names the one that turns it red; and a judge-replay red (#1538, from #1488, bounced twice on
+// Nov 21): test/judges.test.ts goes red when a judge's pinned code changed without a re-recorded replay, and says which
+// files are pinned.
+for (const [what, read, reader, culprit, env] of [
+  ['a guard that names the file behind its failure (#1451)', 'test/flake-baseline.json', 'test/real.test.ts', 'test/loop-lag.test.ts', { FAKE_RED_NAMES: 'loop-lag.test.ts:22 5 `sleep` hits, the baseline allows 3' }],
+  ['a judge-replay red that names the pinned code (#1538)', 'test/judge-replays.json', 'test/judges.test.ts', 'test/pinned-judge.ts', { FAKE_REAL_FILE: 'test/judges.test.ts', FAKE_RED_NAMES: 'the flake counter code changed since its last replay (pinned code: test/pinned-judge.ts)' }],
+] as const) {
+  test(`${what}: the ship that changed that file is the suspect, not the one that changed the file the test reads`, async () => {
+    const l = await line([{}, {}, { change: [read, '{"a":2}\n'] }, { change: [culprit, '// changed\n'] }, {}], { FAKE_RED_PATH: culprit, ...env }, (r) => {
       mkdirSync(join(r.source, 'test'), { recursive: true });
-      writeFileSync(join(r.source, 'test', 'judge-replays.json'), '{"a":1}\n');
-      r.commit(r.source, 'test/judges.test.ts', "import { readFileSync } from 'node:fs';\nreadFileSync('test/judge-replays.json');\n");
-    },
-  );
-  const done = await l.go();
-  assert.match(done[1].stderr, /suspects: #4 \(test\/judges\.test\.ts; a guess/);
-  assert.doesNotMatch(done[1].stderr, /#3 \(|bisect/, 'the ship that only edited the judge test is no suspect');
-  assert.equal(done[3].status, 1, done[3].stderr);
-  for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
-  l.done();
-});
+      writeFileSync(join(r.source, read), '{"a":1}\n');
+      r.commit(r.source, reader, `import { readFileSync } from 'node:fs';\nreadFileSync('${read}');\n`);
+    });
+    const done = await l.go();
+    assert.match(done[1].stderr, new RegExp(`suspects: #4 \\(${reader.replaceAll('.', '\\.')}; a guess`));
+    assert.doesNotMatch(done[1].stderr, /#3 \(|bisect/, 'the ship that changed only what the test reads is no suspect');
+    assert.equal(done[3].status, 1, done[3].stderr);
+    for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+    l.done();
+  });
+}
 
 test('a scan-style guard test that imports nothing still pins the ship that turns it red, with no bisect (#1403)', async () => {
   const l = await line([{}, {}, { change: ['public/other.js', 'x\n'] }, { change: ['public/sidebar.js', "const at = 'props.propose';\n"] }, {}], { FAKE_RED_TEXT: 'props.propose' }, (r) => {

@@ -277,48 +277,47 @@ test('a red with no rerun labels (too many files failed) refuses at once, and a 
   assert.equal(c2.localRuns(), 1, 'the fallback suite here had to pass');
 });
 
-// #1377 (#1372's report: run 44859457680 was interrupted at 55 s with no failing test, and a bisect refused #1302 for
-// it): a run cut off from outside says nothing about the commit. It gets one fresh run; cut off again, it is no answer.
-test('a run cut off before any test failed is no verdict: one fresh run decides, and a second cut-off is no answer', () => {
-  const r = setup();
-  const c = ci(r);
-  r.commit(r.wt, 'b.txt', 'mine\n');
-  const shared = join(r.dir, 'shared');
-  let res = c.run({ FAKE_CUT: '0 1', COORDINATOR_SHARED_DIR: shared });
-  assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /the CI run on \w+ was cut off before any test failed \(https:\/\/ci\/7\), so it says nothing about this commit: running CI once more\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
-  assert.doesNotMatch(res.stderr, /CI FALLBACK|tests failed/);
-  assert.match(landLog(shared), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · green$/m);
-  assert.equal(
-    c
-      .calls()
-      .split('\n')
-      .filter((l) => l.includes('/actions/runners ')).length,
-    2,
-  );
-  assert.equal(c.localRuns(), 0);
-  assert.equal(c.refs(), '');
-
-  // Both cut off: no answer, so it falls back to the suite here, as for any CI that can't answer.
-  const r2 = setup();
-  const c2 = ci(r2);
-  r2.commit(r2.wt, 'b.txt', 'mine\n');
-  const shared2 = join(r2.dir, 'shared');
-  res = c2.run({ FAKE_CUT: '0 2', COORDINATOR_SHARED_DIR: shared2 });
-  assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: CI was cut off twice before any test failed \(https:\/\/ci\/7, https:\/\/ci\/8\)/);
-  assert.doesNotMatch(res.stderr, /tests failed/);
-  assert.match(landLog(shared2), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · no answer$/m);
-  assert.equal(
-    c2
-      .calls()
-      .split('\n')
-      .filter((l) => l.includes('/actions/runners ')).length,
-    2,
-    'never a third run',
-  );
-  assert.equal(c2.localRuns(), 1, 'the fallback suite here had to pass');
-});
+// One rule, four ways a run is lost: a run cut off from outside (#1377, #1372's report: run 44859457680 was interrupted
+// at 55 s with no failing test, and a bisect refused #1302 for it), one killed from outside (#1393: exit 137, the
+// desktop's out-of-memory killer, as run-tests.sh's killed line or only GitHub's exit 137 line when the whole step was
+// killed) and one whose runner went away (#1864, DR1: no step failed). None says anything about the commit: it gets one
+// fresh run, and lost again it is no answer, so the suite here decides as for any CI that can't answer.
+const lostRun = (lost: string) => `the CI run on \\w+ ${lost} \\(https://ci/7\\), so it says nothing about this commit: running CI once more`;
+for (const [kind, cut, lost, fallback] of [
+  ['interrupt', '0 1', 'was cut off before any test failed', ''],
+  ['interrupt', '0 2', 'was cut off before any test failed', 'CI was cut off twice before any test failed \\(https://ci/7, https://ci/8\\)'],
+  ['killed', '0 1', 'was cut off before any test failed', ''],
+  ['bare', '0 1', 'was cut off before any test failed', ''],
+  ['lost', '0 1', 'lost its runner before any step failed', ''],
+  ['lost', '0 2', 'lost its runner before any step failed', "CI's one fresh run lost its runner before any step failed \\(https://ci/8\\), after one that lost its runner before any step failed \\(https://ci/7\\)"],
+] as const) {
+  test(`a CI run lost before any test failed (${kind}, ${cut === '0 1' ? 'once' : 'twice'}) is no verdict: one fresh run decides, and a second lost one is no answer`, () => {
+    const r = setup();
+    const c = ci(r);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const shared = join(r.dir, 'shared');
+    const res = c.run({ FAKE_CUT: cut, FAKE_CUT_KIND: kind, COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, new RegExp(lostRun(lost)));
+    assert.doesNotMatch(res.stderr, /tests failed|a test hung/);
+    if (fallback) assert.match(res.stderr, new RegExp(`CI FALLBACK: ${fallback}`));
+    else {
+      assert.match(res.stderr, /running CI once more\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
+      assert.doesNotMatch(res.stderr, /CI FALLBACK/);
+    }
+    assert.match(landLog(shared), new RegExp(`· cut-off rerun · ticket/1-x · https://ci/7 · ${fallback ? 'no answer' : 'green'}$`, 'm'));
+    assert.equal(
+      c
+        .calls()
+        .split('\n')
+        .filter((l) => l.includes('/actions/runners ')).length,
+      2,
+      'one fresh run, never a third',
+    );
+    assert.equal(c.localRuns(), fallback ? 1 : 0, 'the fallback suite here had to pass, and only on no answer');
+    if (!fallback) assert.equal(c.refs(), '');
+  });
+}
 
 test('a hang run-tests.sh stopped prints the same interrupt but is a real red: refused, not run again', () => {
   const r = setup();
@@ -337,42 +336,6 @@ test('a hang run-tests.sh stopped prints the same interrupt but is a real red: r
     1,
   );
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
-});
-
-// #1393: a run killed from outside (exit 137, the desktop's out-of-memory killer) before any test failed is a lost run,
-// as #1377's cut-off one: run-tests.sh's killed line, or only GitHub's exit 137 line when the whole step was killed.
-test('a CI run killed from outside before any test failed is no verdict: one fresh run decides', () => {
-  for (const kind of ['killed', 'bare']) {
-    const r = setup();
-    const c = ci(r);
-    r.commit(r.wt, 'b.txt', 'mine\n');
-    const shared = join(r.dir, 'shared');
-    const res = c.run({ FAKE_CUT: '0 1', FAKE_CUT_KIND: kind, COORDINATOR_SHARED_DIR: shared });
-    assert.equal(res.status, 0, `${kind}: ${res.stderr}`);
-    assert.match(res.stderr, /the CI run on \w+ was cut off before any test failed \(https:\/\/ci\/7\), so it says nothing about this commit: running CI once more\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s, kind);
-    assert.doesNotMatch(res.stderr, /CI FALLBACK|tests failed|a test hung/, kind);
-    assert.match(landLog(shared), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · green$/m, kind);
-  }
-});
-
-// #1864 (DR1): a runner that went away fails its job with no step of it failed, so the red says nothing about the commit.
-test('a CI run that lost its runner is no verdict: one fresh run decides, and a second lost one is no answer', () => {
-  for (const [cut, result, fallback] of [
-    ['0 1', 'green', 0],
-    ['0 2', 'no answer', 1],
-  ] as const) {
-    const r = setup();
-    const c = ci(r);
-    r.commit(r.wt, 'b.txt', 'mine\n');
-    const shared = join(r.dir, 'shared');
-    const res = c.run({ FAKE_CUT: cut, FAKE_CUT_KIND: 'lost', COORDINATOR_SHARED_DIR: shared });
-    assert.equal(res.status, 0, res.stderr);
-    assert.match(res.stderr, /the CI run on \w+ lost its runner before any step failed \(https:\/\/ci\/7\), so it says nothing about this commit: running CI once more/);
-    assert.doesNotMatch(res.stderr, /tests failed/);
-    if (fallback) assert.match(res.stderr, /CI FALLBACK: CI's one fresh run lost its runner before any step failed \(https:\/\/ci\/8\), after one that lost its runner before any step failed \(https:\/\/ci\/7\)/);
-    assert.match(landLog(shared), new RegExp(`· cut-off rerun · ticket/1-x · https://ci/7 · ${result}$`, 'm'));
-    assert.equal(c.localRuns(), fallback);
-  }
 });
 
 test("a question about a red run that GitHub misses is asked again: the run's own step still decides", () => {

@@ -6,33 +6,24 @@ import { ci, quietProc } from './land-fixture.ts';
 import { line, shipped } from './land-train-fixture.ts';
 import { busy } from './land-train-riders-setup.ts';
 
-// #1377: on Nov 20 a bisect refused #1302 for a run interrupted at 55 s with no failing test (#1372's report).
-test('a bisect run cut off twice before any test failed refuses nobody: the train goes back in line, and only a real red refuses', async () => {
-  // Ship 1's run and the red train's are real; every run of the bisect's first look (the front alone) is cut off: the
-  // one GitHub lists for it, the run pushed for it and its one fresh run.
-  const l = await line([{}, {}, {}, { change: ['red.txt', 'red\n'] }], { FAKE_RED_PATH: 'red.txt', FAKE_CUT: '2 3' });
-  const done = await l.go();
-  assert.match(done[1].stderr, /finding the first ship that turned it red.*cut off before any test failed \(https:\/\/ci\/\d+\).*the ship train goes back in line, since CI gave no answer \(CI was cut off twice before any test failed \(https:\/\/ci\/\d+, https:\/\/ci\/\d+\)\)/s);
-  assert.doesNotMatch(done[1].stderr, /tested green|found .* itself red/, 'the cut-off bisect named nobody');
-  for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
-  // Ship 4 is refused only later, by a run that really failed.
-  assert.equal(done[3].status, 1, done[3].stderr);
-  assert.doesNotMatch(done[3].stderr, /cut off/);
-  assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/);
-  l.done();
-});
-
-// #1393: the same for runs killed from outside (exit 137) before any test failed: no answer, so nobody is refused for it.
-test('a bisect run killed from outside twice before any test failed refuses nobody: only a real red refuses', async () => {
-  const l = await line([{}, {}, {}, { change: ['red.txt', 'red\n'] }], { FAKE_RED_PATH: 'red.txt', FAKE_CUT: '2 3', FAKE_CUT_KIND: 'killed' });
-  const done = await l.go();
-  assert.match(done[1].stderr, /finding the first ship that turned it red.*cut off before any test failed.*the ship train goes back in line, since CI gave no answer \(CI was cut off twice before any test failed/s);
-  assert.doesNotMatch(done[1].stderr, /tested green|found .* itself red|a test hung/);
-  for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
-  assert.equal(done[3].status, 1, done[3].stderr);
-  assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/);
-  l.done();
-});
+// A bisect run lost before any test failed says nothing about the ship it tests: cut off (#1377: on Nov 20 a bisect
+// refused #1302 for a run interrupted at 55 s with no failing test, #1372's report) or killed from outside, exit 137
+// (#1393). Ship 1's run and the red train's are real; every run of the bisect's first look (the front alone) is lost:
+// the one GitHub lists for it, the run pushed for it and its one fresh run.
+for (const kind of ['interrupt', 'killed']) {
+  test(`a bisect run lost twice before any test failed (${kind}) refuses nobody: the train goes back in line, and only a real red refuses`, async () => {
+    const l = await line([{}, {}, {}, { change: ['red.txt', 'red\n'] }], { FAKE_RED_PATH: 'red.txt', FAKE_CUT: '2 3', FAKE_CUT_KIND: kind });
+    const done = await l.go();
+    assert.match(done[1].stderr, /finding the first ship that turned it red.*cut off before any test failed \(https:\/\/ci\/\d+\).*the ship train goes back in line, since CI gave no answer \(CI was cut off twice before any test failed \(https:\/\/ci\/\d+, https:\/\/ci\/\d+\)\)/s);
+    assert.doesNotMatch(done[1].stderr, /tested green|found .* itself red|a test hung/, 'the lost bisect named nobody');
+    for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+    // Ship 4 is refused only later, by a run that really failed.
+    assert.equal(done[3].status, 1, done[3].stderr);
+    assert.doesNotMatch(done[3].stderr, /cut off/);
+    assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/);
+    l.done();
+  });
+}
 
 // #1864 (DR1): a train whose runner went away, or whose step or log GitHub doesn't send, read as red, and the bisect refused its last ship.
 for (const [name, extra, why] of [

@@ -117,30 +117,25 @@ test("the undo guard is the kit template's, line for line, so a fix to one reach
   assert.equal(guard(landText()), guard(readFileSync(join(import.meta.dirname, '..', 'kit/skills/scheme-setup/templates/land.sh'), 'utf8')));
 });
 
-test('a conflict aborts the rebase and lands nothing', () => {
+// The rebase under the lock (LAND_SMOKE=0: smoke's check before the line would beat it). Logged to the retro log with
+// its files when the shared dir can be written, and refused the same when there is none or it can't be.
+test('a conflict aborts the rebase and lands nothing, names its files, and is logged to the retro log if it can be', () => {
   const r = setup();
   r.commit(r.wt, 'a.txt', 'mine\n');
   r.commit(r.source, 'a.txt', 'theirs\n');
   const tip = git(r.wt, 'rev-parse', 'HEAD');
   const main = git(r.source, 'rev-parse', 'main');
-  const res = r.run({ LAND_SMOKE: '0' }); // the rebase under the lock, which smoke's check before the line would beat
-  assert.equal(res.status, 1);
-  assert.match(res.stderr, /rebase onto main failed/);
-  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip, 'the branch is as it was');
-  assert.equal(git(r.wt, 'status', '--porcelain'), '');
-  assert.equal(git(r.source, 'rev-parse', 'main'), main);
-});
-
-test('a conflict is logged to the retro-log with its files, and the refusal names them', () => {
-  const r = setup();
-  r.commit(r.wt, 'a.txt', 'mine\n');
-  r.commit(r.source, 'a.txt', 'theirs\n');
-  const main = git(r.source, 'rev-parse', 'main');
   const shared = join(r.dir, 'shared');
-  const res = r.run({ COORDINATOR_SHARED_DIR: shared, LAND_SMOKE: '0' }); // the rebase under the lock, as above
-  assert.equal(res.status, 1);
-  assert.match(res.stderr, /rebase onto main failed.*conflicted files: a\.txt\./);
-  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  const blocker = join(r.dir, 'blocker');
+  writeFileSync(blocker, 'a file, not a folder\n');
+  for (const dir of [shared, '', blocker]) {
+    const res = r.run({ COORDINATOR_SHARED_DIR: dir, LAND_SMOKE: '0' });
+    assert.equal(res.status, 1, dir);
+    assert.match(res.stderr, /rebase onto main failed.*conflicted files: a\.txt\./, dir);
+    assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip, 'the branch is as it was');
+    assert.equal(git(r.wt, 'status', '--porcelain'), '');
+    assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  }
   const log = landLog(shared);
   assert.match(log, new RegExp(`^- \\d\\d:\\d\\d:\\d\\dZ · land conflict · ticket/1-x onto ${main.slice(0, 7)}: a\\.txt$`, 'm'));
   assert.deepEqual(
@@ -162,22 +157,6 @@ test('a rebase that cannot start logs no conflicted files', () => {
   assert.equal(res.status, 1);
   const log = landLog(shared);
   assert.match(log, /land conflict · ticket\/1-x: no conflicted files found/m);
-});
-
-test('a conflict still refuses the same when there is no shared dir or it cannot be written', () => {
-  const r = setup();
-  r.commit(r.wt, 'a.txt', 'mine\n');
-  r.commit(r.source, 'a.txt', 'theirs\n');
-  const main = git(r.source, 'rev-parse', 'main');
-  const blocker = join(r.dir, 'blocker');
-  writeFileSync(blocker, 'a file, not a folder\n');
-  for (const shared of ['', blocker]) {
-    const res = r.run({ COORDINATOR_SHARED_DIR: shared, LAND_SMOKE: '0' }); // the rebase under the lock, as above
-    assert.equal(res.status, 1);
-    assert.match(res.stderr, /rebase onto main failed/);
-    assert.equal(git(r.source, 'rev-parse', 'main'), main);
-    assert.equal(git(r.wt, 'status', '--porcelain'), '');
-  }
 });
 
 test('a guard test that fails on the rebased branch refuses before any push to land/*, with its own message, and no CI run is spent (#1240)', () => {

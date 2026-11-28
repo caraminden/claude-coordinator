@@ -1211,7 +1211,7 @@ export const ticketRoutes: Route[] = [
           return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
         })
         .join('\n\n')
-        .concat(data.cabalForm && answers[0]?.selected[0] === FORM_GO ? `\n\n${approveRoster(app, data.cabalForm, session)}` : ''); // a Plot's forming card (#2091): its go approves the rows it showed, and the lead reads which
+        .concat(data.cabalForm && [FORM_GO, 'Start the cabal'].includes(String(answers[0]?.selected[0])) ? `\n\n${approveRoster(app, data.cabalForm, session)}` : ''); // (the old label too, on cards asked before #2270) a Plot's forming card (#2091): its go approves the rows it showed, and the lead reads which
       const answer = { answer: { questionId: body.questionId, answers } };
       const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
       // Held from here, before the first wait: a second answer while this one saves its pictures or a ship is checked is refused.

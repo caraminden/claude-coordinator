@@ -46,7 +46,7 @@ export function cabalLead(store: Store, projectId: number, cabal: unknown, self:
   const lead = Number.isInteger(n) && n > 0 ? store.getTicketByNumber(home, n) : undefined;
   if (!lead || lead.kind === 'coordinator') throw new HttpError(400, `cabal must be the #N of a minion that leads it, in this scheme or as "<scheme>#N": no minion #${String(cabal).slice(0, 20)}${scheme ? ` in ${scheme.name}` : ''}`);
   if (home !== projectId) crossRow(store, lead, projectId, title);
-  if (lead.id === self) throw new HttpError(400, "A minion can't be on its own cabal: it leads it");
+  if (lead.id === self) throw new HttpError(400, "A minion can't be on its own Plot: it leads it");
   if (store.cabalRowOf(lead.id)) throw new HttpError(400, `#${n} is on another Plot's board, so it can't lead one`);
   if (self != null && store.getCabal(self)) throw new HttpError(400, "This minion leads a Plot, so it can't join another");
   return lead;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PoolSight, SeenJob } from '../src/ci-ships.ts';
-import { actionsMinutes, FALLBACK, type FallbackDeps, type FallbackLook, Fallbacks, type Gh, machineReasons, noMachine, perigeeNext, perigeeRunner, restartOnGithub, routeOf } from '../src/runner-fallback.ts';
+import { actionsMinutes, FALLBACK, type FallbackDeps, type FallbackLook, Fallbacks, type Gh, machineReasons, noMachine, PERIGEE_HEAVY, perigeeNext, perigeeRunner, restartOnGithub, routeOf } from '../src/runner-fallback.ts';
 import type { PoolJob, PoolMachine, PoolPc } from '../src/runner-pool.ts';
 import { RunnerPool } from '../src/runner-pool.ts';
 
@@ -330,6 +330,9 @@ test("the minutes count is Citadel's own: private repos' dispatched jobs on GitH
   const before = jobReads();
   assert.deepEqual(await actionsMinutes(gh.of, ['caraminden/peek-auras'], '2026-11-01', counted), m);
   assert.equal(jobReads(), before, "an ended run's minutes are kept, not read again");
+  counted.set('2026-10-01 caraminden/peek-auras#1.1', 99);
+  await actionsMinutes(gh.of, ['caraminden/peek-auras'], '2026-11-01', counted);
+  assert.ok(![...counted.keys()].some((k) => k.startsWith('2026-10-01')), "last month's are dropped");
 });
 
 test('the minutes count reads every page of runs, and fails closed past the pages it counts', async () => {
@@ -434,36 +437,90 @@ test("perigee's start that fails tells the Taskmaster, and the job waits for a m
   assert.equal(f.waiting('caraminden/peek-auras', 1), true);
 });
 
-test("perigee's runner: the config goes only to run(), never a log line; one that took no job in 2 minutes is stopped and taken off GitHub", async () => {
+test("perigee's runner: the config goes only to run(), never a log line; one that took no job in 2 minutes after it connected is stopped and taken off GitHub", async () => {
   const lines: string[] = [];
   const ran: { name: string; config: string }[] = [];
   const removed: number[] = [];
   let stopped = 0;
-  let idle: () => void = () => {};
-  let busy = false;
+  let polls = 0;
+  let state: (poll: number) => { busy: boolean; online: boolean } | null = () => null;
   const p = perigeeRunner({
     pressure: () => 12,
     jit: async (_repo, name, labels) => (assert.deepEqual(labels, ['self-hosted', 'peek-auras-ci-linux']), assert.equal(name, 'perigee-1'), { id: 900, config: 'SECRET-JIT' }),
     run: (name, config) => (ran.push({ name, config }), { done: new Promise(() => {}), stop: () => stopped++ }),
-    runner: async () => ({ busy }),
+    runner: async () => state(++polls),
     remove: async (_repo, id) => void removed.push(id),
-    wait: () => new Promise<void>((r) => (idle = r)),
+    wait: async () => {},
     log: (l) => lines.push(l),
   });
+  const settle = async () => {
+    for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+  };
   assert.equal(p.quiet(), true);
-  const r = await p.start(job(), ['self-hosted', 'peek-auras-ci-linux']);
-  assert.equal(r.ok, true);
+  // Waits in citadel-heavy's slot for 10 polls (offline), then connects and takes nothing.
+  state = (n) => ({ busy: false, online: n > 10 });
+  assert.equal((await p.start(job(), ['self-hosted', 'peek-auras-ci-linux'])).ok, true);
   assert.deepEqual(ran, [{ name: 'perigee-1', config: 'SECRET-JIT' }]);
-  idle();
-  await new Promise((r) => setImmediate(r));
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual([stopped, removed], [1, [900]]);
+  await settle();
+  assert.deepEqual([stopped, removed, polls], [1, [900], 10 + FALLBACK.perigee.idleMs / FALLBACK.perigee.pollMs], 'its time in the slot is not idle time');
   assert.ok(!lines.some((l) => l.includes('SECRET-JIT')), 'the config is a credential');
-  busy = true;
   stopped = 0;
+  polls = 0;
+  state = (n) => ({ busy: n > 1, online: true });
   await p.start(job(), ['self-hosted', 'peek-auras-ci-linux']);
-  idle();
-  await new Promise((r) => setImmediate(r));
-  assert.equal(stopped, 0, 'a runner on its job is left to finish');
+  await settle();
+  assert.deepEqual([stopped, polls], [0, 2], 'a runner on its job is left to finish');
   assert.equal(perigeeRunner({ pressure: () => FALLBACK.perigee.quietPct, jit: async () => ({ id: 0, config: '' }), run: () => ({ done: Promise.resolve(), stop() {} }), runner: async () => null, remove: async () => {}, log() {} }).quiet(), false, 'at 30% CPU pressure it is not quiet');
+});
+
+test("perigee's runner waits for citadel-heavy's one slot on perigee: never judged light, never sent to CI", () => {
+  assert.deepEqual(PERIGEE_HEAVY, { CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_JUDGE: '0', CITADEL_HEAVY_WHAT: 'CI fallback: perigee runner' });
+});
+
+test("a job whose perigee runner ended while it still waits goes back to the front of perigee's line once, then waits for a machine and says so", async () => {
+  const w = world({ pub: false, perigee: true });
+  const a = job({ needs: { os: 'linux', session: false, size: 4 } });
+  w.fb.look([look(a, true)]);
+  w.tick(FALLBACK.afterMs);
+  w.fb.look([look(a, true)]);
+  await w.settle();
+  assert.deepEqual(w.perigeeStarts, [1]);
+  w.ends[0]();
+  await w.settle();
+  w.fb.look([look(a, true)]);
+  await w.settle();
+  assert.deepEqual(w.perigeeStarts, [1, 1], 'started again');
+  w.ends[1]();
+  await w.settle();
+  w.fb.look([look(a, true)]);
+  await w.settle();
+  assert.deepEqual(w.perigeeStarts, [1, 1], 'not a third time');
+  assert.match(w.told.at(-1)?.text ?? '', /perigee couldn't start caraminden\/peek-auras's job "build" \(run 1\): its runner ended 2 times with the job still waiting\. It waits for a machine\./);
+  assert.equal(w.fb.waiting('caraminden/peek-auras', 1), true);
+  const done = world({ pub: false, perigee: true });
+  done.fb.look([look(a, true)]);
+  done.tick(FALLBACK.afterMs);
+  done.fb.look([look(a, true)]);
+  await done.settle();
+  done.ends[0]();
+  await done.settle();
+  done.fb.look([]);
+  await done.settle();
+  assert.deepEqual([done.perigeeStarts, done.told.length], [[1], 1], 'its job ended with it: nothing more');
+});
+
+test('a job told to wait starts over once a machine could take it: no stale "waiting for a machine", and told again after 10 more minutes', async () => {
+  const w = world({ pub: false, minutes: { used: 2400, included: 3000 } });
+  w.fb.look([look(job(), true)]);
+  w.tick(FALLBACK.afterMs);
+  w.fb.look([look(job(), true)]);
+  await w.settle();
+  assert.equal(w.fb.waiting('caraminden/peek-auras', 1), true);
+  w.fb.look([look(job(), false)]);
+  assert.equal(w.fb.waiting('caraminden/peek-auras', 1), false, 'a machine could take it: it waits for room');
+  w.fb.look([look(job(), true)]);
+  w.tick(FALLBACK.afterMs);
+  w.fb.look([look(job(), true)]);
+  await w.settle();
+  assert.equal(w.told.length, 2);
 });

@@ -104,7 +104,7 @@ import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
 import { poolOn } from './src/runner-pool.ts';
 import { BUSY, OwnerBusy, offWords } from './src/owner-busy.ts';
-import { actionsMinutes, FALLBACK, Fallbacks, type Gh, perigeeRunner, restartOnGithub } from './src/runner-fallback.ts';
+import { actionsMinutes, FALLBACK, Fallbacks, type Gh, PERIGEE_HEAVY, perigeeRunner, restartOnGithub } from './src/runner-fallback.ts';
 import { readPressure } from './src/host-load.ts';
 import { ghSend } from './src/gh-api.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
@@ -2380,7 +2380,7 @@ const poolFallback = new Fallbacks({
     run: (name, config) => {
       const P = FALLBACK.perigee;
       const args = ['podman', 'run', '--rm', '--name', name, '--cpus', String(P.cpus), '--memory', P.memory, '--pull', 'missing', '-e', 'ACTIONS_RUNNER_INPUT_JITCONFIG', P.image, '/home/runner/run.sh'];
-      const env = { ...turnEnv(process.env), CITADEL_HEAVY_DIR: join(DATA_DIR, 'projects', '.heavy'), CITADEL_HEAVY_WHO: 'CI fallback', CITADEL_HEAVY_WHAT: `CI fallback ${name}`, ACTIONS_RUNNER_INPUT_JITCONFIG: config };
+      const env = { ...turnEnv(process.env), CITADEL_HEAVY_DIR: join(DATA_DIR, 'projects', '.heavy'), CITADEL_HEAVY_WHO: 'CI fallback', ...PERIGEE_HEAVY, ACTIONS_RUNNER_INPUT_JITCONFIG: config };
       const done = new Promise((end) => execFile(join(import.meta.dirname, 'tools', 'citadel-heavy'), args, { env, maxBuffer: 1 << 24 }, (e) => end(e ? 1 : 0)));
       return { done, stop: () => execFile('podman', ['stop', '-t', '10', name], { timeout: 60_000 }, () => {}) };
     },
@@ -2390,7 +2390,8 @@ const poolFallback = new Fallbacks({
       const r = await ghGet(`repos/${repo}/actions/runners/${id}`, null, as);
       if (r.status === 404) return null;
       if (r.status !== 200) throw new Error(`GitHub answered ${r.status}`);
-      return { busy: (r.body as { busy?: unknown } | null)?.busy === true };
+      const b = r.body as { busy?: unknown; status?: unknown } | null;
+      return { busy: b?.busy === true, online: b?.status === 'online' };
     },
     remove: async (repo, id) => {
       const as = asScheme(repo);

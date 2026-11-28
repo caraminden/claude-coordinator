@@ -30,7 +30,7 @@ export const FALLBACK = {
   confirmMs: 60_000,
   confirmPollMs: 5_000,
   /** Perigee's runner: the official image, run rootless through citadel-heavy's slot, started only below this CPU pressure. */
-  perigee: { image: 'ghcr.io/actions/actions-runner:latest', cpus: 4, memory: '8g', quietPct: 30, idleMs: 2 * 60_000 },
+  perigee: { image: 'ghcr.io/actions/actions-runner:latest', cpus: 4, memory: '8g', quietPct: 30, idleMs: 2 * 60_000, pollMs: 30_000, tries: 2 },
   /** At most this many pages of 100 dispatched runs a repo are counted a month; past it the count fails closed. */
   countPages: 10,
 };
@@ -154,6 +154,7 @@ const rateOf = (labels: unknown): number => {
  */
 export async function actionsMinutes(ghOf: (repo: string) => Gh | null, repos: readonly string[], since: string, counted: Map<string, number>): Promise<Minutes> {
   let used = 0;
+  for (const k of counted.keys()) if (!k.startsWith(`${since} `)) counted.delete(k); // last month's
   for (const repo of repos) {
     const gh = ghOf(repo);
     if (!gh) return { error: `no scheme's GitHub login reads ${repo}` };
@@ -166,9 +167,10 @@ export async function actionsMinutes(ghOf: (repo: string) => Gh | null, repos: r
       if ((await got(`repos/${repo}`)).private !== true) continue;
       for (let page = 1; ; page++) {
         if (page > FALLBACK.countPages) throw new Error(`it dispatched more than ${FALLBACK.countPages * 100} runs this month, more than Citadel counts`);
-        const runs = ((await got(`repos/${repo}/actions/runs?event=workflow_dispatch&status=completed&created=>=${since}&per_page=100&page=${page}`)).workflow_runs ?? []) as { id?: unknown }[];
+        const runs = ((await got(`repos/${repo}/actions/runs?event=workflow_dispatch&status=completed&created=>=${since}&per_page=100&page=${page}`)).workflow_runs ?? []) as { id?: unknown; run_attempt?: unknown }[];
         for (const run of runs) {
-          const key = `${since} ${repo}#${Number(run.id)}`;
+          // A re-run is a new attempt of the same run, with jobs of its own: counted again.
+          const key = `${since} ${repo}#${Number(run.id)}.${Number(run.run_attempt ?? 1)}`;
           let mins = counted.get(key);
           if (mins === undefined) {
             const jobs = ((await got(`repos/${repo}/actions/runs/${Number(run.id)}/jobs?filter=all&per_page=100`)).jobs ?? []) as { runner_group_name?: unknown; labels?: unknown; started_at?: unknown; completed_at?: unknown }[];
@@ -190,6 +192,13 @@ export async function actionsMinutes(ghOf: (repo: string) => Gh | null, repos: r
   return { used, included: FALLBACK.included };
 }
 
+/**
+ * citadel-heavy's switches for perigee's runner: it stays on perigee (HERE: never sent to Citadel's CI as a heavy job),
+ * always waits for the one plain slot and its load and memory waits (JUDGE=0: a job is light, and runs at once, until it
+ * has a history), under one name, so its history is one row of jobs, not one per job.
+ */
+export const PERIGEE_HEAVY = { CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_JUDGE: '0', CITADEL_HEAVY_WHAT: 'CI fallback: perigee runner' } as const;
+
 /** What perigee's runner is built from (server.ts gives the real ones; tests, fakes). */
 export interface PerigeeDeps {
   /** perigee's CPU pressure now, a whole percent ("some avg60"); null without PSI. */
@@ -198,8 +207,8 @@ export interface PerigeeDeps {
   jit(repo: string, name: string, labels: readonly string[]): Promise<{ id: number; config: string }>;
   /** Start the container through citadel-heavy, the config only in its environment; `done` resolves when it exits. */
   run(name: string, config: string): { done: Promise<unknown>; stop(): void };
-  /** GitHub's runner `id`: on a job or not; null once it's gone (a one-job runner is removed when its job ends). */
-  runner(repo: string, id: number): Promise<{ busy: boolean } | null>;
+  /** GitHub's runner `id`: connected yet, on a job or not; null once it's gone (a one-job runner is removed when its job ends). */
+  runner(repo: string, id: number): Promise<{ busy: boolean; online: boolean } | null>;
   remove(repo: string, id: number): Promise<void>;
   wait?(ms: number): Promise<unknown>;
   log(line: string): void;
@@ -224,14 +233,22 @@ export function perigeeRunner(d: PerigeeDeps): NonNullable<FallbackDeps['perigee
       const done = r.done.finally(() => {
         ended = true;
       });
-      void wait(FALLBACK.perigee.idleMs).then(async () => {
-        if (ended) return;
-        const s = await d.runner(job.repo, id).catch(() => undefined);
-        if (!s || s.busy) return;
-        d.log(`Runner pool fallback: ${name} took no job in ${FALLBACK.perigee.idleMs / 1000} s; stopping it`);
-        r.stop();
-        await d.remove(job.repo, id).catch((e: unknown) => d.log(`Runner pool fallback: couldn't take ${name} off GitHub: ${(e as Error).message}`));
-      });
+      // The idle clock starts once the runner connects: before that the container waits for citadel-heavy's slot.
+      void (async () => {
+        const P = FALLBACK.perigee;
+        for (let idle = 0; !ended; ) {
+          await wait(P.pollMs);
+          if (ended) return;
+          const s = await d.runner(job.repo, id).catch(() => undefined);
+          if (s === null || s?.busy) return; // gone, or on its job: it ends with it
+          idle = s?.online ? idle + P.pollMs : 0;
+          if (idle < P.idleMs) continue;
+          d.log(`Runner pool fallback: ${name} took no job in ${P.idleMs / 1000} s; stopping it`);
+          r.stop();
+          await d.remove(job.repo, id).catch((e: unknown) => d.log(`Runner pool fallback: couldn't take ${name} off GitHub: ${(e as Error).message}`));
+          return;
+        }
+      })();
       return { ok: true, why: `started on perigee as ${name}`, done };
     },
   };
@@ -262,7 +279,7 @@ export interface FallbackLook {
 }
 
 type Track = { repo: string; run: number; ship: boolean; since: number; told: boolean; route: Route | null; why: string | null };
-type Sent = { key: string; job: PoolJob; labels: readonly string[]; t: Track };
+type Sent = { key: string; job: PoolJob; labels: readonly string[]; t: Track; tries?: number };
 
 export class Fallbacks {
   private d: FallbackDeps;
@@ -291,9 +308,9 @@ export class Fallbacks {
       seen.add(key);
       let t = this.track.get(key);
       if (!none) {
-        // Gone to GitHub (or running on perigee) it stays sent. One never sent, or still in perigee's line, starts over:
-        // a machine can take it now, so it leaves that line.
-        if (t && (!t.route || this.perigeeJobs.has(key))) this.track.delete(key);
+        // Gone to GitHub (or running on perigee) it stays sent. Any other starts over: a machine can take it now, so it
+        // leaves perigee's line, and a later 10 minutes with no machine is told again.
+        if (t && t.route !== 'github' && key !== this.perigeeRunning) this.track.delete(key);
         this.perigeeJobs.delete(key);
         continue;
       }
@@ -387,6 +404,16 @@ export class Fallbacks {
     const end = () => {
       if (this.perigeeRunning === next) this.perigeeRunning = null;
     };
+    s.tries = (s.tries ?? 0) + 1;
+    // Its runner ended and the job still waits (the runner took a sibling job, stopped idle, or couldn't start): back to
+    // the front of the line, once; the next look drops it if it ended. A second time, it waits for a machine and says so.
+    const ended = () => {
+      end();
+      if (this.track.get(next) !== s.t) return;
+      if (s.tries! >= FALLBACK.perigee.tries) return failed(`its runner ended ${s.tries} times with the job still waiting`);
+      this.perigeeLine.unshift(next);
+      this.perigeeJobs.set(next, s);
+    };
     const failed = (why: string) => {
       end();
       // It stays waiting for a machine, and its Taskmaster hears that once more, with why.
@@ -395,7 +422,7 @@ export class Fallbacks {
       this.d.log(`Runner pool fallback: perigee couldn't start ${next}: ${why}`);
     };
     p.start(s.job, s.labels).then(
-      (r) => (r.ok ? r.done.then(end, end) : failed(r.why)),
+      (r) => (r.ok ? r.done.then(ended, ended) : failed(r.why)),
       (e: unknown) => failed(e instanceof Error ? e.message : String(e)),
     );
   }

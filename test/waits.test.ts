@@ -423,6 +423,53 @@ test('a ship train (#1303): the front reads "Train of N", a rider reads riding i
   assert.equal(waits.wait(w.id)!.train?.role, 'waiting');
 });
 
+test('a quick train (#2245): with quick trains on, its planned front and riders wait as "Quick train next", the full train ahead untouched; off, a leftover plan is no train', async () => {
+  const { state, waits, ticket } = setup();
+  const f = minion(),
+    r = minion(),
+    q = minion(),
+    qr = minion(),
+    w = minion();
+  ticket(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
+  ticket(2, r.branch, 0, `riding in ${f.branch}'s ship train`, 20);
+  ticket(3, q.branch, 0, 'next: a quick train right after the full train ahead', 19);
+  ticket(4, w.branch, 0, 'waiting', 18);
+  ticket(5, qr.branch, 0, `riding in ${q.branch}'s ship train`, 17);
+  writeFileSync(join(state, 'quick-train'), `${'a'.repeat(40)} ${'b'.repeat(40)} 3 ${q.branch} 5 123 456\n`);
+  await waits.poll();
+  assert.equal(waits.wait(q.id)!.train?.quick, undefined, 'off (no quick-train-on): the plan is ignored');
+  assert.equal(waits.wait(q.id)!.train?.label, 'Releasing next');
+
+  writeFileSync(join(state, 'quick-train-on'), '');
+  await waits.poll();
+  const front = waits.wait(q.id)!;
+  assert.deepEqual(front.train, { role: 'waiting', label: 'Quick train next', size: 2, members: [`#${q.number}`, `#${qr.number}`], front: `#${q.number}`, quick: true });
+  assert.equal(front.chip, 'line · quick train');
+  assert.match(front.text, /^Quick train next: quick train of 2 .*right after the full train ahead/);
+  assert.equal(waits.wait(qr.id)!.train?.quick, true, 'its rider, though further back in line');
+  assert.equal(waits.wait(qr.id)!.train?.front, `#${q.number}`);
+  assert.equal(waits.wait(f.id)!.train?.role, 'front');
+  assert.equal(waits.wait(f.id)!.train?.quick, undefined, 'the full train ahead is not quick');
+  assert.equal(waits.wait(r.id)!.train?.role, 'rider');
+  assert.equal(waits.wait(w.id)!.train?.label, 'Releasing next', 'the next full train: quick ships fill no full train');
+  assert.match(waits.wait(w.id)!.text, /3rd in line/, 'the quick front is ahead of it; its rider further back is not');
+});
+
+test('a quick train holding the lock (#2245) reads as releasing now, quick, its riders with it', async () => {
+  const { state, waits, ticket } = setup();
+  const q = minion(),
+    qr = minion();
+  ticket(1, q.branch, now / 1000 - 40, "waiting for its quick check on CI's side runner", 30);
+  ticket(2, qr.branch, 0, `riding in ${q.branch}'s ship train`, 20);
+  writeFileSync(join(state, 'quick-train'), `${'a'.repeat(40)} ${'b'.repeat(40)} 1 ${q.branch} 2 123 456\n`);
+  writeFileSync(join(state, 'quick-train-on'), '');
+  await waits.poll();
+  assert.equal(waits.wait(q.id)!.train?.role, 'front');
+  assert.equal(waits.wait(q.id)!.train?.quick, true);
+  assert.equal(waits.wait(qr.id)!.train?.role, 'rider');
+  assert.equal(waits.wait(qr.id)!.train?.quick, true);
+});
+
 test('a red train under bisect reads as the front bisecting; later trains say how many are ahead', async () => {
   assert.equal(landPhase('finding the ship that turned the train red').key, 'bisect');
   assert.equal(trainLabel(0), 'Releasing next');

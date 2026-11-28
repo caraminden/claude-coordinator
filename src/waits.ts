@@ -35,7 +35,7 @@ export interface Wait {
   done?: number;
   total?: number;
   /** A landing's ship train: its front ("front", with how many ride), a rider, or a waiter's train as it reads ("Releasing next"). */
-  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
+  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[]; quick?: true };
   /** A landing's CI test files failed so far (POST /api/ci-tests, #1368). */
   failed?: string[];
   /** Its process is in a frozen cgroup (#1881): the line says so in place of "waiting". */
@@ -415,6 +415,18 @@ export const parseEarly = (text: string | null): EarlyFile | null => {
   const [top, next, at, head] = (text ?? '').trim().split(/\s+/);
   return top && next && head && /^\d+$/.test(at ?? '') ? { top, next, at: Number(at), head } : null;
 };
+/**
+ * The quick train planned (#2245; tools/land/quick.sh): its front's branch, from `<cc-deploy>/quick-train`
+ * ("<base> <top> <front ticket> <front branch> <riders> <planner>"), only while `<cc-deploy>/quick-train-on` exists:
+ * off (the default until a person turns it on after the recount), a leftover plan is no train.
+ */
+export const parseQuickPlan = (text: string | null): string | null => {
+  const w = (text ?? '').trim().split(/\s+/);
+  return w.length >= 6 && w[3] ? w[3] : null;
+};
+export const readQuickFront = (stateDir: string): string | null => (stat(join(stateDir, 'quick-train-on')) ? parseQuickPlan(read(join(stateDir, 'quick-train'))) : null);
+export const readQuickFrontA = async (stateDir: string): Promise<string | null> => ((await statA(join(stateDir, 'quick-train-on'))) ? parseQuickPlan(await readA(join(stateDir, 'quick-train'))) : null);
+
 /** Early tests are off for every landing while `<cc-deploy>/early-off` exists (land.sh's early_next). */
 export const readEarly = (stateDir: string): EarlyFile | null => (stat(join(stateDir, 'early-off')) ? null : parseEarly(read(join(stateDir, 'early'))));
 export const readEarlyA = async (stateDir: string): Promise<EarlyFile | null> => ((await statA(join(stateDir, 'early-off'))) ? null : parseEarly(await readA(join(stateDir, 'early'))));
@@ -461,14 +473,19 @@ export const TRAIN_SHIPS = 7;
 export const trainLabel = (g: number) => (g === 0 ? 'Releasing next' : `Train ${g + 2}, after ${g + 1} ahead`);
 
 /** Each land-line ticket's wait, by its label (a branch, or "tools/deploy.sh"). `name` turns a label into "#513". */
-export function landWaits(line: LandTicket[], took: number[], now: number, usual: (key: string) => number | null, name: (label: string) => string, early: (label: string) => boolean = () => false): Map<string, Wait> {
+export function landWaits(line: LandTicket[], took: number[], now: number, usual: (key: string) => number | null, name: (label: string) => string, early: (label: string) => boolean = () => false, quickFront: string | null = null): Map<string, Wait> {
   const out = new Map<string, Wait>();
   const typical = median(took) ?? TYPICAL_LANDING;
   const holder = line.find((t) => t.got > 0);
   // A train is its front (the holder) and the waiters whose phase says they ride with it; a rider of a front that is gone is a plain waiter.
   const riders = line.filter((t) => t.got === 0 && holder && ridingOf(t.phase) === holder.label);
   const members = holder ? [holder, ...riders].map((t) => name(t.label)) : [];
-  const train = (role: 'front' | 'rider') => ({ role, label: 'Releasing now', size: members.length, members, front: holder ? name(holder.label) : undefined });
+  // The quick train (#2245): its plan's front, holding the lock or waiting right behind the full train, and its riders.
+  const quickNow = !!holder && holder.label === quickFront;
+  const train = (role: 'front' | 'rider') => ({ role, label: 'Releasing now', size: members.length, members, front: holder ? name(holder.label) : undefined, ...(quickNow && { quick: true as const }) });
+  const qFront = !quickNow && quickFront ? line.find((t) => t.got === 0 && t.label === quickFront) : undefined;
+  const quick = qFront ? [qFront, ...line.filter((t) => t.got === 0 && t !== qFront && ridingOf(t.phase) === qFront.label)] : [];
+  const qMembers = quick.map((t) => name(t.label));
   let forming = 0; // waiters past the train, in line order: they fill the next trains
   line.forEach((t, i) => {
     if (t.got > 0) {
@@ -488,7 +505,22 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
         ...(brief && { brief: riders.length ? `train of ${members.length} · ${brief}` : brief }),
         ...(c && { done: c.done, total: c.total }),
         ...(c?.failed && { failed: c.failed }),
-        ...(riders.length && { train: train('front') }),
+        ...((riders.length || quickNow) && { train: train('front') }),
+      });
+      return;
+    }
+    if (quick.includes(t)) {
+      const text = `${qMembers.length > 1 ? `quick train of ${qMembers.length} (${qMembers.join(', ')})` : 'a quick train'}, right after the full train ahead: it ships on a quick check, the full tests run behind it`;
+      out.set(t.label, {
+        kind: 'land',
+        stage: 'line',
+        label: 'Quick train',
+        chip: 'line · quick train',
+        text: `Quick train next: ${text}`,
+        brief: 'Quick train next',
+        since: t.mtime,
+        usual: null,
+        train: { role: 'waiting', label: 'Quick train next', size: qMembers.length, members: qMembers, front: name(quick[0].label), quick: true },
       });
       return;
     }
@@ -520,7 +552,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
       out.set(t.label, { kind: 'land', stage: 'line', label: 'Pulled', chip: 'line · pulled', text, brief: `pulled off ${name(off.front)}'s train on a guess`, since: t.mtime, usual: null, train: { role: 'waiting', label: 'Pulled' } });
       return;
     }
-    const ahead = line.slice(0, i).filter((a) => !riders.includes(a) && !heldOf(a.phase) && !pulledOf(a.phase));
+    const ahead = line.slice(0, i).filter((a) => !riders.includes(a) && !heldOf(a.phase) && !pulledOf(a.phase) && !quick.slice(1).includes(a));
     const place = ordinal(ahead.length + 1);
     const label = trainLabel(Math.floor(forming++ / TRAIN_SHIPS));
     let text: string,
@@ -884,20 +916,21 @@ export class Waits {
   /** Read the land line and heavy folder with no blocking file call (#1807), then apply them. */
   async poll() {
     const gen = ++this.reads;
-    const [land, heavy, early, offStat] = await Promise.all([
+    const [land, heavy, early, offStat, quickFront] = await Promise.all([
       this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null,
       readHeavyA(this.d.heavyDir, this.now(), this.d.held),
       this.d.deployState ? readEarlyA(this.d.deployState) : null,
       this.d.deployState ? statA(join(this.d.deployState, 'early-off')) : null,
+      this.d.deployState ? readQuickFrontA(this.d.deployState) : null,
     ]);
-    if (gen === this.reads) this.apply(land, heavy, early, !!offStat); // a newer poll or setOrder read since: this snapshot is old
+    if (gen === this.reads) this.apply(land, heavy, early, !!offStat, quickFront); // a newer poll or setOrder read since: this snapshot is old
   }
   private reads = 0;
 
   /** poll for a person's own action (setOrder), which must have the line before it returns: it reads the land line in the thread and takes the heavy folder from the last poll. */
   private pollNow() {
     this.reads++;
-    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, this.lastHeavy, this.d.deployState ? readEarly(this.d.deployState) : null, !!(this.d.deployState && stat(join(this.d.deployState, 'early-off'))));
+    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, this.lastHeavy, this.d.deployState ? readEarly(this.d.deployState) : null, !!(this.d.deployState && stat(join(this.d.deployState, 'early-off'))), this.d.deployState ? readQuickFront(this.d.deployState) : null);
   }
 
   /** Which waiting ships have an early run, and which just lost theirs (#1905): the file goes when land.sh throws the run away. */
@@ -941,7 +974,7 @@ export class Waits {
 
   /** The heavy folder as the last poll read it (off the thread); a person's own action reuses it rather than read the folder in the thread. */
   private lastHeavy: HeavyJobs = { holders: [], waiters: [] };
-  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: HeavyJobs, early: EarlyFile | null = null, off = false) {
+  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: HeavyJobs, early: EarlyFile | null = null, off = false, quickFront: string | null = null) {
     this.lastHeavy = heavy;
     const now = this.now();
     const next = new Map<number, Wait & { key?: string }>();
@@ -956,10 +989,18 @@ export class Waits {
         }),
         now,
       );
-      for (const [label, w] of landWaits(line, took, now, this.usual, this.name, (l) => {
-        const i = this.ticketFor(l);
-        return i != null && !!this.d.early?.(i);
-      })) {
+      for (const [label, w] of landWaits(
+        line,
+        took,
+        now,
+        this.usual,
+        this.name,
+        (l) => {
+          const i = this.ticketFor(l);
+          return i != null && !!this.d.early?.(i);
+        },
+        quickFront,
+      )) {
         const id = this.ticketFor(label);
         const holder = line.find((t) => t.label === label && t.got > 0);
         if (id != null) next.set(id, { ...w, key: holder ? `land:${landPhase(holder.phase).key}` : undefined });

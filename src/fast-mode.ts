@@ -100,6 +100,23 @@ export interface FastModeDeps {
 }
 
 const key = (projectId: number) => `fast-mode:${projectId}`;
+/** Where a scheme's FastState is kept in the settings, for readers outside this class (src/quick-view.ts). */
+export const fastStateKey = key;
+
+/** land.sh's quick-behind file, a line per quick train shipped (tools/land/behind.sh): "<epoch> <base> <top> <ship top>:<#N, or -> ... [red=<file>,...]". */
+export function parseQuickBehind(text: string) {
+  return text
+    .split('\n')
+    .map((l) => l.trim().split(/\s+/))
+    .filter((w) => w.length >= 4 && /^\d+$/.test(w[0]) && /^[0-9a-f]{40}$/.test(w[1]) && /^[0-9a-f]{40}$/.test(w[2]))
+    .map((w) => {
+      const red = w.find((x) => x.startsWith('red='));
+      const ships = w.slice(3).filter((x) => /^[0-9a-f]{40}:(\d+|-)$/.test(x));
+      const owners: Record<string, number | null> = {};
+      for (const x of ships) owners[x.slice(0, 40)] = x.endsWith(':-') ? null : Number(x.slice(41));
+      return { at: Number(w[0]) * 1000, base: w[1], top: w[2], tops: ships.map((x) => x.slice(0, 40)), owners, red: red ? red.slice(4).split(',').filter(Boolean) : null };
+    });
+}
 /** A red left unfixed this long goes to the Taskmaster (the handoff's 30 minutes). */
 export const ESCALATE_MS = 30 * 60_000;
 /** The most commits a red's range is pinned through; a longer one goes to the Taskmaster unpinned. */
@@ -306,18 +323,7 @@ export class FastMode {
 
   /** land.sh's quick-behind lines: "<epoch> <base> <top> <ship top>:<#N, or -> ... [red=<file>,...]" (tools/land/behind.sh). */
   private async owedLines(dir: string) {
-    const text = await readFile(join(dir, 'quick-behind'), 'utf8').catch(() => '');
-    return text
-      .split('\n')
-      .map((l) => l.trim().split(/\s+/))
-      .filter((w) => w.length >= 4 && /^\d+$/.test(w[0]) && /^[0-9a-f]{40}$/.test(w[1]) && /^[0-9a-f]{40}$/.test(w[2]))
-      .map((w) => {
-        const red = w.find((x) => x.startsWith('red='));
-        const ships = w.slice(3).filter((x) => /^[0-9a-f]{40}:(\d+|-)$/.test(x));
-        const owners: Record<string, number | null> = {};
-        for (const x of ships) owners[x.slice(0, 40)] = x.endsWith(':-') ? null : Number(x.slice(41));
-        return { at: Number(w[0]) * 1000, base: w[1], top: w[2], tops: ships.map((x) => x.slice(0, 40)), owners, red: red ? red.slice(4).split(',').filter(Boolean) : null };
-      });
+    return parseQuickBehind(await readFile(join(dir, 'quick-behind'), 'utf8').catch(() => ''));
   }
 
   /** The quick scheme's next run: the pin's next commit, else the oldest quick top on main still owed a verdict. */

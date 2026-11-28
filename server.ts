@@ -176,7 +176,7 @@ import { type BuildSummary, Builds } from './src/builds.ts';
 import { type CabalCard, CabalCards } from './src/cabal-cards.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
-import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
+import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
 import { earlyCi, earlyDroppedWhy, landNews, readTailA, tailNow } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
@@ -184,7 +184,8 @@ import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
 import { rollbackStarters } from './src/rollback-starters.ts';
 import { HostJobs, jobLost } from './src/host-job.ts';
-import { FastMode, type FastState } from './src/fast-mode.ts';
+import { FastMode, type FastState, fastStateKey } from './src/fast-mode.ts';
+import { type QuickInfo, readQuick } from './src/quick-view.ts';
 import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
@@ -1709,18 +1710,26 @@ const rollback = new Rollback({
     failed: (projectId, target, sha, why) => rollback.failed(projectId, target, sha, why),
   }),
 });
+/** Citadel's quick trains as the last ship-line read found them (#2245), for its server card. */
+let quickNow: { scheme: number; info: QuickInfo } | null = null;
 const releases = new Releases({
   store,
   readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader],
   broadcast,
   deploy: (tv) => autoDeploy.info(tv),
   rollback: (tv, views) => rollback.info(tv, views),
+  // Quick trains on Citadel's own server card (#2245): off until a person turns them on after the recount (ADR 0035).
+  quick: (tv) => (quickNow && tv.target.id === CITADEL_TARGET && tv.target.projectId === quickNow.scheme ? quickNow.info : null),
   // A keyless Capacitor app's card offers Make release key (#837): the app's own card, as it has no Android one until its first APK.
   releaseKey: (tv) => {
     const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null;
     return name && apkBuilds.keyless(name) ? name : null;
   },
-  lines: () => landsInFlight.refresh(),
+  lines: async () => {
+    await landsInFlight.refresh();
+    const own = deployState ? ownScheme()?.id : undefined;
+    quickNow = deployState && own != null ? { scheme: own, info: await readQuick(deployState, store.getSetting<FastState>(fastStateKey(own)) ?? undefined) } : null;
+  },
   inFlight: (views, fresh) => {
     landsInFlight.attach(views, fresh);
     prsInFlight.attach(views);

@@ -61,7 +61,7 @@ export interface ReleaseProgress {
   done?: number;
   total?: number;
   early?: EarlyTest;
-  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
+  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[]; quick?: true };
 }
 
 /** One minion's change in the release under way (src/releases.ts Change). */
@@ -175,6 +175,15 @@ export interface TargetView {
   deploy?: DeployInfo;
   releaseKey?: string;
   rollback?: RollbackInfo;
+  quick?: QuickInfo;
+}
+
+/** Quick trains on Citadel's server card (src/quick-view.ts QuickInfo, #2245). */
+export interface QuickInfo {
+  on: boolean;
+  behind: { at: number; top: string; ships: number[]; running: boolean }[];
+  pinning: { ids: string[]; ships: number[]; at: number | null } | null;
+  reds: { ids: string[]; n: number | null; at: number; escalateAt: number; escalated: boolean }[];
 }
 
 /** One scheme's releases (src/releases.ts SchemeReleases). */

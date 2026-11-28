@@ -474,12 +474,10 @@ export class StandingChecks {
     const stuck = found.filter((f) => f.check === 'shipped-live' && f.ticket !== null);
     const live = stuck.some((f) => !done.has(f.key)) && this.d.deployLive ? new Set(await this.d.liveNow?.()) : new Set<number>();
     for (const f of stuck) {
-      if (!done.has(f.key)) {
-        if (!live.has(f.ticket!)) continue;
-        this.d.deployLive!(f.ticket!);
-      }
+      if (done.has(f.key)) f.text += ' The check ran the deploy-live step for it once; it stayed open.';
+      else if (live.has(f.ticket!)) f.text += this.d.deployLive!(f.ticket!) ? ' The check ran the deploy-live step, which dismissed it.' : ' The check ran the deploy-live step for it; it stays open.';
+      else continue;
       f.repaired = true;
-      f.text += ' The check ran the deploy-live step for it once.';
     }
   }
 

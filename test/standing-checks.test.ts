@@ -287,12 +287,18 @@ test("shipped-live's one repair: a stuck minion whose deploy is live gets the se
   await checks.run();
   await checks.settled();
   assert.deepEqual(ran, [live.id], 'only the minion with a live deploy of its commit');
-  const kept = keptChecks(store)!.findings.find((f) => f.ticket === live.id)!;
-  assert.match(kept.text, /ran the deploy-live step/);
+  const repaired = () => keptChecks(store)!.findings.map((f) => [f.ticket, f.repaired ?? false]);
+  assert.deepEqual(repaired(), [
+    [live.id, true],
+    [notLive.id, false],
+  ]);
   await checks.run();
   await checks.settled();
   assert.deepEqual(ran, [live.id], 'once: a minion it kept open is not tried again');
-  assert.match(keptChecks(store)!.findings.find((f) => f.ticket === live.id)!.text, /ran the deploy-live step/);
+  assert.deepEqual(repaired(), [
+    [live.id, true],
+    [notLive.id, false],
+  ]);
 });
 
 test("the Status tile shows a viewer only their schemes' findings, and Citadel's own only in Citadel's (ADR 0015)", () => {

@@ -33,3 +33,12 @@ test("an old-domain link carrying a login, or over http, is not taken as Citadel
 test('anything that is not a web or mail link is ignored', () => {
   for (const h of ['javascript:alert(1)', 'file:///C:/x']) assert.deepEqual(go(h), { kind: 'none' });
 });
+
+test('only a build under a launcher has one to point shortcuts at (#2274)', () => {
+  const { launcherOf } = createRequire(import.meta.url)('../desktop/route.cjs');
+  const installed = 'C:\\Users\\Cara\\AppData\\Local\\citadel\\citadel.exe';
+  const has = (p: string) => p === installed;
+  assert.equal(launcherOf('C:\\Users\\Cara\\AppData\\Local\\citadel\\versions\\11\\Citadel.exe', has), installed);
+  // A test copy unzipped by hand: no launcher, so no shortcut to itself.
+  assert.equal(launcherOf('C:\\Users\\Cara\\Downloads\\citadel-desktop-test(2)\\Citadel\\Citadel.exe', has), null);
+});

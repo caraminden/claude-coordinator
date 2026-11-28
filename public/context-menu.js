@@ -329,6 +329,7 @@ function withInspect(spec, target, e) {
 // links), not on message text, which keeps the phone's own selection, or on bare page and part menus.
 const LONG_PRESS = new Set(['Minion', 'Card', 'File', 'Code block', 'Release', 'Link']);
 mountMenus({
-  menuFor: desktop ? (target, e) => withInspect(menuFor(target), target, /** @type {MouseEvent | null} */ (e)) : menuFor,
+  // A desktop build from before #1665 has no inspect: no item that would do nothing (#2274).
+  menuFor: desktopBridge?.inspect ? (target, e) => withInspect(menuFor(target), target, /** @type {MouseEvent | null} */ (e)) : menuFor,
   longPress: (t, spec) => LONG_PRESS.has(/** @type {string} */ (spec.kind)) && !t.closest('[data-reorder]'),
 });

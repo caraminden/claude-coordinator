@@ -9,7 +9,7 @@
 const { app, BrowserWindow, Menu, Tray, nativeTheme, safeStorage, screen, shell, ipcMain } = require('electron');
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
-const { route } = require('./route.cjs');
+const { route, launcherOf } = require('./route.cjs');
 const { reloadKey, devtoolsKey } = require('./keys.cjs');
 const { appFrame } = require('./app-frame.cjs');
 const { savedLogin, fromCitadel } = require('./saved-login.cjs');
@@ -156,12 +156,13 @@ function makeTray() {
 /**
  * Start menu and desktop shortcuts to #1148's launcher (two folders up from this build, versions\<n>\), so updates
  * run; with the app's id, which Windows needs to show its notifications. The Start menu one is rewritten on each
- * start (the launcher may have moved); the desktop one is made once, so deleting it sticks.
+ * start (the launcher may have moved); the desktop one is made once, so deleting it sticks. A copy with no launcher
+ * (a test build unzipped by hand) writes none (#2274): it took the Start menu's Citadel for itself, and never updates.
  */
 function shortcuts() {
   if (process.platform !== 'win32' || !app.isPackaged) return;
-  const launcher = join(dirname(process.execPath), '..', '..', 'citadel.exe');
-  const target = existsSync(launcher) ? launcher : process.execPath;
+  const target = launcherOf(process.execPath, existsSync);
+  if (!target) return;
   const link = { target, cwd: dirname(target), icon: ICON, iconIndex: 0, appUserModelId: AUMID, description: 'Citadel' };
   shell.writeShortcutLink(join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Citadel.lnk'), 'replace', link);
   const made = join(app.getPath('userData'), 'desktop-shortcut-made');

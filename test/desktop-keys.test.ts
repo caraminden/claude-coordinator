@@ -36,3 +36,12 @@ test('Ctrl+Shift+I opens DevTools, and nothing near it does (#1665)', () => {
   assert.equal(devtoolsKey(null), false);
   assert.equal(down('I', { control: true, shift: true }), null);
 });
+
+test('a bare F12 opens DevTools too (#2274)', () => {
+  const key = (k: string, mods: object = {}) => devtoolsKey({ type: 'keyDown', key: k, control: false, shift: false, alt: false, meta: false, ...mods });
+  assert.equal(key('F12'), true);
+  assert.equal(key('F12', { control: true }), false);
+  assert.equal(key('F12', { alt: true }), false);
+  assert.equal(devtoolsKey({ type: 'keyUp', key: 'F12' }), false);
+  assert.equal(down('F12'), null);
+});

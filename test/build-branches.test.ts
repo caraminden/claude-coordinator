@@ -45,13 +45,13 @@ test("an Overseer gets the skill in place of the build steps, a member the board
   const old = turn({ build: 7, branch: 'build/7', owner: true }, null);
   assert.ok(old.includes('You are the build minion of Plot 7') && !old.includes('Overseer'), "Build 7's minion keeps today's steps");
   const feeder = turn({ build: 7, branch: 'build/7', owner: false }, null);
-  assert.ok(feeder.includes('You are a feeder in Build 7') && !feeder.includes('cabal_board'), "Build 7's feeders keep today's text");
+  assert.ok(feeder.includes('You are a feeder in Plot 7') && !feeder.includes('cabal_board'), "Build 7's feeders keep today's text");
   const inBuild = turn({ build: 8, branch: 'build/8', owner: false }, member);
-  assert.match(inBuild, /You are a member of Build 8, a cabal led by Build 8's Overseer \(#12\)/);
+  assert.match(inBuild, /You are a member of Build 8, a Plot led by Build 8's Overseer \(#12\)/);
   assert.match(inBuild, /ask it with a cabal_board ask to move the claim/);
   assert.ok(!/feeder/i.test(inBuild.replaceAll('a-feeder', '')), 'a member reads no "feeder" (the fixture\'s branch aside)');
   assert.ok(!inBuild.includes('ship to live yourself'), "a build member's work goes into the build");
-  assert.ok(inBuild.indexOf('You are a member') < inBuild.indexOf('In Build 8, a build cabal'), 'who it is comes before the branch steps');
+  assert.ok(inBuild.indexOf('You are a member') < inBuild.indexOf('In Build 8: your base'), 'who it is comes before the branch steps');
   const goalRole: CabalRole = { lead: false, name: 'Worker machines', overseer: "Worker machines' Overseer", ref: 'Delve #4', build: null };
   const goal = cabalLines(goalRole).join('\n');
   assert.match(goal, /led by Worker machines' Overseer \(Delve #4\)/);

@@ -112,6 +112,26 @@ test('a build cabal: each column comes from facts', async () => {
   assert.match(text, /\| merged \| \$4\.62 \| risk low \| claims src\/running-turn\.ts src\/turns\//);
 });
 
+test('an answered ask stays on the board with its answer, the newest ten, and counts nowhere as open (#2289)', async () => {
+  const lead = minion('Answers lead', null, null, 0);
+  const asker = minion('Asker', null, null, 0);
+  store.joinCabal(asker.id, lead.id, p.id, asker.title);
+  const ids = Array.from({ length: 12 }, (_, i) => store.addCabalAsk(lead.id, asker.id, `Ask ${i}`, false, 1000 + i));
+  const open = store.addCabalAsk(lead.id, asker.id, 'Still open', true, 2000);
+  for (const [i, id] of ids.entries()) store.answerCabalAsk(id, `Answer ${i}`, '#1 lead', 3000 + i);
+  const b = (await readBoard(store, lead.id, deps))!;
+  assert.deepEqual(
+    b.asks.map((a) => [a.text, a.answer]),
+    [['Still open', null], ...Array.from({ length: 10 }, (_, i) => [`Ask ${11 - i}`, `Answer ${11 - i}`])],
+    'the open ones, then the ten answered most lately, newest first',
+  );
+  assert.equal(b.asks[0].id, open);
+  assert.equal(b.members[0].state, 'blocked', 'the open blocking ask still blocks');
+  const text = boardText(b);
+  assert.match(text, /Open asks \(1\):\n- ask \d+ BLOCKING from Asker #\d+ .*Still open/);
+  assert.doesNotMatch(text, /Ask 11/, "the agents' read lists open asks only");
+});
+
 test('a goal cabal (no branch): shipped from its ship note, and a file two members list is flagged', async () => {
   const lead = minion('Docs sweep lead', null, null, 0);
   store.props.set('minion', lead.id, p.id, { effortName: 'Docs sweep' }, 'Cara');

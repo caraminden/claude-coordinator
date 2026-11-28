@@ -3,16 +3,17 @@
 // first and a blocking ask pinned on top, a red-run bar when the lead set one, and "Roster of N, nobody started yet"
 // before anyone starts. It only reads: src/cabal-board.ts builds the board, and people answer by writing in the lead's chat.
 import { api, h, icon, threadHref, view } from './base.js';
+import { shortDuration } from './chattext.js';
 import { emptyCard, schemeTag, toneChip } from './look.js';
 import { loadingLine } from './ui/state.js';
 
 /**
  * @typedef {'roster' | 'sealed' | 'running' | 'idle' | 'blocked' | 'merged' | 'shipped' | 'closed'} MemberState
  * @typedef {{ row: number, label: string, title: string, number: number | null, project_id: number | null, scheme: string | null, open: boolean, lane: string, role: string, state: MemberState, word: string, after: string | null, note: string, note_at: number | null, spend: number, risk: string | null, claims: string[], files: string[], doubled: string[] }} BoardMember
- * @typedef {{ id: number, from: string, number: number | null, scheme: string | null, text: string, blocking: boolean, opened_at: number }} BoardAsk
+ * @typedef {{ id: number, from: string, number: number | null, scheme: string | null, text: string, blocking: boolean, opened_at: number, answer: string | null, answered_at: number | null }} BoardAsk
  * @typedef {{ lead: { id: number, number: number | null, title: string, spend: number, project_id: number, open: boolean }, name: string, kind: 'build' | 'goal', build: number | null, members: BoardMember[], asks: BoardAsk[], log: { at: number, by: string, text: string }[], red: { text: string, at: number } | null, counts: { members: number, started: number, merged: number, open: number, running: number, spend: number } }} Board
  * @typedef {'open' | 'all' | 'done'} Filter
- * @typedef {{ filter: Filter, open: number | null, shown: boolean }} LedgerState
+ * @typedef {{ filter: Filter, open: number | null, shown: boolean, lines: Set<string> }} LedgerState
  */
 
 /** @type {Record<MemberState, string>} the chip's tone (public/ui/base.css) */
@@ -47,23 +48,96 @@ function boardHead(b, projectId) {
   ];
 }
 
-/** The red-run bar, then the open asks: blocking ones pinned (all of them on the page, the first in a chat). @param {Board} b @param {boolean} all @param {((a: BoardAsk) => void) | null} reply */
-function pinned(b, all, reply) {
+/** The line's separator: the summary is a flex row, which drops plain spaces at its items' edges. */
+const SEP = '\u00a0·\u00a0';
+
+/** How long an ask has waited: "just now", "12 min", "1h 5m". @param {number} ms */
+const waited = (ms) => (ms < 60_000 ? 'just now' : ms < 3_600_000 ? `${Math.floor(ms / 60_000)} min` : shortDuration(ms));
+
+/** Text with its `code` spans. @param {string} text */
+const inline = (text) => text.split(/`([^`]+)`/).map((part, i) => (i % 2 ? h('code', {}, part) : part));
+
+/**
+ * An ask's one line as its parts (#2289): its "1) … 2) …" forks, when it numbers two or more in order, and each part's
+ * "Recommended: …" split out. Asks are stored as one line (the route folds line breaks), so this is all the shape they have.
+ * @param {string} text
+ */
+export function askParts(text) {
+  /** @type {{ at: number, len: number }[]} */
+  const marks = [];
+  for (const m of text.matchAll(/(^|\s)(\d)\)\s+/g)) if (Number(m[2]) === marks.length + 1) marks.push({ at: /** @type {number} */ (m.index) + m[1].length, len: m[0].length - m[1].length });
+  const forks = marks.length >= 2 ? marks.map((m, i) => text.slice(m.at + m.len, marks[i + 1]?.at ?? text.length).trim()) : [];
+  const split = (/** @type {string} */ part) => {
+    const i = part.search(/\bRecommended:\s*/i);
+    return i < 0
+      ? { text: part, rec: '' }
+      : {
+          text: part.slice(0, i).trim(),
+          rec: part
+            .slice(i)
+            .replace(/^Recommended:\s*/i, '')
+            .trim(),
+        };
+  };
+  return { intro: split((forks.length ? text.slice(0, marks[0].at) : text).trim()), forks: forks.map(split) };
+}
+
+/** A part of an ask: its words, a short "Title: " in bold, and its recommendation called out. @param {{ text: string, rec: string }} part @param {boolean} titled */
+function askPart(part, titled) {
+  const c = titled ? part.text.indexOf(': ') : -1;
+  return [part.text ? h('div', {}, ...(c > 0 && c <= 60 ? [h('b', {}, part.text.slice(0, c)), ': ', inline(part.text.slice(c + 2))] : [inline(part.text)])) : null, part.rec ? h('div', { class: 'cabal-rec' }, h('b', {}, 'Recommended'), ' ', inline(part.rec)) : null];
+}
+
+/**
+ * One collapsed line in the chat's toggle style (.msg.coord, as the "messages between" row): what it is and how long
+ * it has waited, the full text behind the toggle. `key` keeps it open across redraws.
+ * @param {LedgerState} s @param {string} key @param {(string | Node)[]} who @param {string} preview @param {(Node | null)[]} body @param {string | null} [tone]
+ */
+function line(s, key, who, preview, body, tone) {
+  return h(
+    'details',
+    { class: 'msg coord cabal-line', 'data-tone': tone ?? null, open: s.lines.has(key), ontoggle: (/** @type {Event} */ e) => (/** @type {HTMLDetailsElement} */ (e.currentTarget).open ? s.lines.add(key) : s.lines.delete(key)) },
+    h('summary', {}, h('span', { class: 'who' }, ...who), h('span', { class: 'preview' }, preview)),
+    h('div', { class: 'cabal-line-body' }, ...body),
+  );
+}
+
+/** An ask as a line: who asked and how long it waits, or "answered"; open, its forks and the Overseer's answer. @param {Board} b @param {BoardAsk} a @param {LedgerState} s @param {((a: BoardAsk) => void) | null} reply */
+function askLine(b, a, s, reply) {
+  const open = a.answered_at == null;
+  const parts = askParts(a.text);
+  const from = `${a.from}${a.number ? ` ${a.scheme ? `${a.scheme} ` : ''}#${a.number}` : ''}`;
+  return line(
+    s,
+    `ask-${a.id}`,
+    [h('span', { class: 'name' }, `${from} asked the Overseer`), ...(open ? [...(a.blocking ? [SEP, h('b', { class: 'cabal-blocking' }, 'blocking')] : []), h('span', {}, `${SEP}${waited(Date.now() - a.opened_at)}`)] : [SEP, h('span', { class: 'cabal-answered' }, 'answered')])],
+    a.text,
+    [
+      ...askPart(parts.intro, false),
+      parts.forks.length ? h('ol', { class: 'cabal-forks' }, ...parts.forks.map((f) => h('li', {}, ...askPart(f, true)))) : null,
+      a.answer != null ? h('div', { class: 'cabal-answer' }, h('div', { class: 'cabal-when' }, `${overseer(b)} answered${a.answered_at ? ` · ${clock(a.answered_at)}` : ''}`), h('div', {}, inline(a.answer))) : null,
+      open && reply ? h('div', {}, h('button', { type: 'button', class: 'small secondary', onclick: () => reply(a) }, 'Reply')) : null,
+    ],
+    open && a.blocking ? 'blocking' : open ? null : 'answered',
+  );
+}
+
+/**
+ * The red-run line, then the asks as lines: open ones, blocking first (in a chat, the first three), then on the page
+ * the newest answered ones. Nothing here asks a person: a member's ask is for the Overseer, which posts a card itself.
+ * @param {Board} b @param {LedgerState} s @param {boolean} all @param {((a: BoardAsk) => void) | null} reply
+ */
+function pinned(b, s, all, reply) {
   const out = [];
-  if (b.red) out.push(h('div', { class: 'cabal-red', role: 'status', title: b.red.text }, h('b', {}, 'Red run '), h('span', { class: 'cabal-when' }, clock(b.red.at)), ' ', b.red.text));
-  const blocking = b.asks.filter((a) => a.blocking);
-  for (const a of all ? [...blocking, ...b.asks.filter((x) => !x.blocking)] : blocking.slice(0, 1))
-    out.push(
-      h(
-        'div',
-        { class: 'cabal-ask', 'data-blocking': a.blocking ? '' : null },
-        h('div', { title: a.text }, h('b', {}, a.blocking ? 'Blocking ask' : 'Ask'), ` · ${a.from}${a.number ? ` ${a.scheme ? `${a.scheme} ` : ''}#${a.number}` : ''}: `, a.text),
-        reply ? h('button', { type: 'button', class: 'small secondary', onclick: () => reply(a) }, 'Reply') : null,
-      ),
-    );
-  const rest = b.asks.length - (all ? b.asks.length : Math.min(1, blocking.length));
-  if (!all && rest > 0) out.push(h('div', { class: 'cabal-more' }, `${rest} more open ask${rest === 1 ? '' : 's'} on the board`));
-  return out;
+  if (b.red) out.push(line(s, 'red', [h('span', { class: 'name' }, h('b', { class: 'cabal-blocking' }, 'Red run')), h('span', {}, `${SEP}${clock(b.red.at)}`)], b.red.text, [h('div', {}, inline(b.red.text))], 'red'));
+  const open = b.asks.filter((a) => a.answered_at == null);
+  const asks = [...open.filter((a) => a.blocking), ...open.filter((a) => !a.blocking)];
+  const shown = all ? asks : asks.slice(0, 3);
+  for (const a of shown) out.push(askLine(b, a, s, reply));
+  if (all) for (const a of b.asks.filter((x) => x.answered_at != null).sort((x, y) => (y.answered_at ?? 0) - (x.answered_at ?? 0))) out.push(askLine(b, a, s, null));
+  const rest = asks.length - shown.length;
+  if (rest > 0) out.push(h('a', { class: 'cabal-more', href: cabalHref(/** @type {number} */ (b.lead.project_id), b.lead.number) }, `${rest} more open ask${rest === 1 ? '' : 's'} on the board →`));
+  return out.length ? [h('div', { class: 'cabal-lines' }, ...out)] : [];
 }
 
 /** What a row says under "Note or waits on". @param {BoardMember} m */
@@ -115,7 +189,7 @@ function table(rows, b, s, projectId, redraw) {
         );
         if (!open) return [tr];
         const files = m.claims.length ? m.claims : m.files;
-        const ask = b.asks.find((a) => a.number != null && a.number === m.number && a.scheme === m.scheme);
+        const ask = b.asks.find((a) => a.answered_at == null && a.number != null && a.number === m.number && a.scheme === m.scheme);
         const det = h(
           'td',
           { colspan: '4', class: 'cabal-det' },
@@ -178,7 +252,7 @@ export async function renderCabalPanel(fresh = false) {
   const slot = document.getElementById('chat-cabal');
   const t = view?.ticket;
   if (!slot || !t) return;
-  if (!panel || panel.ticket !== t.id) panel = { ticket: t.id, board: null, read: false, s: { filter: 'open', open: null, shown: false } };
+  if (!panel || panel.ticket !== t.id) panel = { ticket: t.id, board: null, read: false, s: { filter: 'open', open: null, shown: false, lines: new Set() } };
   const mine = panel;
   if (fresh || !mine.read) {
     mine.read = true; // once a chat open, then on the stream's news: every head redraw calls this
@@ -222,7 +296,7 @@ function drawPanel(slot, p) {
       'div',
       { class: 'cabal-panel' },
       h('div', { class: 'cabal-bar' }, ...boardHead(b, projectId), h('span', { class: 'cabal-acts' }, toggle, h('a', { class: 'small', href: cabalHref(projectId, b.lead.number) }, 'Board →'))),
-      ...pinned(b, false, reply),
+      ...pinned(b, p.s, false, reply),
       p.s.shown ? h('div', { class: 'cabal-scroll' }, h('div', { class: 'cabal-tools' }, filters(b, p.s, redraw)), ledger(b, p.s, projectId, redraw)) : null,
     ),
   );
@@ -236,7 +310,7 @@ let page = null;
 /** The page at #/p/N/cabal/M, M the lead's #N. @param {number} projectId @param {number} number */
 export function cabalPage(projectId, number) {
   const el = h('section', { class: 'artifacts-main cabal-main' }, loadingLine('Reading the board…'));
-  page = { el, projectId, number, board: null, error: null, s: { filter: 'open', open: null, shown: true } };
+  page = { el, projectId, number, board: null, error: null, s: { filter: 'open', open: null, shown: true, lines: new Set() } };
   readPage(page);
   return el;
 }
@@ -268,7 +342,7 @@ function drawPage(p) {
       'div',
       { class: 'cabal-panel cabal-page' },
       h('div', { class: 'cabal-bar' }, ...boardHead(b, p.projectId), h('span', { class: 'cabal-acts' }, filters(b, p.s, redraw))),
-      ...pinned(b, true, null),
+      ...pinned(b, p.s, true, null),
       ledger(b, p.s, p.projectId, redraw),
       b.log.length ? h('h3', { class: 'cabal-log-head' }, `${overseer(b)}'s log`) : null,
       logList(b),

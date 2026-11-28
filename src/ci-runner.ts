@@ -65,6 +65,13 @@ export function schemeLabels(schemeName: string): string[] {
  */
 export const poolKey = (scheme: number) => `ci_pool:${scheme}`;
 export const poolOn = (store: { getSetting<T>(key: string): T | null }, scheme: number) => store.getSetting<boolean>(poolKey(scheme)) === true;
+/**
+ * Why switching a scheme's pool on is refused, or null. Until P6 moves every scheme over, a scheme whose jobs nothing can
+ * take yet (Windows desktop jobs, no fallback) would wait forever, so only the first live scheme can be switched on (Cara,
+ * 2026-11-28, on Plot 11's ship card: "Lock until move-over"). Off is always allowed.
+ * shortcut: one scheme by name, until P6 ships and deletes this.
+ */
+export const poolLocked = (scheme: string, on: boolean) => (on && scheme !== 'Theory of Crafting' ? `Only Theory of Crafting can run on the runner pool until every scheme has been moved over to it (Plot 11's P6). ${scheme} keeps its standing runners until then.` : null);
 
 /**
  * Citadel's own one-job runners, by name: the runner pool's (src/runner-slots.ts poolName, `pool-m…`) and perigee's CI

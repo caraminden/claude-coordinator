@@ -690,3 +690,11 @@ test('the switch: a scheme is on the pool only once a member turns it on, and of
   assert.equal(store.getSetting(poolKey(p.id)), null);
   await assert.rejects(patch({ on: 'yes' }), /on must be true/);
 });
+
+import { poolLocked } from '../src/ci-runner.ts';
+
+test('until P6 moves every scheme over, only Theory of Crafting can be switched on; any scheme can switch off (Cara, 2026-11-28, "Lock until move-over")', () => {
+  assert.equal(poolLocked('Theory of Crafting', true), null);
+  assert.match(poolLocked('Peek', true) ?? '', /Only Theory of Crafting/);
+  assert.equal(poolLocked('Peek', false), null);
+});

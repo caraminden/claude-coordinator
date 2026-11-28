@@ -35,6 +35,7 @@ paths:
   - "test/land-train-fixture.ts"
   - "test/land-recover-fixture.ts"
   - "test/scheme-setup-land-fixture.ts"
+  - "test/queue-cases.ts"
   - "test/land.test.ts"
   - "test/land-2.test.ts"
   - "test/land-3.test.ts"

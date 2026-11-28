@@ -492,7 +492,8 @@ queueCases({
           const [, , who, phase] = readFileSync(join(q.state, 'land-queue', t), 'utf8').split('\n');
           return who === `ticket/${i}-x` && /running the check/.test(phase ?? '');
         }),
-      served: () => q.landed().map((s) => Number(s.split(': ')[1])),
+      // Each landing's own commit, "f<i>.txt: <i>", or -1 for any other subject.
+      served: () => q.landed().map((s) => (/^f(\d+)\.txt: \1$/.test(s) ? Number(s.split(': ')[1]) : -1)),
       tickets: q.tickets,
       issued: q.issued,
     };
@@ -529,6 +530,7 @@ test('a waiter gives up once nothing has moved for the stall limit, with nothing
   }
 });
 
+// The template's only, as above.
 test('the stall limit is longer than the check limit, so a waiter outlasts a check that runs to its limit', async () => {
   // The holder's branch has a file that makes the check hang; the waiter's does not.
   const q = queueSetup(2, '[ ! -e f1.txt ] || sleep 30');

@@ -166,6 +166,7 @@ export function queueCases(side: QueueSide) {
       await until('a to hold the lock', () => l.holds(1));
       const b = start(2);
       await until('b to wait', () => /2nd in line/.test(b.stderr()));
+      assert.ok(!l.holds(2), 'b waits while a holds the lock');
       a.child.kill('SIGKILL'); // the template's check runs on without the lock, until the gate opens below
       await until('b to get the lock', () => new RegExp(`got the ${lock}`).test(b.stderr()));
       open();
@@ -221,6 +222,8 @@ export function queueCases(side: QueueSide) {
       open(gate.a);
       assert.equal(await a.exit, 0, a.stderr());
       await until('c to take the lock past the stopped b', () => l.holds(3));
+      assert.match(c.stderr(), new RegExp(`got the ${lock}`));
+      assert.ok(!l.holds(2), 'the stopped b took nothing');
       // Awake again while the one that passed it has the lock: that is a party in line, not something outside it, and
       // like any holder it is ahead of every waiter (#1002, #1007).
       process.kill(b.child.pid!, 'SIGCONT');

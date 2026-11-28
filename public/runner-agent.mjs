@@ -550,7 +550,7 @@ export class SelfUpdate {
       this.waitingSince ||= this.now();
       // A PC whose slots never all end at once still updates: after a while no new one starts.
       if (this.now() - this.waitingSince > UPDATE_DRAIN_MS && !this.jobs.draining) this.jobs.draining = UPDATE_DRAINING;
-      return this.say('waiting', `version ${this.target.version} waits for ${busy}`);
+      return this.say('waiting', `waits for ${busy}`);
     }
     this.running = true;
     this.jobs.busy = UPDATING;
@@ -571,7 +571,7 @@ export class SelfUpdate {
   /** Every stale file fetched and checked first, then swapped in, the old ones kept; any failure puts them all back. */
   async swap(stale, have) {
     const { version, files } = this.target;
-    this.say('updating', `swapping in version ${version}`);
+    this.say('updating', 'swapping in the new files');
     const part = (n) => join(this.dir, `${n}.new`);
     try {
       for (const n of stale) {

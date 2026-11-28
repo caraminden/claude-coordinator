@@ -557,14 +557,14 @@ const CI_AGENT_UPDATE = {
 /** Each CI runner agent's version and where its own update stands (#2310), as a toned chip and its why.
  * @param {NonNullable<import('./types.js').MachineRow['runner_agents']>[number]} r */
 function ciAgentVersion(r) {
-  const os = r.os === 'linux' ? 'Linux' : 'Windows';
+  const os = h('b', {}, r.os === 'linux' ? 'Linux' : 'Windows');
   const u = r.update;
-  if (!r.self_update) return h('div', { class: 'small' }, toneChip('warn', 'Can’t update itself'), ` ${os}: installed before it could. Its install, run once more, fixes that.`);
-  if (!u) return h('div', { class: 'small' }, toneChip('neutral', 'Checking'), ` ${os}: hasn't said its version yet.`);
+  const row = (/** @type {(Node | string)[]} */ head, /** @type {string} */ why = '') => h('div', { class: 'ci-agent small' }, h('div', {}, ...head), why ? h('p', { class: 'look-prose ci-agent-why' }, why) : '');
+  if (!r.self_update) return row([os, ' ', toneChip('warn', 'Can’t update itself')], 'Installed before it could.');
+  if (!u) return row([os, ' ', toneChip('neutral', 'Checking')], 'It hasn’t said its version yet.');
   const chip = { current: toneChip('ok', 'Up to date'), waiting: toneChip('info', 'Update waiting'), updating: toneChip('info', 'Updating'), failed: toneChip('danger', 'Update failed') }[u.state];
-  const behind = u.state !== 'current' && r.latest && r.latest !== u.version ? [', Citadel has ', h('code', {}, r.latest)] : [];
-  const why = u.why ? `. ${u.why[0].toUpperCase()}${u.why.slice(1)}.` : '';
-  return h('div', { class: 'small' }, chip, ` ${os}: version `, h('code', {}, u.version), ...behind, why);
+  const behind = u.state !== 'current' && r.latest && r.latest !== u.version ? [' → ', h('code', {}, r.latest)] : [];
+  return row([os, ' ', chip, ' ', h('span', { class: 'ci-agent-ver' }, h('code', {}, u.version), ...behind)], u.why ? `${u.why}.` : '');
 }
 
 /** Why an old CI runner agent wants updating (Build 7 M6b), and the line for each one there.

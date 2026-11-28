@@ -264,6 +264,10 @@ button.link.mcard-open, .mcard button.link { align-self: flex-start; display: in
 }
 .mcard-details summary { cursor: pointer; color: var(--muted); }
 .mcard-details .machine-body { border-top: 0; padding: 0.5rem 0 0; }
+/* The CI agent line (#2310): one row per runner agent, its reason muted under it. */
+.ci-agent + .ci-agent { margin-top: 0.5rem; }
+.ci-agent-why { margin-top: 0.15rem; }
+.ci-agent-ver { white-space: nowrap; }
 .mcard-lent { margin: 0.2rem 0 0.8rem; }
 .mcard-lent-one { cursor: help; }
 .machine-empty .machine-connect-first { justify-self: start; }

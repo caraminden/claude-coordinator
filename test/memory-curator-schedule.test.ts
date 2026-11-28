@@ -46,7 +46,7 @@ test('a run is skipped free with no notes or an open tidy, and otherwise its bri
       made.push(t.id);
       return { id: t.id, number: t.number! };
     },
-    runner: { emit: () => {}, send: (_id: number, _by: string, text: string) => sent.push(text), limitWait: () => null, netWait: () => null, killWait: () => null } as any,
+    runner: { emit: () => {}, send: (_id: number, _by: string, text: string) => sent.push(text), limitWait: () => null, netWait: () => null, killWait: () => null, failWait: () => null } as any,
     broadcast: () => {},
     by: 'Citadel',
     dataDir: '/data',

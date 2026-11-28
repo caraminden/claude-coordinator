@@ -44,7 +44,7 @@ const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Other scheme', null);
 const pushes: { ticket: number; text: string }[] = [];
 const alerts: { ticket: number; text: string }[] = [];
-function makeRunner(retryMs = 20) {
+function makeRunner(retryMs = 300) {
   const r = new Runner(
     store,
     () => {},
@@ -78,23 +78,21 @@ const events = (id: number, kind: string) =>
     .map((e) => JSON.parse(e.data).text as string);
 const BOOM = 'API Error: 500 Internal server error';
 
-test('a failed turn is retried once, telling the minion why, and nobody is pushed when the retry works', async () => {
+test('a failed turn is retried once, telling the minion why, and its Taskmaster hears nothing when the retry works', async () => {
   const id = minion();
   setRelease(BOOM);
   const before = turnsRun();
   runner.send(id, 'Cara', 'go');
   await until('the failed turn', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.ok(runner.failWait(id), 'it waits for its retry');
-  assert.equal(store.getTicket(id)!.note, 'Failed: retries by itself shortly');
+  assert.equal(store.getTicket(id)!.note, BOOM, 'the note keeps its own words');
+  assert.match(events(id, 'error').at(-1)!, /retries it by itself once in about a minute/);
   setRelease('ok');
   await until('the retry', () => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.status === 'idle');
   assert.match(lastPrompt(), /Your last turn failed[\s\S]*API Error: 500 Internal server error[\s\S]*check the state of your work/);
   assert.equal(runner.failWait(id), null);
   assert.equal(store.getTicket(id)!.note, null);
-  assert.deepEqual(
-    pushes.filter((p) => p.ticket === id),
-    [],
-  );
+  assert.equal(pushes.filter((p) => p.ticket === id).length, 1, 'people are pushed as before');
   assert.deepEqual(
     alerts.filter((a) => a.ticket === id),
     [],
@@ -109,14 +107,14 @@ test("a second failure in a row stops, stays in error and wakes the owner's Task
   await until('the failed retry', () => turnsRun() === before + 2 && !runner.isRunning(id) && alerts.some((a) => a.ticket === id));
   const t = store.getTicket(id)!;
   assert.equal(t.status, 'error');
-  assert.equal(t.note, 'Failed twice: its Taskmaster was told');
+  assert.equal(t.note, BOOM);
   assert.equal(runner.failWait(id), null);
   const mine = alerts.filter((a) => a.ticket === id);
   assert.equal(mine.length, 1);
   assert.match(mine[0].text, /API Error: 500 Internal server error/);
   assert.match(mine[0].text, /retried once/);
   assert.match(events(id, 'error').at(-1)!, /retried once[\s\S]*Taskmaster/);
-  assert.equal(pushes.filter((p) => p.ticket === id).length, 1, 'people are pushed on the second failure');
+  assert.equal(pushes.filter((p) => p.ticket === id).length, 2, 'people are pushed on each failure, as before');
   // Nothing more by itself: the next turn is a person's, and it works.
   setRelease('ok');
   runner.send(id, 'Cara', 'carry on');

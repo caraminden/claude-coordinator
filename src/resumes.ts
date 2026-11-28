@@ -113,7 +113,6 @@ export interface FailResume {
 }
 
 /** A turn that failed for any other reason is retried once (#2258); a second failure in a row tells its owner's Taskmaster. */
-export const FAIL_NOTE = 'Failed: retries by itself shortly';
 /** The retry's prompt: the failure's words, cut to a few lines. */
 export const retryFailPrompt = (error: string) =>
   `Your last turn failed with this error, and Citadel retried it by itself once:\n\n${error.length > 600 ? error.slice(0, 599) + '…' : error}\n\nA command may have half-run when it failed (a ship, a push, a deploy, a test run), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;

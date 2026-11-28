@@ -19,7 +19,7 @@ for (const [what, sql] of [
     const runs = new ScheduledRuns({
       store,
       newMinion: (project, m, by) => makeMinion(store, project, m, by, dir),
-      runner: { emit: () => {}, send: () => {}, limitWait: () => null, netWait: () => null, killWait: () => null } as any,
+      runner: { emit: () => {}, send: () => {}, limitWait: () => null, netWait: () => null, killWait: () => null, failWait: () => null } as any,
       broadcast: () => {},
       by: 'Citadel',
       dataDir: '/data',

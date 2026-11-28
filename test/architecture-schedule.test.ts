@@ -53,7 +53,7 @@ test('an inactive scheme skips at no cost; an active one runs', async () => {
       const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
       return { id: t.id, number: t.number! };
     },
-    runner: fake<ScheduledRunDeps['runner']>({ emit: fake<Runner['emit']>(() => {}), send: fake<Runner['send']>(() => {}), limitWait: () => null, netWait: () => null, killWait: () => null }),
+    runner: fake<ScheduledRunDeps['runner']>({ emit: fake<Runner['emit']>(() => {}), send: fake<Runner['send']>(() => {}), limitWait: () => null, netWait: () => null, killWait: () => null, failWait: () => null }),
   });
   addArchitectureChecks(store, '/data');
   // The window opens at the row's making: put that a day back so minions made in the same millisecond still count.

@@ -303,7 +303,7 @@ test('a slot whose minion was made before a kill finishes with that minion, not 
       const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
       return { id: t.id, number: t.number! };
     },
-    runner: { emit: () => {}, send: (id: number, _by: string, text: string) => sent.push({ id, text }), limitWait: () => null, netWait: () => null, killWait: () => null } as any,
+    runner: { emit: () => {}, send: (id: number, _by: string, text: string) => sent.push({ id, text }), limitWait: () => null, netWait: () => null, killWait: () => null, failWait: () => null } as any,
     broadcast: () => {},
     by: 'Citadel',
     dataDir: '/data',

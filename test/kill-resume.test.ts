@@ -173,16 +173,17 @@ test("a person's Stop is never resumed", async () => {
   assert.equal(store.getTicket(id)!.status, 'idle');
 });
 
-test('"claude exited with code 1" is no kill: it waits for a failed turn\'s one retry (#2258), its words keeping the last lines of its stderr', async () => {
+test('"claude exited with code 1" is no kill: it waits for a failed turn\'s one retry (#2258), and its error keeps the last lines of its stderr', async () => {
   pushes.length = 0;
   const id = minion();
   runner.send(id, 'Cara', 'crash now');
   await until('the turn to fail', () => store.getTicket(id)!.status === 'error' && !runner.isRunning(id) && !!runner.failWait(id), 10_000);
   assert.equal(runner.killWait(id), null, 'not a kill resume');
   assert.equal(turnsOf(id), 1);
-  const said = events(id, 'note').at(-1)!;
-  assert.match(said, /TypeError: something inside claude broke\n {4}at main \(cli\.js:1:1\)\n\(claude exited with code 1\)\nCitadel retries it by itself once/);
-  assert.equal(pushes.length, 0, 'nobody is pushed before the retry');
+  const errors = events(id, 'error');
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /TypeError: something inside claude broke\n {4}at main \(cli\.js:1:1\)\n\(claude exited with code 1\)\nCitadel retries it by itself once/);
+  assert.equal(pushes.length, 1);
   assert.equal(runner.stop(id), true, 'a stop ends the wait');
   assert.equal(runner.failWait(id), null);
 });

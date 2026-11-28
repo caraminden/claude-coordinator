@@ -83,7 +83,7 @@ import { clockTime, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
-import { FAIL_NOTE, KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, retryFailedText, retryFailPrompt, type FailResume, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
+import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, retryFailedText, retryFailPrompt, type FailResume, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
 import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, type OnAccount } from './line-place.ts';
 import { runningTurn, runningTurnOff, START_GRACE_MS, wrapperAlive, wrapperAliveOff, wrapperInProc, type TurnAt } from './running-turn.ts';
@@ -3330,7 +3330,7 @@ export class Runner {
         this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.resumes.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
-      if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE || ticket.note === FAIL_NOTE) this.store.updateTicket(ticket.id, { note: null });
+      if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE) this.store.updateTicket(ticket.id, { note: null });
       // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
       else if (ticket.kind === 'coordinator' && ticket.note) this.store.updateTicket(ticket.id, { note: null });
       // One-tap replies answer the turn that offered them; a new turn makes them stale.
@@ -3949,19 +3949,21 @@ export class Runner {
       this.store.updateTicket(ticketId, { note: NET_NOTE });
       return;
     }
-    // Any other failure is retried once a minute later (#2258), with no push: one that fixes itself needs nobody.
-    if (out.kind === 'failed' && out.retry) {
-      this.resumes.waitForRetry(ticketId, out.retry.retries, why || exited);
-      this.emit(ticketId, 'note', { text: `${text}\nCitadel retries it by itself once in about a minute; if that fails too, its Taskmaster is told. A message now runs instead of the retry.` });
-      if (!keepState) this.store.updateTicket(ticketId, { note: FAIL_NOTE });
-      return;
-    }
     const netTries = out.kind === 'net' ? out.spent!.tries : 0;
+    // Any other failure is retried once a minute later (#2258); a second in a row tells its owner's Taskmaster.
+    const retrying = out.kind === 'failed' && out.retry;
     const twice = out.spent?.via === 'fail';
+    if (retrying) this.resumes.waitForRetry(ticketId, out.retry!.retries, why || exited);
     const event = this.emit(ticketId, 'error', {
-      text: netTries ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : twice ? `${text}\nIt was already retried once after a failed turn, so it stopped, and its Taskmaster was told: send a message to carry on.` : text,
+      text: netTries
+        ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.`
+        : retrying
+          ? `${text}\nCitadel retries it by itself once in about a minute; if that fails too, its Taskmaster is told. A message now runs in place of the retry.`
+          : twice
+            ? `${text}\nIt was already retried once after a failed turn, so it stopped, and its Taskmaster was told: send a message to carry on.`
+            : text,
     });
-    this.setFailNote(ticketId, { note: netTries ? `Network: stopped retrying after ${netTries} resumes` : twice ? 'Failed twice: its Taskmaster was told' : short(first) });
+    this.setFailNote(ticketId, { note: netTries ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
     this.onTurnError(ticketId, text, event.id);
     if (twice) this.onRetryFailed(ticketId, retryFailedText('it was retried once a minute later, and the retry failed too', text));
   }

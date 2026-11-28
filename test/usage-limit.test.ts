@@ -165,7 +165,8 @@ test('any other failure shows its own words, in the chat, the note and the push'
   const t = await turn(id, 'API Error: 529 Overloaded');
   assert.equal(t.status, 'error');
   assert.equal(t.note, 'API Error: 529 Overloaded');
-  assert.equal(events(id, 'error').at(-1), 'API Error: 529 Overloaded\n(claude ended without finishing)');
+  // It waits for its one retry, and says so (#2258).
+  assert.equal(events(id, 'error').at(-1)!.split('\nCitadel retries it by itself once')[0], 'API Error: 529 Overloaded\n(claude ended without finishing)');
   assert.equal(pushes.at(-1)?.text, 'API Error: 529 Overloaded\n(claude ended without finishing)');
   pushes.length = 0;
 });

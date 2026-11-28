@@ -222,6 +222,13 @@ test('flags cabal and Build <n> said of a group, and "major build" (#2270: a gro
   assert.match(explain(misusedWords('The cabal is done.')), /Plot/);
 });
 
+test('leaves a compiled desktop, APK or release build alone (#2285)', () => {
+  for (const ok of ['- **Desktop app:** build 12 is published from CI.', 'Desktop build 13 is published from CI and replaces build 12.', '- **Desktop app:** desktop build 14 is published from CI.', 'APK build 5 is out.', 'release build 3 is out.']) assert.deepEqual(flagged(ok), [], ok);
+  assert.deepEqual(flagged("Build 11's Overseer"), ['Build 11']);
+  assert.deepEqual(flagged('merged into Build 11'), ['Build 11']);
+  assert.deepEqual(flagged('a major build'), ['major build']);
+});
+
 test('leaves Plot, compiling builds and quoted cabal alone', () => {
   for (const ok of ['Plot 11 shipped.', 'Merged into Plot 11.', 'The APK build is done.', 'Build the feature.', 'Use the `cabal` tool.', 'The branch build/11 is ready.', '"Cabal" is retired.']) assert.deepEqual(flagged(ok), [], ok);
 });

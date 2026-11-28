@@ -46,7 +46,7 @@ export const RESERVED: Reserved[] = [
   {
     term: 'major build',
     why: 'A group of minions is a "Plot" now, and "Build <n>" or a "major build" for it is retired (Cara, 2026-11-27, picked "Plot" on #2270\'s card); a build that compiles (an APK build, "build the feature") is fine',
-    match: /\bmajor\s+builds?\b|\bbuild\s+#?\d+\b/gi,
+    match: /\bmajor\s+builds?\b|(?<!\b(?:desktop|apk|android|windows|release|replaces|supersedes)\s)\bbuild\s+#?\d+\b(?!\s+(?:is|was)\s+published\b)/gi,
     suggest: '"Plot 11" for the group ("merged into Plot 11", "Plot 11 shipped")',
   },
   {

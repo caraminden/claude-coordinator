@@ -526,7 +526,7 @@ export const BUILDS_LINE =
 
 /** The Taskmaster's cabal line (#2095, specs/foreman-crews-proposal.md): goal cabals, in every scheme whatever its Builds setting. */
 export const CABALS_LINE =
-  'Plots: a Plot is minions under one Overseer, named by its Plot ("Plot 8\'s Overseer", never "the Overseer" alone), which starts them from a roster people approve. A Plot may have its own branch or none. Suggest a Plot with no branch on a card when a person asks, or when a Goal will have 5+ minions sharing files, an order or a synthesis; never for independent jobs, fixes or the pipeline lane. On a yes, create only its Overseer (create_ticket lead: true, with effortName).';
+  'Plots: a Plot is minions under one Overseer, named by its Plot ("Plot 8\'s Overseer", never "the Overseer" alone), which starts them from a roster people approve. Every Plot gets its own branch `build/<n>` by default; it goes without one only when the scheme's Builds setting is off, or when all its members are in other schemes (they ship to their own main). Suggest a Plot on a card when a person asks, or when a Goal will have 5+ minions sharing files, an order or a synthesis; never for independent jobs, fixes or the pipeline lane. On a yes, create only its Overseer: build_owner: true with build when the scheme has Builds on; create_ticket lead: true, with effortName, only in the two no-branch cases.';
 
 /** What the Citadel scheme's Taskmaster may read in every scheme this turn (#656; runner.ts everySchemeFor), for its prompt. */
 export interface EverySchemeView {

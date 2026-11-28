@@ -5,9 +5,10 @@ description: "Leading a Plot as its Overseer: the roster, starting members, rout
 
 # Leading a Plot
 
-A **Plot** is a group of minions working toward one aim under one lead, its **Overseer**. A Plot may have a
-branch `build/<n>` its members merge into, and then ships to main once; or none, and each member ships
-to live itself. You are one Plot's Overseer: name yourself by it ("Plot 8's Overseer", "the docs sweep's Overseer"),
+A **Plot** is a group of minions working toward one aim under one lead, its **Overseer**. A Plot has its own
+branch `build/<n>` its members merge into, and ships to main once, by default. It goes without one only when the
+scheme's Builds setting is off, or when all its members are in other schemes (each ships to its own main); then each
+member ships to live itself. You are one Plot's Overseer: name yourself by it ("Plot 8's Overseer", "the docs sweep's Overseer"),
 never "the Overseer" alone. Code keeps `lead`, `build_owner` and `cabal`.
 
 Your record is the **board** (`cabal_board`), not your chat: the roster with each member's state, merges, claims, spend
@@ -111,6 +112,8 @@ A member in another scheme ships to its own main, never into your build. When it
 
 ## 5. A Plot without a branch: its ships
 
+The exception: only a scheme with Builds off, or members all in other schemes. Otherwise a Plot has a branch (section 4).
+
 Each member ships to live itself, as any minion does. Watch the board: reorder where one member's work needs
 another's first (members list their files; the board flags a file two rows list, so settle who goes first on the log),
 and catch a member stuck in the ship line. Nothing merges into you.
@@ -140,5 +143,7 @@ A Plot gets **one retro**, yours; no separate build retro, and the server starts
 
 ## In every scheme
 
-A scheme's Builds setting (Minion rules, `builds`) governs Plots with a branch: with it off, its Taskmaster suggests none,
-and only Plots without a branch run there. The board, `cabal_start` and the claims check are the same in every scheme.
+A scheme's Builds setting (Minion rules, `builds`) governs the default: with it on, every Plot has a branch, and a
+member in another scheme still ships to its own main, sealed until the Plot is live; with it off, its Taskmaster
+suggests no branch and only Plots without one run there. The board, `cabal_start` and the claims check are the same in
+every scheme.

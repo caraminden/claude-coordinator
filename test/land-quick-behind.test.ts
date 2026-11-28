@@ -30,7 +30,7 @@ test('--verify runs the full suite on CI on HEAD: real failures are named, files
   assert.match(c.calls(), new RegExp(`head_sha=${git(r.source, 'rev-parse', 'main')}`));
   assert.doesNotMatch(c.refs(), /behind/, 'land/behind and land-base/behind are gone');
   // Passed-alone files with the leak guard's line, or a skipped test: red of their own, naming no file ("CI").
-  for (const extra of [{ FAKE_LEAK: '1' }, { FAKE_SKIP: '1' }]) {
+  for (const extra of [{ FAKE_LEAK: '1' }, { FAKE_SKIP: '1' }] as Record<string, string>[]) {
     const mixed = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', ...extra }, ['--verify'], wt);
     assert.equal(mixed.status, 1, mixed.stderr);
     assert.deepEqual(verdict(mixed.stdout), ['verify: failing CI', 'verify: red'], JSON.stringify(extra));

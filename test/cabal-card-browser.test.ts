@@ -17,7 +17,7 @@ const STUB = pageStub(
   `
   window.ready = true;
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
-  const lead = { id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'Build 10: one kind of machine', status: 'idle', build: 10, updated_at: 0, created_at: 0 };
+  const lead = { id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'Build 10: one kind of machine', status: location.search === '?works' ? 'running' : 'idle', build: 10, updated_at: 0, created_at: 0 };
   const other = { id: 102, project_id: 1, kind: 'ticket', number: 8, title: 'Another minion', status: 'idle', type: 'feature', updated_at: 0, created_at: 0 };
   const member = (label, state, word) => ({ id: null, number: null, label, title: label + ' work', state, word });
   const cabals = [{ lead: 101, number: 7, title: lead.title, overseer: "Build 10's Overseer", name: 'Build 10', build: 10, members: [member('H1', 'merged', 'merged'), member('H2', 'running', 'building')], finished: 1, done: 'merged', next: 0, spend: 12 }];
@@ -54,25 +54,31 @@ after(async () => {
   await app?.close();
 });
 
-test("a redraw of the list leaves a building member's segment mid-pulse, not back at its start", { skip }, async () => {
-  const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
-  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-meter i[data-s=running]')`);
-  // Redraw away from the turn's start (the shared clock: 1.6 s a turn). How far into its turn the new segment's pulse began
-  // is its place now less its own running time, so a late frame moves neither: in step, it began where the clock was at
-  // the redraw; started over, it began at 0.
-  const [began, from, to] = await page.eval<number[]>(`(async () => {
-    const { renderSidebar } = await import('./sidebar.js');
-    while (Math.abs((Date.now() % 1600) - 800) > 300) await new Promise(requestAnimationFrame);
-    const from = Date.now() % 1600;
-    renderSidebar();
-    const to = Date.now() % 1600;
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const [pulse] = document.querySelector('.cabal-meter i[data-s=running]').getAnimations();
-    const began = (((pulse.effect.getComputedTiming().progress * 1600 - pulse.currentTime) % 1600) + 1600) % 1600;
-    return [began, from, to];
-  })()`);
-  assert.ok(began >= from - 2 && began <= to + 2, `the segment's pulse began where the clock was at the redraw (${Math.round(began)} ms into its turn; the clock was at ${from} to ${to})`);
-});
+// The working Overseer's dot in the card's header pulses too (#2277's layout), and is held to the same (#2280).
+for (const [what, dot] of [
+  ["a building member's segment", '.cabal-meter i[data-s=running]'],
+  ["the working Overseer's dot", '.cabal-state[data-s=running] i'],
+]) {
+  test(`a redraw of the list leaves ${what} mid-pulse, not back at its start`, { skip }, async () => {
+    const page = await browser.page(`${base}?works#/p/1`, { width: 1280, height: 800 });
+    await waitFor(page, 'the card to draw', `document.querySelector('${dot}')`);
+    // Redraw away from the turn's start (the shared clock: 1.6 s a turn). How far into its turn the new pulse began
+    // is its place now less its own running time, so a late frame moves neither: in step, it began where the clock was at
+    // the redraw; started over, it began at 0.
+    const [began, from, to] = await page.eval<number[]>(`(async () => {
+      const { renderSidebar } = await import('./sidebar.js');
+      while (Math.abs((Date.now() % 1600) - 800) > 300) await new Promise(requestAnimationFrame);
+      const from = Date.now() % 1600;
+      renderSidebar();
+      const to = Date.now() % 1600;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const [pulse] = document.querySelector('${dot}').getAnimations();
+      const began = (((pulse.effect.getComputedTiming().progress * 1600 - pulse.currentTime) % 1600) + 1600) % 1600;
+      return [began, from, to];
+    })()`);
+    assert.ok(began >= from - 2 && began <= to + 2, `the pulse began where the clock was at the redraw (${Math.round(began)} ms into its turn; the clock was at ${from} to ${to})`);
+  });
+}
 
 test('opening a card that has no member rows to show moves nothing', { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
@@ -141,7 +147,7 @@ test("a shut card lists its started members and the header's chip opens a waitin
 // Nothing in the list may start a transition because of a redraw alone.
 test('a redraw under a resting pointer leaves the card as it was: no outline fading back in (#2280)', { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
-  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .thread-row')`);
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .cabal-meter')`);
   const at = await page.eval<{ x: number; y: number }>(`(() => { const r = document.querySelector('.cabal-meter').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 2 }; })()`);
   await page.mouse(at.x - 3, at.y);
   await page.mouse(at.x, at.y);

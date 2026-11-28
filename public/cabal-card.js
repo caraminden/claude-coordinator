@@ -81,7 +81,8 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
         ? h(
             'div',
             { class: 'cabal-lead' },
-            h('span', { class: 'cabal-state', 'data-s': leadTicket.status === 'running' ? 'running' : 'idle' }, h('i', { 'aria-hidden': 'true' }), leadTicket.status === 'running' ? 'Working' : 'Idle'),
+            // The working dot rejoins the shared pulse on a redraw, as a building segment does below (#2280).
+            h('span', { class: 'cabal-state', 'data-s': leadTicket.status === 'running' ? 'running' : 'idle' }, leadTicket.status === 'running' ? phase(h('i', { 'aria-hidden': 'true' }), 1600) : h('i', { 'aria-hidden': 'true' }), leadTicket.status === 'running' ? 'Working' : 'Idle'),
             cards.length ? badge(cards, !cardsYours({ ...leadTicket, open_cards: cards }).length) : '',
           )
         : '',

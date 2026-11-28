@@ -699,7 +699,7 @@ test('until P6 moves every scheme over, only Theory of Crafting can be switched 
     const res = { setHeader() {}, writeHead: () => res, end() {} };
     return ciPoolRoutes[1].handler({ req, res, app: { store }, project: peek } as never);
   };
-  await assert.rejects(patch({ on: true }), (e: { status?: number; message: string }) => e.status === 409 && /Only Theory of Crafting/.test(e.message));
+  await assert.rejects(patch({ on: true }), { status: 409, message: /Only Theory of Crafting/ });
   assert.equal(store.getSetting(poolKey(peek.id)), null, 'refused before anything is written');
   await patch({ on: false });
   assert.equal(poolOn(store, peek.id), false);

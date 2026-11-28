@@ -305,9 +305,10 @@ Test-That 'crashdownload: 6 is current and 7 no longer waits' ($s.current.id -eq
 Test-That "crashdownload: the running 6's files are untouched" ((Test-Path (Join-Path $d 'versions\6\App.exe')) -and (Test-Path (Join-Path $d 'versions\6\label.txt')) -and ((Get-Content (Join-Path $d 'versions\6\label.txt')) -eq '6 (good)'))
 Show-Install $d
 
-# 12. In the tray (#2279): build 6 sits hidden in the tray and the feed names 12. The launcher, still beside it, downloads
-# 12, asks 6 to quit once the PC is idle (a short idle time and feed interval here, set in launcher.json) and starts again:
-# 12 starts hidden too, on probation as any new build is.
+# 12. In the tray (#2279): build 6 sits hidden in the tray, and the feed names 12 only after the start's own read. The
+# launcher, still beside it, finds 12 on a later read (a short feed interval and idle time here, set in launcher.json),
+# asks 6 to quit once the PC is idle and starts again: 12, which has no tray.txt of its own, starts hidden because the
+# launcher asks it to (CITADEL_START_HIDDEN), on probation as any new build is.
 function New-Zip([string]$Name, [string]$Label, [switch]$Tray) {
     $z = Join-Path $root "zip-$Name"
     New-Item -ItemType Directory -Path $z | Out-Null
@@ -326,10 +327,12 @@ function Get-Windows([string]$Dir) {
 }
 $d = New-Install 'tray' ($good6 + '}') @{ 5 = 'good'; 6 = 'good' }
 Set-Content -Path (Join-Path $d 'versions\6\tray.txt') -Value 'x' -Encoding ASCII
-Set-Tray $d (New-Feed 'tray' 12 0 (New-Zip 'b12' '12 (tray)' -Tray))
+Set-Tray $d (New-Feed 'tray' 6)
 $l = Start-Launcher $d
 Test-That 'tray: 6 starts hidden in the tray' ((Wait-Log $d 'starting build 6' 30) -and (Get-Windows $d).Count -eq 0)
-Test-That 'tray: 12 downloads while 6 runs' (Wait-Log $d 'build 12 is ready' 60)
+Start-Sleep -Seconds 3
+[void](New-Feed 'tray' 12 0 (New-Zip 'b12' '12 (plain)'))
+Test-That 'tray: 12 is found by a later feed read and downloads while 6 runs' (Wait-Log $d 'build 12 is ready' 60)
 Test-That 'tray: idle in the tray, 6 is asked to quit' (Wait-Log $d 'Trial app is idle in the tray: asking it to quit, to take build 12' 90)
 Test-That 'tray: the launcher starts again' (Wait-Log $d 'starting the launcher again to take the update' 45)
 Test-That 'tray: 12 is tried and starts, on probation' (Wait-Log $d 'build 12 started: it is now current, on probation' 60)

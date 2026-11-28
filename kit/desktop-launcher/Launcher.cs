@@ -235,6 +235,8 @@ namespace Citadel.Desktop
                         // A second launcher update before the first one took over would move the waiting one aside.
                         CheckForUpdates(state, !File.Exists(TrialFile));
                         next = DateTime.UtcNow + Tray.NextCheck(every, rnd.NextDouble());
+                        // A download can take minutes: the app may have been closed meanwhile, which the top of the loop sees.
+                        continue;
                     }
                     bool launcherWaits = File.Exists(TrialFile);
                     var held = state.Pending == null && !launcherWaits ? Held.NothingNew : Tray.Hold(state, launcherWaits, WindowShows(state), SinceInput(), idle);
@@ -262,6 +264,8 @@ namespace Citadel.Desktop
         /// <summary>Write QuitFile and wait for every copy to close. The file goes either way, so a copy started later doesn't read it.</summary>
         bool AskToQuit(State state)
         {
+            // Closed since the loop looked: the person quit it, and a restart would open it again under them.
+            if (!ACopyRuns(state)) return false;
             try
             {
                 File.WriteAllText(QuitFile, "quit");
@@ -702,7 +706,9 @@ namespace Citadel.Desktop
                 TryDelete(TrialFile);
                 MarkBad(Program.Version);
                 Log("launcher " + Program.Version + " failed: the old launcher is back");
-                Process.Start(new ProcessStartInfo(Me, Quote(args)) { UseShellExecute = false, WorkingDirectory = dir }).Dispose();
+                // A restart in the tray stays one: the old launcher (5 or later, since only those restart there) starts the app hidden too.
+                string again = hidden ? (TrayRestart + " " + Quote(args)).Trim() : Quote(args);
+                Process.Start(new ProcessStartInfo(Me, again) { UseShellExecute = false, WorkingDirectory = dir }).Dispose();
                 return true;
             }
             catch (Exception e)

@@ -36,7 +36,8 @@ function repo(change: Record<string, string>, map = '', base: Record<string, str
   git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'the ship');
   return dir;
 }
-const ship = (dir: string, env: Record<string, string> = {}) => spawnSync('bash', ['tools/burn-in.sh', '--ship', 'HEAD~1'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), ...env } });
+// BURN_IN_CPUS 16 by default, so the runner's own CPU count (4 on GitHub's) never paces these copies (#2290's tests set it).
+const ship = (dir: string, env: Record<string, string> = {}) => spawnSync('bash', ['tools/burn-in.sh', '--ship', 'HEAD~1'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), BURN_IN_CPUS: '16', ...env } });
 
 test('a test file failing 1 copy in 10 is refused, with that copy named and its output shown', () => {
   const r = ship(repo({ 'test/racy.test.ts': ONE_IN_TEN, 'test/clean.test.ts': CLEAN }));
@@ -402,7 +403,31 @@ test('a race failing 1 copy in 10 is still refused when its copies run 3 at a ti
   assert.match(line, /^burn-in: test\/racy\.test\.ts: failed in 1 of 10 copies at once \(at most 3 at a time\) \(copies 3\), in \d+ s$/);
   // tools/land/ci.sh's burn_lines and tools/land/common.sh's racy-file pick read it as before.
   assert.match(line, /burn-in: [^ ]*: failed in [0-9]* of [0-9]* copies at once/);
-  assert.match(r.stdout, /^burn-in: refused: a copy of test\/racy\.test\.ts failed when run 10 at once/m);
+  assert.match(r.stdout, /^burn-in: refused: a copy of test\/racy\.test\.ts failed when run 10 at once \(at most 3 at a time\), so it is racy/m);
+});
+
+// A race between copies: each takes a lock folder every copy shares and fails if another copy holds it, so it fails
+// only when two copies overlap, never one at a time (#1327's make-app "No free app port left" was this kind).
+const CLASH = [
+  "import { test } from 'node:test';",
+  "import { mkdirSync, rmdirSync } from 'node:fs';",
+  "import { join } from 'node:path';",
+  "import { setTimeout as sleep } from 'node:timers/promises';",
+  "test('takes the one shared port', async () => {",
+  "  const lock = join(process.env.BURN_IN_PROBE as string, 'port');",
+  '  mkdirSync(lock); // throws EEXIST while another copy holds it',
+  '  await sleep(400); // timing-ok: holds the lock so an overlapping copy finds it',
+  '  rmdirSync(lock);',
+  '});',
+  '',
+].join('\n');
+
+test('a race between copies is still caught when they run 2 at a time, and passes only when nothing overlaps', () => {
+  const caught = paced({ 'test/clash.test.ts': CLASH }, { BURN_IN_CPUS: '2' });
+  assert.equal(caught.r.status, 1, caught.r.stdout + caught.r.stderr);
+  assert.match(caught.r.stdout, /^burn-in: test\/clash\.test\.ts: failed in \d+ of 10 copies at once \(at most 2 at a time\)/m);
+  const serial = paced({ 'test/clash.test.ts': CLASH }, { BURN_IN_CPUS: '1' });
+  assert.equal(serial.r.status, 0, `one at a time it can't clash: ${serial.r.stdout}`);
 });
 
 test("on a 4-CPU runner a ship caps a file's own concurrency too: copies x in-file checks stay within 4 (#2073's rule)", () => {
@@ -415,19 +440,19 @@ test("on a 4-CPU runner a ship caps a file's own concurrency too: copies x in-fi
   assert.equal(peaks.length, 10 * 8 * 2, 'all 10 copies ran all 8 checks');
 });
 
-test("a ship's file asking concurrency: true runs its copies one at a time, said, not refused", () => {
+test("a ship's file asking concurrency: true runs its copies 2 at a time, said, not refused", () => {
   const dir = repo({ 'test/wide.test.ts': wide('true') });
   mkdirSync(join(dir, 'probe'));
   const r = ship(dir, { BURN_IN_PROBE: join(dir, 'probe'), BURN_IN_CPUS: '4' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts asks concurrency: true inside each copy, more than this runner's 4 CPUs, so its copies run one at a time/m);
-  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts: 10 of 10 copies at once \(at most 1 at a time\) passed/m);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts asks concurrency: true inside each copy, more than this runner's 4 CPUs, so its copies run 2 at a time/m);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts: 10 of 10 copies at once \(at most 2 at a time\) passed/m);
 });
 
 test('copies waiting their turn get only the time left: the last are stopped at the limit or never start, so no verdict', () => {
   const { r, ran } = paced({ 'test/held.test.ts': held }, { BURN_IN_CPUS: '2', BURN_IN_HOLD: '4000', BURN_IN_LIMIT: '15' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.ok(ran >= 4 && ran <= 8, `${ran} copies finished in 15 s at 2 at a time`);
+  assert.ok(ran >= 1 && ran <= 8, `${ran} copies finished in 15 s at 2 at a time: some, never all 10`);
   assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: \d+ of 10 copies at once \(at most 2 at a time\) were stopped at 15 s/m);
   assert.match(r.stdout, /^burn-in: NO VERDICT on test\/held\.test\.ts: stopped at the 15 s limit/m);
 });

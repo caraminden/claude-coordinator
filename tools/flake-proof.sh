@@ -2,7 +2,8 @@
 # One batch of a flake proof (#1120, .github/workflows/flake-proof.yml): runs a test file as N copies at once, each with its own
 # TMPDIR, under CPU load (the flakes this counts failed in a full run at load 12 to 26 and passed alone, so a quiet box would pass
 # an unfixed one). Copies at once, not one after another (#1443): the ship's burn-in has the same shape (tools/burn-in.sh, which
-# runs them), and #1327 measured runs in a row catching 0 or 1 in 10 where copies at once caught 9 or 10.
+# runs them; a ship's runs them at most nproc at a time on a runner with fewer CPUs, #2290, where a batch here stays all at
+# once), and #1327 measured runs in a row catching 0 or 1 in 10 where copies at once caught 9 or 10.
 # The run asks Citadel before its first batch and is stopped while a ship is in line (flake-proof.yml's ask step, #1902); everything
 # it starts (burners and test runs) is nice 19, so a ship's run on the same desktop gets the CPU first (#1359). The proof still runs
 # under load: a quiet box would pass an unfixed flake.

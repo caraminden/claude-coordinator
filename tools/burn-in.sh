@@ -37,6 +37,7 @@ test_limit=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) # each test, in ms, as the ga
 read -ra nice_cmd <<<"${BURN_IN_NICE:-}"
 unset NODE_TEST_CONTEXT # set by an outer node --test (a test of this script), it makes each copy skip its file and pass
 
+declare -A pace_of=() # <file>: " (at most <k> at a time)" when its copies ran fewer at once than their number
 declare -A alone_of=() # <file>: failed, passed or unrun (no time left), run alone after every copy failed
 # <file> <copies> <seconds>: 0 clean, 1 a copy failed, 2 none failed but one was stopped at the limit.
 # [at a time]: at most that many copies run at once, each next one starting as one ends, within the same <seconds>
@@ -45,6 +46,7 @@ burn_one() {
   local file=$1 n=$2 limit=$3 k=${4:-$2} dir i rc fails=() stopped=() t0=$SECONDS first='' left pace=''
   dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/burn-in.XXXXXX") || { echo "burn-in: no temp folder for $file"; return 1; }
   [ "$k" -ge "$n" ] || pace=" (at most $k at a time)"
+  pace_of[$file]=$pace
   for ((i = 1; i <= n; i++)); do
     while [ "$(jobs -rp | wc -l)" -ge "$k" ]; do wait -n; done
     left=$((limit - (SECONDS - t0)))
@@ -253,8 +255,12 @@ for f in "${files[@]}"; do
     continue
   fi
   # This runner's CPUs (fit, above): all its copies run, at most fit_k at a time. A file whose own concurrency can't be
-  # capped runs them one at a time, said, rather than refusing the ship for how it is written.
-  fit "$f" "$copies" "$cpus" || echo "burn-in: $f asks concurrency: $fit_c inside each copy, more than this runner's $cpus CPUs, so its copies run one at a time; have it read BURN_IN_INNER (as test/boot-check.test.ts does)"
+  # capped runs them 2 at a time, the fewest that still overlap (a race between copies needs two), said, rather than
+  # refusing the ship for how it is written.
+  if ! fit "$f" "$copies" "$cpus"; then
+    fit_k=$((copies < 2 ? copies : 2))
+    echo "burn-in: $f asks concurrency: $fit_c inside each copy, more than this runner's $cpus CPUs, so its copies run $fit_k at a time; have it read BURN_IN_INNER (as test/boot-check.test.ts does)"
+  fi
   rc=0 t0=$SECONDS
   if [ -n "$fit_inner" ]; then BURN_IN_INNER=$fit_inner burn_one "$f" "$copies" "$left" "$fit_k" || rc=$?
   else burn_one "$f" "$copies" "$left" "$fit_k" || rc=$?; fi
@@ -271,7 +277,7 @@ for f in "${red[@]}"; do
   case ${alone_of[$f]:-} in
     failed) echo "burn-in: refused: $f: alone: failed too, after every copy failed: a plain red or a fault of CI's own environment, not a race (its output is above); fix that" ;;
     unrun) echo "burn-in: refused: $f: alone: no time left to run it, after every copy failed: a plain red or a race (its output is above); run it alone with citadel-test to tell" ;;
-    *) echo "burn-in: refused: a copy of $f failed when run $copies at once, so it is racy (its output is above); fix the race, not the wait" ;;
+    *) echo "burn-in: refused: a copy of $f failed when run $copies at once${pace_of[$f]:-}, so it is racy (its output is above); fix the race, not the wait" ;;
   esac
 done
 [ ${#red[@]} = 0 ] || exit 1

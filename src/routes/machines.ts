@@ -689,9 +689,7 @@ export const machineRoutes: Route[] = [
           };
         }),
       }));
-      // The runner pool's line (Build 11 P1, watching only): the jobs of the schemes they can see, each with its place in the whole line.
-      const pool = app.pool?.view();
-      json(res, 200, { schemes, pcs: app.ciLoad.views(), now: Date.now(), pool: pool ? { ...pool, line: pool.line.filter((j) => app.store.canSee(session, j.scheme)), total: pool.line.length } : null });
+      json(res, 200, { schemes, pcs: app.ciLoad.views(), now: Date.now() });
     },
   },
   // Investigate on a CI red (#1491; Cara, 2026-11-21, picked "Investigate button"): starts a fix minion for the red in its own

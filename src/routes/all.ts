@@ -15,6 +15,7 @@ import { jobRoutes } from './jobs.ts';
 import { minionJobRoutes } from './minion-jobs.ts';
 import { heavyBuildRoutes } from './heavy-builds.ts';
 import { ciStoreRoutes } from './ci-store.ts';
+import { ciPoolRoutes } from './ci-pool.ts';
 import { desktopRoutes } from './desktop.ts';
 import { pushRoutes } from './push.ts';
 import { timeLogRoutes } from './time-log.ts';
@@ -46,6 +47,7 @@ export const apiRoutes = [
   ...minionJobRoutes,
   ...heavyBuildRoutes,
   ...ciStoreRoutes,
+  ...ciPoolRoutes,
   ...desktopRoutes,
   ...pushRoutes,
   ...unitRoutes,

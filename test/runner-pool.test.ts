@@ -405,3 +405,33 @@ test("a runner's machine is the one whose hostname its name starts with", () => 
   assert.equal(machineOfRunner('pool-m2-w1-j55', pcs), 2);
   assert.equal(machineOfRunner('pool-m7-l1-ab12cd', pcs), null);
 });
+
+import { ciPoolRoutes } from '../src/routes/ci-pool.ts';
+
+test("/api/ci/pool shows a person only the jobs of the schemes they can see, with the whole line's count", async () => {
+  const lineJob = (id: number, scheme: number) => ({ repo: `r/${scheme}`, scheme, id, run: id, name: `job ${id}`, labels: [], ship: false, since: NOW, size: 4, place: id, step: 2, machine: null, why: 'room' });
+  const view = { at: NOW, watching: true as const, line: [lineJob(1, PEEK), lineJob(2, MANDATE), lineJob(3, PEEK)] };
+  const read = async (pool: { view(): typeof view } | undefined) => {
+    const res = {
+      body: '',
+      headersSent: false,
+      setHeader() {},
+      writeHead() {
+        return this;
+      },
+      end(b?: string) {
+        this.body = b ?? '';
+      },
+    };
+    const app = { pool, store: { canSee: (_: unknown, scheme: number) => scheme === PEEK } };
+    await ciPoolRoutes[0].handler({ res, app, session: { name: 'Cara', uid: 1 } } as never);
+    return JSON.parse(res.body);
+  };
+  const got = await read({ view: () => view });
+  assert.deepEqual(
+    got.line.map((j: { id: number }) => j.id),
+    [1, 3],
+  );
+  assert.equal(got.total, 3);
+  assert.equal(await read(undefined), null);
+});

@@ -738,9 +738,10 @@ export const releasesHash = (projectId, scope, tab = 'releases') => `#/p/${proje
 /** GET /api/ci; an answer without its schemes (an old server, a test's stub) counts as a failed read, so nothing reads `.schemes` off it. */
 /** @returns {Promise<CiRead>} */
 const readCi = async () => {
-  const r = await api('api/ci');
+  // The runner pool's line comes on its own route (Build 11 P1); a failed read of it only leaves the line out.
+  const [r, pool] = await Promise.all([api('api/ci'), api('api/ci/pool').catch(() => null)]);
   if (!Array.isArray(r?.schemes)) throw new Error('no CI in the answer');
-  return r;
+  return { ...r, pool };
 };
 /** @type {CiRead | null} */
 let ciRead = null; // the last /api/ci read, the page's or the chips', so a page opened again draws at once

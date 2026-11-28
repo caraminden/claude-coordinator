@@ -43,6 +43,8 @@
 #   tools/land.sh --build                          lands the build its branch is at the tip of: main comes in by merge
 #       (a rebase would change its feeders' commit hashes), then the gate, the fast-forward and the deploy, then build/<n> is deleted.
 #   A plain land refuses a branch that carries commits of a build/* that main doesn't have: half a build would go live.
+# tools/land.sh --verify (#2244): the full suite behind a quick train, out of line, from a detached worktree at a commit on
+#   main (src/fast-mode.ts runs it). It prints verify: lines and exits 0 green, 1 red, 75 no verdict: tools/land/behind.sh.
 #   Claims (#1159): with a build-claims.md on build/<n>, --into first checks the feeder's files against it (claims_check).
 # Lock order: the deploy lock (fd 9) before a build's lock (fd 6), and --into takes only the build's, so none waits on the other.
 # Paths can be overridden with DEPLOY_LIVE and DEPLOY_SOURCE, as for deploy.sh (how it is tested).
@@ -68,6 +70,9 @@ flake_kept=${LAND_FLAKE_KEPT:-0} # how many times this hand-off kept its place a
 aside=${LAND_ASIDE:-0} # how many times this hand-off stepped aside from its own red train (train_suspects)
 retried=${LAND_RETRIED:-} # why it was refused by the pipeline once already (retry_in_place, tools/land/ci.sh), in the copy that goes again
 mode=land build='' files=()
+# --verify (#2244, tools/land/behind.sh): the full run behind a quick train, or LAND_VERIFY_IDS's files alone, on HEAD.
+verify=
+[ "${1:-}" != --verify ] || { verify=1; shift; [ $# -eq 0 ] || refuse "--verify takes no other arguments"; }
 case ${1:-} in
   '') ;;
   --into)
@@ -92,6 +97,7 @@ for land_part in "$tools"/land/*.sh; do
   [ ! -e "$land_part" ] || . "$land_part"
 done
 unset land_part
+[ -z "$verify" ] || behind_verify # it exits
 # Which files bash is reading: land.sh and its parts (tools/land/*.sh), each by name and inode. The rebase below may
 # replace any of them; a part-only change must hand over too (#2099).
 land_self() {

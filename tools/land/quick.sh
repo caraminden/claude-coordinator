@@ -31,7 +31,8 @@
 # CI over since (a full ship clears it). With it, no quick train forms on main.
 # Empty line (quick_alone): a qualifying front with no waiter that doesn't qualify and no early run of its own takes the
 # qualifying waiters as a quick train at once, checked here.
-# Piece 4 adds the full run behind; until then nothing runs the full suite over a quick top but the next full train.
+# Behind it (piece 4, #2244, tools/land/behind.sh): each quick train shipped owes the full suite one verdict on its top, kept
+# in <state>/quick-behind for the server to run, or the next full train's own run counts.
 
 QUICK_SIDE_LABEL=citadel-ci-linux-side
 
@@ -380,8 +381,10 @@ quick_landed() {
     echo "$tip" >"$state/quick-untested"
     rm -f "$state/quick-train" "$state/quick-stacked"
     retro_log "quick train shipped · $label · $((${#train_n[@]} + 1)) ships, no CI run · $(git rev-parse --short "$tip")"
-  elif [ "${rc:-}" != light ] && [ -e "$state/quick-untested" ]; then
-    rm -f "$state/quick-untested" || true
+    behind_mark # the full run it owes (tools/land/behind.sh)
+  elif [ "${rc:-}" != light ]; then
+    [ ! -e "$state/quick-untested" ] || rm -f "$state/quick-untested" || true
+    behind_landed
   fi
   return 0
 }

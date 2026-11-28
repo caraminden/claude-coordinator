@@ -26,6 +26,7 @@ train_main_red() {
   phase_ticker_end
   git worktree remove --force "$wt" >/dev/null 2>&1 || true
   [ ${#reds[@]} -gt 0 ] || return 1
+  behind_red "${reds[@]}" # a quick train's top at main's tip: its red, found by this train's run (tools/land/behind.sh)
   # Failed files with no verdict (not rerun, or the rerun killed) may be the train's own: they count as its other reds.
   mapfile -t -O "${#other[@]}" other < <(train_labels | sed -n 's/^\(not rerun\|killed (exit [0-9]*) when rerun alone\) //p') || true
   train_chg

@@ -140,11 +140,13 @@ test("a missing manifest or start command, and a program that isn't there, are r
   assert.match(empty.out, /FAILED: can't read .*citadel-app\.json/);
 });
 
-test("the workflows run only on the scheme's own runner, and not on pull requests", () => {
+// GitHub's runners only by the runner pool's route=github input (Build 11 P5: a public repo's run no machine could take).
+const ROUTED = `\${{ inputs.route == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "<scheme-slug>-ci-linux"]') }}`;
+test("the workflows run only on the scheme's own runner, or GitHub's by the pool's route input, and not on pull requests", () => {
   for (const f of readdirSync(DIR).filter((n) => n.endsWith('.yml'))) {
     const wf = readFileSync(join(DIR, f), 'utf8').replace(/^\s*#.*$|\s#\s.*$/gm, '');
     const runsOn = [...wf.matchAll(/runs-on:(.*)/g)].map((m) => m[1].trim());
-    assert.deepEqual(runsOn, ['[self-hosted, <scheme-slug>-ci-linux]'], f);
-    assert.doesNotMatch(wf, /ubuntu-|windows-latest|CI_RUNNER|pull_request|upload-artifact|--if-present|\|\| true/, f);
+    assert.deepEqual(runsOn, [f === 'ci.yml' ? ROUTED : '[self-hosted, <scheme-slug>-ci-linux]'], f);
+    assert.doesNotMatch(wf.replace(ROUTED, ''), /ubuntu-|windows-latest|CI_RUNNER|pull_request|upload-artifact|--if-present|\|\| true/, f);
   }
 });

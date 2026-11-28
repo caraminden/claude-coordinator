@@ -6,7 +6,9 @@
 # Jobs that open windows or read the screen are desktop.yml, a workflow of its own on the session runner, so a desktop runner that is gone or busy never holds this workflow's
 # concurrency group, and a landing gets a build verdict even while the desktop is away (Peek Auras, 2026-11-06).
 # Setting the repository variable CI_RUNNER to `github` sends the runs to GitHub's windows-latest (minutes billed at 2x
-# there). Ask Cara before setting it.
+# there). Ask Cara before setting it. A run started with the input route=github goes there too: Citadel's runner pool
+# starts one when no machine could take a job for 10 minutes (a public repo, or a private one under 80% of its included
+# minutes; Citadel's src/runner-fallback.ts). Keep the input's name: the pool sends it.
 name: windows
 
 # When it runs (#603): on the commit a landing is about to land, which tools/land.sh pushes to land/<branch> (list this
@@ -20,6 +22,11 @@ on:
   push:
     branches: ['land/**']
   workflow_dispatch:
+    inputs:
+      route:
+        description: "github: run on GitHub's runners (Citadel's runner pool sets it when no machine can take the job)"
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -36,7 +43,7 @@ defaults:
 
 jobs:
   build:
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'windows-latest' || fromJSON('["self-hosted", "<scheme-slug>-ci"]') }}
+    runs-on: ${{ (vars.CI_RUNNER == 'github' || inputs.route == 'github') && 'windows-latest' || fromJSON('["self-hosted", "<scheme-slug>-ci"]') }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7

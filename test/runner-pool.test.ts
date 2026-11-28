@@ -560,10 +560,14 @@ test("a runner's machine is the one whose hostname its name starts with", () => 
 });
 
 import { ciPoolRoutes } from '../src/routes/ci-pool.ts';
+import { poolKey, poolOn } from '../src/runner-pool.ts';
+import { Readable } from 'node:stream';
 
-test("/api/ci/pool shows a person only the jobs of the schemes they can see, with the whole line's count", async () => {
-  const lineJob = (id: number, scheme: number) => ({ repo: `r/${scheme}`, scheme, id, run: id, name: `job ${id}`, labels: [], ship: false, since: NOW, size: 4, place: id, step: 2, machine: null, why: 'room' });
-  const view = { at: NOW, watching: true as const, line: [lineJob(1, PEEK), lineJob(2, MANDATE), lineJob(3, PEEK)] };
+test("/api/ci/pool shows a person only the jobs of the schemes they can see, with the whole line's count; another scheme's running job by its size only", async () => {
+  const lineJob = (id: number, scheme: number) => ({ repo: `r/${scheme}`, scheme, id, run: id, name: `job ${id}`, labels: [], ship: false, since: NOW, size: 4, place: id, step: 2, machine: null, why: 'room', pool: false, starting: false });
+  const running = (scheme: number) => ({ repo: `r/${scheme}`, scheme, name: `tests ${scheme}`, size: 4, since: NOW, pool: true, starting: false });
+  const view = { at: NOW, watching: false, line: [lineJob(1, PEEK), lineJob(2, MANDATE), lineJob(3, PEEK)], machines: [{ id: 1, name: 'cara-desktop', limit: 16, used: 8, free: 8, off: null, running: [running(PEEK), running(MANDATE)] }] };
+  const settings = new Map<string, unknown>([[poolKey(PEEK), true]]);
   const read = async (pool: { view(): typeof view } | undefined) => {
     const res = {
       body: '',
@@ -576,7 +580,7 @@ test("/api/ci/pool shows a person only the jobs of the schemes they can see, wit
         this.body = b ?? '';
       },
     };
-    const app = { pool, store: { canSee: (_: unknown, scheme: number) => scheme === PEEK } };
+    const app = { pool, store: { canSee: (_: unknown, scheme: number) => scheme === PEEK, listProjects: () => [{ id: PEEK }, { id: MANDATE }, { id: CITADEL }], getSetting: (k: string) => settings.get(k) ?? null } };
     await ciPoolRoutes[0].handler({ res, app, session: { name: 'Cara', uid: 1 } } as never);
     return JSON.parse(res.body);
   };
@@ -586,5 +590,43 @@ test("/api/ci/pool shows a person only the jobs of the schemes they can see, wit
     [1, 3],
   );
   assert.equal(got.total, 3);
+  assert.deepEqual(
+    got.machines[0].running.map((r: { name: string; scheme: number; size: number }) => [r.name, r.scheme, r.size]),
+    [
+      [`tests ${PEEK}`, PEEK, 4],
+      ["another scheme's job", 0, 4],
+    ],
+  );
+  assert.deepEqual(got.pooled, [PEEK]);
   assert.equal(await read(undefined), null);
+});
+
+test('the switch: a scheme is on the pool only once a member turns it on, and off again takes the setting away (Build 11 P3)', async () => {
+  const store = new Store(':memory:');
+  const p = store.getProject(store.createProject('Theory of Crafting', null).id)!;
+  assert.equal(poolOn(store, p.id), false, 'every scheme starts on its standing runners');
+  const patch = async (body: unknown) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
+    const res = {
+      status: 0,
+      body: '',
+      headersSent: false,
+      setHeader() {},
+      writeHead(s: number) {
+        this.status = s;
+        return this;
+      },
+      end(b?: string) {
+        this.body = b ?? '';
+      },
+    };
+    await ciPoolRoutes[1].handler({ req, res, app: { store }, project: p } as never);
+    return res;
+  };
+  await patch({ on: true });
+  assert.equal(poolOn(store, p.id), true);
+  await patch({ on: false });
+  assert.equal(poolOn(store, p.id), false);
+  assert.equal(store.getSetting(poolKey(p.id)), null);
+  await assert.rejects(patch({ on: 'yes' }), /on must be true/);
 });

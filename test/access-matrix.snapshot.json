@@ -2073,6 +2073,16 @@
   "m1": "200",
   "m2": "200"
  },
+ "PATCH /api/projects/:p/ci-pool": {
+  "anon": "401 Not logged in",
+  "person": "400 on must be true (the runner pool) or false (standing runners)",
+  "member": "400 on must be true (the runner pool) or false (standing runners)",
+  "outsider": "404 No such scheme",
+  "tmA": "400 on must be true (the runner pool) or false (standing runners)",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/ci-runners": {
   "anon": "401 Not logged in",
   "person": "200",

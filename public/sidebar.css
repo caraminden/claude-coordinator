@@ -100,6 +100,7 @@
 .sidebar .cabal-gone:hover > span:first-child { text-decoration: underline; }
 .cabal-gone > span:first-child { flex: 1; min-width: 0; }
 .cabal-gone .muted { flex: none; font-weight: 600; white-space: nowrap; }
+.cabal-gone:last-child { margin-bottom: var(--space-1); } /* room before the card's edge, as the not-started lines have */
 .cabal-gone.opening { animation: cabal-open 0.15s ease-out; }
 @media (prefers-reduced-motion: reduce) { :is(.cabal-planned, .cabal-gone).opening { animation: none; } }
 .g-build > h3 { color: var(--gc); }

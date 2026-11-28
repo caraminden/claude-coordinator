@@ -22,6 +22,7 @@ const STUB = pageStub(
   const member = (label, state, word) => ({ id: null, number: null, label, title: label + ' work', state, word });
   const cabals = [{ lead: 101, number: 7, title: lead.title, overseer: "Build 10's Overseer", name: 'Build 10', build: 10, members: [member('H1', 'merged', 'merged'), member('H2', 'running', 'building')], finished: 1, done: 'merged', next: 0, spend: 12 }];
   cabals[0].members.forEach((m, i) => { m.id = 200 + i; m.number = 20 + i; });
+  if (location.search === '?waits') cabals[0].members.push({ id: null, number: null, label: 'H3', title: 'Not yet', state: 'roster', word: 'next up' });
   window.stubCabals = cabals;
   // ?waits: a member with a question card waiting on people (#2277).
   const waiter = { id: 201, project_id: 1, kind: 'ticket', number: 21, title: 'H2 work', status: 'idle', build: 10, updated_at: 0, created_at: 0, open_cards: [{ minion: 201, kind: 'question', what: 'question', label: 'Q', href: '#/p/1/t/21?e=5' }] };
@@ -122,11 +123,15 @@ test("a chat click in the scheme keeps the Plot's card (#2274)", { skip }, async
   assert.ok(await page.eval(`!!document.querySelector('.cabal-card')`));
 });
 
-// #2277: the Overseer is the header, so a member's waiting card shows on the shut card as its chip, and one click opens it.
-test("a member's waiting card is the header's chip on a shut card, and a click opens it", { skip }, async () => {
+// #2277 (Cara, 2026-11-27): the Overseer is the header; a shut card lists every started member, an open one adds the not-started
+// lines. A member's waiting card shows as the header's chip too, and one click opens it.
+test("a shut card lists its started members and the header's chip opens a waiting card; open adds the not-started lines", { skip }, async () => {
   const page = await browser.page(`${base}?waits#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the chip to draw', `document.querySelector('.cabal-lead .card-badge')`);
-  assert.equal(await page.eval(`document.querySelector('.cabal-card').hasAttribute('data-open') || !!document.querySelector('.cabal-card .thread-row')`), false, 'shut: no Overseer row');
+  const count = (sel: string) => page.eval<number>(`document.querySelectorAll('.cabal-card ${sel}').length`);
+  assert.deepEqual([await count('.thread-row'), await count('.cabal-planned'), await count('.cabal-lead + * .thread-row')], [1, 0, 0], 'shut: the started member, no Overseer row, no not-started line');
+  await page.eval(`document.querySelector('.cabal-toggle').click()`);
+  assert.deepEqual([await count('.thread-row'), await count('.cabal-planned')], [1, 1], 'open: adds the not-started line');
   await page.eval(`window.hashes = []; addEventListener('hashchange', (e) => hashes.push(new URL(e.newURL).hash)); document.querySelector('.cabal-lead .card-badge').click()`);
   await waitFor(page, 'the card', `hashes.includes('#/p/1/t/21?e=5')`);
 });

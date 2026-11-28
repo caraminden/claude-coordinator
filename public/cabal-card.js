@@ -54,7 +54,9 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
   const leadTicket = tickets.get(c.lead) ?? lead;
   // The Overseer is the header, not a second row (Cara, 2026-11-27: "probably the header is good enough?"): its state and every waiting card show there.
   const cards = leadTicket ? (overseerRow(leadTicket, mine).open_cards ?? []) : [];
-  const members = rows.filter((t) => t.id !== c.lead);
+  // Shut: every started member, in its own row; open adds the sealed and not-started ones (Cara, 2026-11-27: "the collapsed version still shows all active minions, and the expanded one shows the not started").
+  const sealed = (/** @type {Row} */ t) => c.members.some((m) => m.id === t.id && m.state === 'sealed');
+  const members = rows.filter((t) => t.id !== c.lead && (open || !sealed(t)));
   const unstarted = c.members.filter((m) => m.id == null || m.scheme); // another scheme's members aren't in this list: named here
   const started = c.members.some((m) => m.state !== 'roster');
   const toggle = () => {
@@ -108,16 +110,13 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
       ),
     ),
     build ? h('p', { class: 'cabal-build' }, `${build.behind} behind main`, preview ? [' · ', h('a', { href: `../preview/build/${build.build}/`, target: '_blank', rel: 'noopener', title: `build/${build.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
-    open && (members.length || unstarted.length)
+    members.length || (open && unstarted.length)
       ? h(
           'div',
-          { class: `cabal-members${fresh ? ' opening' : ''}` },
+          { class: 'cabal-members' },
           members.map(row),
-          unstarted.map((m) => h('p', { class: 'cabal-planned', title: 'Planned: not started yet' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
+          (open ? unstarted : []).map((m) => h('p', { class: `cabal-planned${fresh ? ' opening' : ''}`, title: 'Planned: not started yet' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
         )
-      : // A filter that hides the Overseer but matches a member shows that member, not an empty card.
-        !lead && members.length
-        ? h('div', { class: 'cabal-members' }, members.map(row))
-        : '',
+      : '',
   );
 }

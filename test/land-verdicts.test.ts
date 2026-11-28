@@ -61,6 +61,7 @@ const NOT_VERDICTS: Record<string, string> = {
   train_suspects: 'calls train_real, train_pin and train_suspects_of, benched here, then holds or refuses what they name',
   flake_keep: 'calls flake_free and train_suspects_of, benched here',
   flake_free: 'calls flake_only, benched here, and drops a red with leftover processes',
+  behind_verify: 'the run behind a quick train (#2244): calls train_real, train_labels, known_flakes and skipped_tests, benched here, and keeps a red with leftover processes red',
 };
 
 function fn(name: string): string {

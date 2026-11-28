@@ -270,6 +270,30 @@ test("the pool reads every queued run's jobs, past the five the queued counts re
   assert.equal(counts.get(repo), 5, 'the queued counts read as before');
 });
 
+test("a repo whose scheme isn't on the pool costs GitHub what it did without the pool: five queued runs' jobs, no in-progress list, nothing in the pool's sight", async () => {
+  const [off, on] = ['caraminden/peek-auras', 'caraminden/delve'];
+  const runs = Array.from({ length: 7 }, (_, k) => ({ id: k + 1, head_branch: 'main' }));
+  const pages: Record<string, unknown> = {};
+  for (const repo of [off, on]) {
+    pages[`repos/${repo}/actions/runs?status=queued&per_page=20`] = { workflow_runs: runs };
+    pages[`repos/${repo}/actions/runs?status=in_progress&per_page=50`] = { workflow_runs: [] };
+    for (const r of runs) pages[`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`] = { jobs: [{ id: r.id * 10, name: 'build', status: 'queued', labels: ['self-hosted', 'ci'] }] };
+  }
+  const gh = github(pages);
+  const sights: PoolSight[] = [];
+  const w = new ShipWatch({ repos: () => [off, on], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: () => {}, pool: (s) => void sights.push(s), pooled: (repo) => repo === on });
+  await w.tick(0);
+  const asked = (repo: string) => gh.asked.filter((p) => p.includes(repo));
+  // What ShipWatch asked before the pool existed, for the same repo.
+  const before = github(pages);
+  await new ShipWatch({ repos: () => [off], as: () => ({}), send: () => {}, get: before.get, log: () => {}, queued: () => {} }).tick(0);
+  assert.deepEqual(asked(off), before.asked);
+  assert.ok(asked(on).length > before.asked.length, 'the pooled repo reads all seven runs and the in-progress list too');
+  assert.deepEqual([...sights[0].repos], [on]);
+  assert.ok(sights[0].jobs.length === 7 && sights[0].jobs.every((j) => j.repo === on));
+  assert.ok([...sights[0].runs].every((r) => r.startsWith(`${on}#`)));
+});
+
 test("a failed read isn't passed off as new: the repo isn't counted as read, so no job is ended on it", async () => {
   const repo = 'caraminden/peek-auras';
   const runningRuns = `repos/${repo}/actions/runs?status=in_progress&per_page=50`;

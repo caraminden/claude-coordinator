@@ -2509,6 +2509,10 @@ const shipWatch = new ShipWatch({
     for (const j of jobs) ciHeavy.set(j.repo, (ciHeavy.get(j.repo) ?? 0) + 1);
     void heavyPlacer.pass(jobs, read);
   },
+  pooled: (repo) => {
+    const p = schemeOf(repo);
+    return !!p && poolOn(store, p.id);
+  },
   pool: (sight) => {
     try {
       runnerPool.pass(sight);

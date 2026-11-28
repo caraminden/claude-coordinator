@@ -97,6 +97,8 @@ export interface ShipWatchDeps {
   heavy?: (jobs: QueuedHeavy[], read: Set<string>) => void;
   /** Every queued and running self-hosted job, for the runner pool (Build 11 P1); read only with `queued`. */
   pool?: (sight: PoolSight) => void;
+  /** Whether the repo's scheme is switched to the pool; left out, every repo is. Only those get the pool's extra job reads and a place in its sight, so with none pooled GitHub is asked what it was before the pool. */
+  pooled?: (repo: string) => boolean;
   get?: GhGet;
   log?: (line: string) => void;
 }
@@ -164,7 +166,7 @@ export class ShipWatch {
             if (w.labels.size) labels.set(repo, w.labels);
             if (w.jobs.length) jobs.set(repo, w.jobs);
             heavy.push(...w.heavy);
-            if (this.deps.pool) {
+            if (this.poolsRepo(repo)) {
               await this.running(repo, as, used, sight, now);
               sight.repos.add(repo);
             }
@@ -223,16 +225,17 @@ export class ShipWatch {
     const labels = new Set<string>();
     const jobLabels: string[][] = [];
     const heavy: QueuedHeavy[] = [];
-    for (const r of runs) if (Number.isInteger(r?.id)) sight.runs.add(`${repo}#${r.id}`);
+    const pooled = this.poolsRepo(repo);
+    if (pooled) for (const r of runs) if (Number.isInteger(r?.id)) sight.runs.add(`${repo}#${r.id}`);
     // The pool reads every listed run's jobs, the oldest first in its line (a 304 costs nothing); the counts keep the newest QUEUED_RUNS.
     const ids = runs.filter((r) => Number.isInteger(r?.id));
-    for (const [k, r] of (this.deps.pool ? ids : ids.slice(0, QUEUED_RUNS)).entries()) {
+    for (const [k, r] of (pooled ? ids : ids.slice(0, QUEUED_RUNS)).entries()) {
       const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
-      sight.known.add(`${repo}#${r.id}`);
+      if (pooled) sight.known.add(`${repo}#${r.id}`);
       for (const j of jobs) {
         if (j?.status !== 'queued' || !Array.isArray(j.labels) || !j.labels.includes('self-hosted')) continue;
         const asks = j.labels.filter((l) => typeof l === 'string');
-        const seen = seenJob(repo, r, j);
+        const seen = pooled ? seenJob(repo, r, j) : null;
         if (seen) sight.jobs.push(seen);
         if (k >= QUEUED_RUNS) continue;
         const kind = heavyKind(asks);
@@ -279,6 +282,10 @@ export class ShipWatch {
         if (seen) sight.jobs.push(seen);
       }
     }
+  }
+
+  private poolsRepo(repo: string): boolean {
+    return !!this.deps.pool && (this.deps.pooled?.(repo) ?? true);
   }
 
   private async read(path: string, as: GithubEnv, used: Set<string>): Promise<unknown> {

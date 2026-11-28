@@ -282,6 +282,8 @@ export class SlotWatch {
 
   /** A start about to run, saved first: an agent killed during it still reports it at its next start. */
   pending(job) {
+    // A start comes only from a pooled scheme: the flag may not have reached this agent yet, and a start with no copy needs the update.
+    this.pooled = true;
     this.slots[`pending/${job.name}`] = { scheme: job.scheme, slot: job.slot, runner: job.name, at: this.now(), pending: true };
     this.save();
   }
@@ -1194,6 +1196,7 @@ async function main() {
   let retry = 0;
   for (;;) {
     try {
+      slots.pool(false); // Citadel's flag follows its hello
       const url = new URL('/api/machines/connect', appUrl);
       url.searchParams.set('host', hostname());
       url.searchParams.set('command', 'citadel runner agent');

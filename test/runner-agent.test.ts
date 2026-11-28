@@ -639,6 +639,9 @@ test('a machine no pooled scheme lends to does nothing: no state, no update, no 
     f.ran.length = 0;
     await watch.tick();
     assert.deepEqual(f.ran, [], 'switched off again: no update');
+    // A start can only come from a pooled scheme: it counts as the word, ahead of the flag.
+    await jobs.handle(start(1, NAME));
+    assert.equal(watch.pooled, true);
   } finally {
     rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }

@@ -153,6 +153,8 @@ export interface CiRunsDeps {
   now?: () => number;
   /** A worktree's head commit, or null. */
   head?: (cwd: string) => Promise<string | null>;
+  /** The run has a job no machine could take for 10 minutes that hasn't gone to GitHub (the runner pool's fallback, Build 11 P5). */
+  machineWait?: (slug: string, runId: number) => boolean;
 }
 
 const run = promisify(execFile);
@@ -261,7 +263,9 @@ export class CiRuns {
       Object.assign(c, { step: `${t.done}/${t.total} ${what}`, text: `${c.text} · ${t.done} of ${t.total} ${what}${t.file ? ` · ${t.file}` : ''}`, done: t.done, total: t.total });
       if (t.failed) c.failed = t.failed;
     }
-    if (c.stage === 'queued' && w.ahead != null) {
+    // Build 11 P5 (spec section 5): "A ship's line shows 'waiting for a machine'".
+    if (c.stage === 'queued' && w.runs.some((r) => this.d.machineWait?.(w.slug, r))) Object.assign(c, { short: 'no machine', text: 'waiting for a machine' });
+    else if (c.stage === 'queued' && w.ahead != null) {
       c.short = w.ahead ? `${w.ahead} ahead` : 'queued';
       c.text += w.ahead ? `, ${w.ahead} run${w.ahead === 1 ? '' : 's'} ahead` : ', none ahead';
     }

@@ -87,7 +87,7 @@ function minion(status: 'running' | 'idle' = 'idle') {
   return { id: t.id, branch: `ticket/${t.number}-x` };
 }
 
-function setup() {
+function setup(machineWait?: (slug: string, run: number) => boolean) {
   let now = T0 + 60_000;
   const gh = github();
   const changed: number[] = [];
@@ -105,7 +105,7 @@ function setup() {
     now: () => now,
     alive: () => true,
     held: () => false,
-    ci: (ci = new CiRuns({ changed: (id) => waits.check(id), get: gh.get, now: () => now, head: async () => heads.sha })),
+    ci: (ci = new CiRuns({ changed: (id) => waits.check(id), get: gh.get, now: () => now, head: async () => heads.sha, machineWait })),
     ciSlug: () => 'o/r',
   });
   const pr = (number: number, runs: number[], state: PrSnapshot['state'] = 'OPEN') =>
@@ -163,6 +163,20 @@ test("a PR's run: queued, its jobs, then green for a while; shown only once the 
   at(260 + KEEP_MS / 1000);
   await ci.tick();
   assert.equal(waits.wait(m.id), null);
+});
+
+test('a queued run whose job no machine could take for 10 minutes reads "waiting for a machine" (Build 11 P5)', async () => {
+  const stuck = new Set<number>([7]);
+  const { gh, ci, waits, pr } = setup((slug, run) => slug === 'o/r' && stuck.has(run));
+  const m = minion();
+  gh.answers.set('repos/o/r/actions/runs/7', { id: 7, workflow_id: 3, status: 'queued' });
+  gh.answers.set('repos/o/r/actions/workflows/3/runs', { workflow_runs: [] });
+  gh.answers.set('repos/o/r/actions/runs/7/jobs', { jobs: [job('test')] });
+  ci.pr(m.id, 'o/r', undefined, pr(88, [7]));
+  await ci.tick();
+  assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['CI · no machine', 'PR #88 · waiting for a machine']);
+  stuck.clear();
+  assert.equal(waits.wait(m.id)!.text, 'PR #88 · queued for a runner (citadel-ci-linux)', 'once a machine can take it, or it went to GitHub');
 });
 
 test('a PR closed or pushed again lets the old run go', async () => {

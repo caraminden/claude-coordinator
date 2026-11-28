@@ -87,7 +87,7 @@ import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, chainedStep, fixShipped, githubPrs, touchedSince, LiveWaiters, missingCommits, pacificTime, relayDests, runsRepo, startChained, TimedWakes } from './src/wake.ts';
 import { deliveriesOf, Outbox } from './src/outbox.ts';
 import { waitsFor } from './src/waits-readout.ts';
-import { followOrigins } from './src/scheme-repo.ts';
+import { followOrigins, type GithubEnv } from './src/scheme-repo.ts';
 import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { depsNote, installDeps, installsRunning, NPM_CACHE_CAP, npmCacheDir } from './src/worktree-deps.ts';
@@ -104,6 +104,7 @@ import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
 import { poolOn } from './src/runner-pool.ts';
 import { BUSY, OwnerBusy, offWords } from './src/owner-busy.ts';
+import { Fallbacks, type Gh, restartOnGithub } from './src/runner-fallback.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import { heavyNow } from './src/heavy-now.ts';
 import { appOwners } from './src/host-load.ts';
@@ -1478,7 +1479,9 @@ const deployState = (() => {
   }
 })();
 // CI runs in flight (#546): a minion's PR (the PR watcher below names its runs) and a landing's CI gate, every 20 s.
-const ciRuns = new CiRuns({ changed: (id) => waits.check(id) });
+// Build 11 P5: a ship's run whose job no machine could take reads "waiting for a machine" (set once the pool's fallback is made).
+let poolWaiting: (slug: string, run: number) => boolean = () => false;
+const ciRuns = new CiRuns({ changed: (id) => waits.check(id), machineWait: (slug, run) => poolWaiting(slug, run) });
 let liveSlug: string | null = null;
 void originRepo(import.meta.dirname).then((slug) => (liveSlug = slug));
 const waits = new Waits({
@@ -2320,6 +2323,38 @@ const ownerBusy = new OwnerBusy({
   sample: (id) => ciLoad.newest(id, 'windows') ?? ciLoad.newest(id, 'linux'),
   owner: (id) => store.getUser(store.getMachine(id)?.owner_id ?? -1)?.name ?? 'its owner',
 });
+// Build 11 P5 (src/runner-fallback.ts): a pool job no machine could take for 10 minutes moves on: a public repo's to
+// GitHub's runners, a private repo's Windows job too while under 80% of the included minutes, a private repo's Linux job
+// to perigee; the scheme's Taskmaster hears once. A preview or boot check never restarts a run.
+const poolGh =
+  (as: GithubEnv): Gh =>
+  async (method, path, body) => {
+    if (method === 'GET') return ghGet(path, null, as);
+    const fields: Record<string, string> = {};
+    for (const [k, v] of Object.entries(body ?? {}))
+      if (v && typeof v === 'object') for (const [k2, v2] of Object.entries(v)) fields[`${k}[${k2}]`] = String(v2);
+      else fields[k] = String(v);
+    return { ...(await ghPost(path, as, fields)), body: null };
+  };
+const poolFallback = new Fallbacks({
+  now: Date.now,
+  isPublic: async (repo) => {
+    const as = asScheme(repo);
+    const r = as === null ? null : await ghGet(`repos/${repo}`, null, as).catch(() => null);
+    const pr = r?.status === 200 ? (r.body as { private?: unknown } | null)?.private : undefined;
+    return typeof pr === 'boolean' ? !pr : null;
+  },
+  // shortcut: GitHub's billing API needs the `user` scope, which Citadel's links don't ask for (src/github-link.ts SCOPES), and
+  // reports no included allowance; until P5's ask 17 settles it, the guard fails closed and private Windows jobs wait.
+  minutes: async () => ({ error: "Citadel's GitHub links can't read the account's Actions minutes (they need the user scope)" }),
+  github: async (repo, run) => {
+    const as = asScheme(repo);
+    return as === null ? { ok: false, why: 'no scheme reads its repo' } : restartOnGithub(poolGh(as), repo, run);
+  },
+  tell: (repo, text) => tellHeld(repo, text),
+  log: (line) => console.log(line),
+});
+poolWaiting = (slug, run) => poolFallback.waiting(slug, run);
 // The runner pool, watching only (Build 11 P1, src/runner-pool.ts): each look's self-hosted jobs go in its books
 // (pool_jobs) and its line, and it logs where it would start each. Nothing on any PC changes until P3 turns it on.
 const runnerPool = new RunnerPool({
@@ -2381,6 +2416,7 @@ const runnerPool = new RunnerPool({
           return runnerSlots.start(project, machine, { os: ask.os, slot: ask.slot, labels: ask.labels, job: ask.job });
         },
       }),
+  ...(PREVIEW || BOOT_CHECK ? {} : { fallback: poolFallback }),
 });
 runnerSlots.onReport = (r) => runnerPool.onSlot(r);
 const shipWatch = new ShipWatch({

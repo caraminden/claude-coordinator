@@ -7,7 +7,7 @@
 // Settings and the sign-in cookie live in %APPDATA%\Citadel (Electron's userData), never in the read-only build folder.
 // Closing the window keeps it in the tray, so notifications (core.js desktopNotify) still come; Quit is the tray's menu.
 const { app, BrowserWindow, Menu, Tray, nativeTheme, safeStorage, screen, shell, ipcMain } = require('electron');
-const { copyFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
+const { copyFileSync, existsSync, readFileSync, watchFile, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const { route, launcherOf } = require('./route.cjs');
 const { reloadKey, devtoolsKey } = require('./keys.cjs');
@@ -34,6 +34,10 @@ Menu.setApplicationMenu(null);
 let win = null;
 let tray = null;
 let quitting = false;
+/** The launcher restarted this copy into an update while it sat in the tray (#2279): its first window starts hidden there. */
+let startHidden = !!process.env.CITADEL_START_HIDDEN;
+/** Maximised from last time, but started hidden: maximize() would show the window, so the first show does it. */
+let maximizeOnShow = false;
 
 function overlay(color) {
   const dark = nativeTheme.shouldUseDarkColors;
@@ -74,7 +78,11 @@ function open(url = START.href) {
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: true },
   });
   const wc = win.webContents;
-  win.once('ready-to-show', () => { if (place.maximized) win.maximize(); win.show(); });
+  win.once('ready-to-show', () => {
+    if (startHidden) { startHidden = false; maximizeOnShow = !!place.maximized; return; }
+    if (place.maximized) win.maximize();
+    win.show();
+  });
   wc.once('did-finish-load', started);
   wc.setWindowOpenHandler(({ url }) => {
     const r = route(url, START, ALIASES);
@@ -103,6 +111,20 @@ function open(url = START.href) {
   win.on('session-end', () => { remember(); quitting = true; });
   win.on('closed', () => { win = null; });
   win.loadURL(url);
+}
+
+/**
+ * The launcher asks this copy to quit by writing CITADEL_QUIT_FILE, to restart it into an update while it sits in the
+ * tray (#2279). It quits only while its window is hidden: a window someone has open is never closed under them, and the
+ * launcher then waits for the next hide.
+ */
+function watchQuit() {
+  const file = process.env.CITADEL_QUIT_FILE;
+  if (!file) return;
+  watchFile(file, { interval: 2000 }, (now) => {
+    if (!now.mtimeMs || (win && !win.isDestroyed() && win.isVisible())) return;
+    app.quit();
+  });
 }
 
 /** Tell #1148's launcher this build is up, once its window has a page in it. */
@@ -141,6 +163,7 @@ ipcMain.on('citadel:title-bar', (e, color) => {
 function show() {
   if (!win) return open();
   if (win.isMinimized()) win.restore();
+  if (maximizeOnShow) { maximizeOnShow = false; win.maximize(); }
   win.show();
   win.focus();
 }
@@ -197,4 +220,4 @@ ipcMain.handle('citadel:login-forget', (e) => fromCitadel(e.senderFrame, START) 
 app.on('second-instance', show);
 app.on('before-quit', () => { remember(); quitting = true; });
 // The second copy only hands over (second-instance above): it quits before making a window or a tray icon.
-if (first) app.whenReady().then(() => { open(); makeTray(); shortcuts(); });
+if (first) app.whenReady().then(() => { open(); makeTray(); shortcuts(); watchQuit(); });

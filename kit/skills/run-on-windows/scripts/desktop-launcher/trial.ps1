@@ -1,6 +1,6 @@
 # The kit desktop launcher's trial rules on real Windows (#1396): probation, the roll back after a crash inside it,
 # one more try before a build is refused, no try while a copy runs (#1522), and a roll back on the feed dropping the
-# waiting build (#1942). Each scenario is a made-up install folder under %TEMP%\launcher-trial with state.json written by
+# waiting build (#1942), and updates while the app sits in the tray (#2279). Each scenario is a made-up install folder under %TEMP%\launcher-trial with state.json written by
 # hand and builds already unpacked. 1 to 6 need no feed (the feed URL refuses at once); the rest read one served here.
 # -From is a URL folder serving launcher.exe (built from kit/desktop-launcher) and testapp.exe (kit/desktop-launcher/testapp).
 # Prints PASS or FAIL per check and exits with the number failed. While it waits (-Pause seconds) after a roll back, the
@@ -144,12 +144,16 @@ Invoke-WebRequest -Uri "$From/launcher.exe" -OutFile (Join-Path $root 'bin\launc
 Invoke-WebRequest -Uri "$From/testapp.exe" -OutFile (Join-Path $root 'bin\testapp.exe') -UseBasicParsing
 $good6 = '{"current":{"id":6,"exe":"App.exe","started":"file"},"previous":{"id":5,"exe":"App.exe","started":"file"},"failed":[4]'
 
-# 1. Launcher 1's state.json reads as it is: its current build is good, so it just starts and the launcher leaves.
+# 1. Launcher 1's state.json reads as it is: its current build is good, so it just starts. The launcher stays beside it
+# (in the tray, #2279) and leaves once it is closed.
 $d = New-Install 'old-state' ($good6 + '}') @{ 5 = 'good'; 6 = 'good' }
 $l = Start-Launcher $d
 Test-That 'old state: build 6 starts' (Wait-Log $d 'starting build 6' 30)
-Test-That 'old state: the launcher leaves without a probation watch' ($l.WaitForExit(30000))
+Start-Sleep -Seconds 3
+Test-That 'old state: the launcher stays beside the app' (-not $l.HasExited)
 Test-That 'old state: no probation in the log' (-not ((Get-Log $d) -match 'probation'))
+Close-App $d
+Test-That 'old state: closing the app, the launcher leaves' ($l.WaitForExit(15000))
 Show-Install $d
 Stop-Install $d
 
@@ -234,7 +238,7 @@ Start-Sleep -Seconds 2
 $l = Start-Launcher $d
 Test-That 'copy: build 11 waits while a copy runs' (Wait-Log $d 'build 11 waits: a copy of Trial app is already running' 30)
 Test-That 'copy: build 6 starts instead' (Wait-Log $d 'starting build 6' 10)
-[void]$l.WaitForExit(30000)
+Start-Sleep -Seconds 3
 Stop-Install $d
 $s = Get-State $d
 Test-That 'copy: 11 still waits, with no strike' ($s.current.id -eq 6 -and $s.pending.id -eq 11 -and -not ($s.struck -contains 11) -and -not ($s.failed -contains 11))
@@ -249,7 +253,8 @@ Start-Feed
 $d = New-Install 'rollback' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'rollback' 6)
 $l = Start-Launcher $d
 Test-That 'rollback: 6 starts' (Wait-Log $d 'starting build 6' 45)
-Test-That 'rollback: the launcher leaves without a probation watch' ($l.WaitForExit(30000))
+Start-Sleep -Seconds 3
+Test-That 'rollback: no probation watch' (-not ((Get-Log $d) -match 'probation'))
 Test-That 'rollback: 11 is never tried' (-not ((Get-Log $d) -match 'trying build 11'))
 Stop-Install $d
 $s = Get-State $d
@@ -270,12 +275,14 @@ Start-Process -FilePath (Join-Path $d 'versions\6\App.exe') -WorkingDirectory (J
 Start-Sleep -Seconds 2
 $l = Start-Launcher $d
 Test-That 'copyrollback: 11 waits while a copy runs' (Wait-Log $d 'build 11 waits: a copy of Trial app is already running' 30)
-[void]$l.WaitForExit(45000)
+[void](Wait-Log $d 'build 11 is not tried: the feed now names build 6' 45)
 Stop-Install $d
 Test-That 'copyrollback: 11 no longer waits' (-not (Get-State $d).pending)
 Set-Feed $d $offline
 $l = Start-Launcher $d
-[void]$l.WaitForExit(45000)
+$until = (Get-Date).AddSeconds(45)
+while ((Get-Date) -lt $until -and [regex]::Matches((Get-Log $d), 'starting build 6').Count -lt 2) { Start-Sleep -Milliseconds 250 }
+Start-Sleep -Seconds 2
 Test-That 'copyrollback: the next start, offline, runs 6 and not 11' (([regex]::Matches((Get-Log $d), 'starting build 6').Count -eq 2) -and -not ((Get-Log $d) -match 'trying build 11'))
 Show-Install $d
 Stop-Install $d
@@ -297,6 +304,56 @@ $s = Get-State $d
 Test-That 'crashdownload: 6 is current and 7 no longer waits' ($s.current.id -eq 6 -and -not $s.pending)
 Test-That "crashdownload: the running 6's files are untouched" ((Test-Path (Join-Path $d 'versions\6\App.exe')) -and (Test-Path (Join-Path $d 'versions\6\label.txt')) -and ((Get-Content (Join-Path $d 'versions\6\label.txt')) -eq '6 (good)'))
 Show-Install $d
+
+# 12. In the tray (#2279): build 6 sits hidden in the tray and the feed names 12. The launcher, still beside it, downloads
+# 12, asks 6 to quit once the PC is idle (a short idle time and feed interval here, set in launcher.json) and starts again:
+# 12 starts hidden too, on probation as any new build is.
+function New-Zip([string]$Name, [string]$Label, [switch]$Tray) {
+    $z = Join-Path $root "zip-$Name"
+    New-Item -ItemType Directory -Path $z | Out-Null
+    Copy-Item (Join-Path $root 'bin\testapp.exe') (Join-Path $z 'App.exe')
+    Set-Content -Path (Join-Path $z 'label.txt') -Value $Label -Encoding ASCII
+    if ($Tray) { Set-Content -Path (Join-Path $z 'tray.txt') -Value 'x' -Encoding ASCII }
+    $zip = Join-Path $feedRoot "$Name.zip"
+    Compress-Archive -Path (Join-Path $z '*') -DestinationPath $zip
+    return $zip
+}
+function Set-Tray([string]$Dir, [string]$Url) {
+    Set-Content -Path (Join-Path $Dir 'launcher.json') -Value ('{"app":"trialapp","feed":"' + $Url + '","title":"Trial app","trayEvery":10,"trayIdle":5}') -Encoding ASCII
+}
+function Get-Windows([string]$Dir) {
+    return @(Get-Process -Name App -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) -and $_.MainWindowHandle -ne 0 })
+}
+$d = New-Install 'tray' ($good6 + '}') @{ 5 = 'good'; 6 = 'good' }
+Set-Content -Path (Join-Path $d 'versions\6\tray.txt') -Value 'x' -Encoding ASCII
+Set-Tray $d (New-Feed 'tray' 12 0 (New-Zip 'b12' '12 (tray)' -Tray))
+$l = Start-Launcher $d
+Test-That 'tray: 6 starts hidden in the tray' ((Wait-Log $d 'starting build 6' 30) -and (Get-Windows $d).Count -eq 0)
+Test-That 'tray: 12 downloads while 6 runs' (Wait-Log $d 'build 12 is ready' 60)
+Test-That 'tray: idle in the tray, 6 is asked to quit' (Wait-Log $d 'Trial app is idle in the tray: asking it to quit, to take build 12' 90)
+Test-That 'tray: the launcher starts again' (Wait-Log $d 'starting the launcher again to take the update' 45)
+Test-That 'tray: 12 is tried and starts, on probation' (Wait-Log $d 'build 12 started: it is now current, on probation' 60)
+Start-Sleep -Seconds 2
+Test-That 'tray: 12 runs with its window hidden' ((Get-Windows $d).Count -eq 0 -and @(Get-Process -Name App -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith((Join-Path $d 'versions\12'), [StringComparison]::OrdinalIgnoreCase) }).Count -eq 1)
+$s = Get-State $d
+Test-That 'tray: 12 current on probation, 6 kept to go back to' ($s.current.id -eq 12 -and $s.probation -eq 12 -and $s.previous.id -eq 6)
+Show-Install $d
+Stop-Install $d
+
+# 13. A window that shows is never restarted (#2279): 6 stays open with 13 waiting, and 13 is tried on the next start.
+$d = New-Install 'visible' ($good6 + '}') @{ 5 = 'good'; 6 = 'good' }
+Set-Tray $d (New-Feed 'visible' 13 0 (New-Zip 'b13' '13 (good)'))
+$l = Start-Launcher $d
+Test-That 'visible: 13 downloads while 6 shows' (Wait-Log $d 'build 13 is ready' 60)
+Test-That "visible: 13 waits for the open window" (Wait-Log $d "build 13 waits: Trial app's window is open" 30)
+Start-Sleep -Seconds 30
+Test-That 'visible: 6 is never asked to quit' (-not ((Get-Log $d) -match 'asking it to quit') -and (Get-Windows $d).Count -eq 1)
+Close-App $d
+Test-That 'visible: closing it, the launcher leaves' ($l.WaitForExit(15000))
+$l = Start-Launcher $d
+Test-That 'visible: the next start tries 13' (Wait-Log $d 'build 13 started: it is now current, on probation' 45)
+Show-Install $d
+Stop-Install $d
 
 # 11. A feed that doesn't answer holds the app up by a few seconds at most, then the waiting build is tried as before.
 # Last: its held-up answers would hold up the next one's.

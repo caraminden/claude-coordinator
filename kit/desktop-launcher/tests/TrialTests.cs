@@ -282,6 +282,7 @@ static class TrialTests
         Test("tray: someone used the PC within the idle time: wait", () =>
         {
             Is(Tray.Hold(Waiting(), false, false, Tray.Idle - TimeSpan.FromSeconds(1)), Held.InUse, "hold");
+            Is(Tray.Hold(Waiting(), false, false, TimeSpan.FromSeconds(11), TimeSpan.FromSeconds(10)), Held.No, "a test's short idle time");
         });
         Test("tray: nothing waiting: no restart", () =>
         {
@@ -297,6 +298,9 @@ static class TrialTests
             s.Struck = new List<int> { 7 };
             Is(Tray.Hold(s, false, false, idle), Held.SecondTry, "hold");
             Is(Tray.Hold(s, true, false, idle), Held.No, "a new launcher still restarts");
+            Is(Tray.SecondTry(s), true, "the restart for the launcher doesn't try it");
+            Is(Tray.SecondTry(Waiting()), false, "a first try");
+            Is(Tray.SecondTry(new State { Current = B(6), Struck = new List<int> { 6 } }), false, "nothing waiting");
         });
         Test("tray: the check comes every 30 min, up to 10 min later at random", () =>
         {

@@ -322,6 +322,19 @@ window.addEventListener('pagehide', saveScroll);
 
 let streamRetry = 0;
 /** @type {number | undefined} */ let streamTimer;
+// A stream request no server answers (one taken mid-boot, #2260) leaves an EventSource connecting for good: no error, no
+// retry. Past this it is dropped and asked again. citadelStreamOpenMs: the test's knob (test/reconnect-browser.test.ts).
+const STREAM_OPEN_MS = Number(Reflect.get(globalThis, 'citadelStreamOpenMs')) || 30_000;
+/** @type {number | undefined} */ let openTimer;
+/** @param {EventSource} es */ function awaitOpen(es) {
+  clearTimeout(openTimer);
+  openTimer = setTimeout(() => {
+    if (stream !== es || es.readyState !== EventSource.CONNECTING) return;
+    es.close();
+    stream = null;
+    connectStream(true);
+  }, STREAM_OPEN_MS);
+}
 
 // While the live stream is down (a restart, mostly) the page stays as it is, clicks wait for the next server,
 // and after a moment this chip says why, until the stream is back (#493).
@@ -416,7 +429,9 @@ function connectStream(catchUp = false) {
   clearTimeout(streamTimer);
   const es = new EventSource('api/stream');
   stream = es;
+  awaitOpen(es);
   es.onopen = () => {
+    clearTimeout(openTimer);
     streamRetry = 0;
     reconnecting(false);
     // Anything broadcast while we were disconnected was missed; fetch it.
@@ -515,7 +530,7 @@ function connectStream(catchUp = false) {
     reconnecting(true);
     // EventSource retries dropped connections itself, but gives up for good on a non-200
     // reply (e.g. Caddy's 502 while the server restarts), so reconnect by hand then.
-    if (es.readyState !== EventSource.CLOSED) return;
+    if (es.readyState !== EventSource.CLOSED) return awaitOpen(es);
     es.close();
     if (stream === es) stream = null;
     streamTimer = setTimeout(() => connectStream(true), Math.min(30_000, 1000 * 2 ** streamRetry++));
@@ -1432,6 +1447,7 @@ export async function logout() {
   eventCache.clear();
   forgetSchemes();
   clearTimeout(streamTimer);
+  clearTimeout(openTimer);
   stream?.close();
   stream = null;
   reconnecting(false);

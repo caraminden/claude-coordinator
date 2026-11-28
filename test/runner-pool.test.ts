@@ -17,7 +17,7 @@ function job(o: Partial<PoolJob> & { scheme: number }): PoolJob {
   return { repo: `r/${o.scheme}`, id, run: id, name: `job ${id}`, ship: false, first: false, since: NOW, needs: { os: 'linux', session: false, size: 4 }, ...o };
 }
 function pc(o: Partial<PoolMachine> & { id: number }): PoolMachine {
-  return { name: `pc${o.id}`, priority: null, os: ['windows', 'linux'], session: true, schemes: [CITADEL, PEEK, MANDATE], free: 16, off: null, ...o };
+  return { name: `pc${o.id}`, priority: null, os: ['windows', 'linux'], session: true, schemes: [CITADEL, PEEK, MANDATE], limit: 16, free: 16, off: null, ...o };
 }
 const ids = (xs: { job: PoolJob }[]) => xs.map((x) => x.job.id);
 
@@ -81,13 +81,31 @@ test('a big job gets its room: after 2 minutes, nothing smaller starts on the ma
     [null, null],
   );
   assert.match(late[0].why!, /nothing smaller starts there meanwhile/);
-  assert.match(late[1].why!, /held for a bigger job ahead of it: job 1 on pc1/);
+  assert.equal(late[1].why, 'held for a bigger job ahead of it on pc1', "the held job isn't named: it may be another scheme's");
   // Another machine with room still takes the small one.
   const two = place({ jobs: [big(NOW - POOL.bigHoldMs), small], machines: [pc({ id: 1, free: 6, priority: 1 }), pc({ id: 2, free: 4, priority: 2 })], now: NOW, lastStart: new Map(), warm: new Map() });
   assert.deepEqual(
     two.map((p) => p.machine),
     [null, 2],
   );
+});
+
+test("a big job never holds a machine it can't ever fit: it waits for one that can, or says it's too big", () => {
+  const big = job({ id: 1, scheme: MANDATE, since: NOW - POOL.bigHoldMs, needs: { os: 'linux', session: false, size: 8 } });
+  const small = job({ id: 2, scheme: PEEK, since: NOW });
+  // pc1 comes first by its owner's order but can only ever lend 4; pc2 can lend 8 and is full: pc2 is the one held.
+  const out = place({ jobs: [big, small], machines: [pc({ id: 1, priority: 1, limit: 4, free: 4 }), pc({ id: 2, priority: 2, limit: 8, free: 0 })], now: NOW, lastStart: new Map(), warm: new Map() });
+  assert.deepEqual(
+    out.map((p) => p.machine),
+    [null, 1],
+  );
+  assert.equal(out[0].why, 'room on pc2: needs 8 threads, 0 free; nothing smaller starts there meanwhile');
+  const none = place({ jobs: [big, small], machines: [pc({ id: 1, limit: 4, free: 4 })], now: NOW, lastStart: new Map(), warm: new Map() });
+  assert.deepEqual(
+    none.map((p) => p.machine),
+    [null, 1],
+  );
+  assert.equal(none[0].why, 'too big for now: needs 8 threads, and the most CI may use on any machine for it is 4');
 });
 
 test("the owner's order first, then the warm machine, then the most room", () => {
@@ -122,7 +140,7 @@ test("a job's needs come from its labels", () => {
 });
 
 test('the books follow the job each runner really took: a same-repo swap books neither job twice', () => {
-  const r = (name: string, job: number, at = NOW) => ({ name, repo: 'o/peek', machine: 1, job, at });
+  const r = (name: string, job: number, at = NOW, labels = ['self-hosted', 'peek-auras-ci']) => ({ name, repo: 'o/peek', machine: 1, job, labels, at });
   // s2 was made for job 20 but took job 10 (s1's); s1 hasn't taken one yet: s1 now stands for job 20.
   const a = settle([r('s1', 10), r('s2', 20)], [{ repo: 'O/Peek', id: 10, runner: 's2' }], NOW);
   assert.deepEqual(Object.fromEntries(a.holds), { s1: { machine: 1, job: 20 }, s2: { machine: 1, job: 10 } });
@@ -146,6 +164,10 @@ test('the books follow the job each runner really took: a same-repo swap books n
   // Another repo's runner of the same name takes nothing of this one's.
   const d = settle([r('s1', 10)], [{ repo: 'o/mandate', id: 10, runner: 's1' }], NOW);
   assert.deepEqual(Object.fromEntries(d.holds), { s1: { machine: 1, job: 10 } });
+  // s2 (a -side runner) took s1's job; s1 (-long) can't take s2's -side job, so it holds none and job 20 waits again.
+  const e = settle([r('s1', 10, NOW, ['self-hosted', 'peek-auras-ci-long']), r('s2', 20, NOW, ['self-hosted', 'peek-auras-ci-side'])], [{ repo: 'o/peek', id: 10, runner: 's2' }], NOW);
+  assert.deepEqual(Object.fromEntries(e.holds), { s1: { machine: 1, job: null }, s2: { machine: 1, job: 10 } });
+  assert.deepEqual(e.free, [20]);
 });
 
 // ---------- the watcher (P1: watching only) and the poll that feeds it ----------
@@ -153,6 +175,7 @@ test('the books follow the job each runner really took: a same-repo swap books n
 import { ShipWatch, type PoolSight, type SeenJob } from '../src/ci-ships.ts';
 import type { PoolLook, PoolRow } from '../src/db/runner-pool.ts';
 import { RunnerPool, machineOfRunner, type PoolPc } from '../src/runner-pool.ts';
+import { Store } from '../src/db.ts';
 
 /** A fake GitHub that answers 304 to a path asked again with the ETag it gave, and counts the calls GitHub would count. */
 function github(pages: Record<string, unknown>) {
@@ -219,6 +242,45 @@ test('the job poll asks with ETags: an unchanged answer makes no counted call, a
   (gh.pages[jobsOf(2)] as { jobs: { status?: string }[] }).jobs[0].status = 'completed';
   await w.tick(POOL.runningMs + 2 * POOL.pollMs);
   assert.deepEqual(gh.counted.sort(), [jobsOf(2), runningRuns].sort());
+  // Run 1 started between the two lists, so both name it: its job is in sight once.
+  gh.pages[runningRuns] = {
+    workflow_runs: [
+      { id: 1, head_branch: 'land/9-x', updated_at: 'c' },
+      { id: 2, head_branch: 'main', updated_at: 'b' },
+    ],
+  };
+  await w.tick(POOL.runningMs + 3 * POOL.pollMs);
+  assert.deepEqual(sights.at(-1)!.jobs.filter((j) => j.id === 11).length, 1);
+});
+
+test("the pool reads every queued run's jobs, past the five the queued counts read", async () => {
+  const repo = 'caraminden/peek-auras';
+  const runs = Array.from({ length: 7 }, (_, k) => ({ id: k + 1, head_branch: 'main' }));
+  const pages: Record<string, unknown> = { [`repos/${repo}/actions/runs?status=queued&per_page=20`]: { workflow_runs: runs }, [`repos/${repo}/actions/runs?status=in_progress&per_page=50`]: { workflow_runs: [] } };
+  for (const r of runs) pages[`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`] = { jobs: [{ id: r.id * 10, name: 'build', status: 'queued', labels: ['self-hosted', 'peek-auras-ci'] }] };
+  const gh = github(pages);
+  const sights: PoolSight[] = [];
+  let counts = new Map<string, number>();
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: (q) => void (counts = q), pool: (s) => void sights.push(s) });
+  await w.tick(0);
+  assert.deepEqual(
+    sights[0].jobs.map((j) => j.id),
+    [10, 20, 30, 40, 50, 60, 70],
+  );
+  assert.equal(counts.get(repo), 5, 'the queued counts read as before');
+});
+
+test("a failed read isn't passed off as new: the repo isn't counted as read, so no job is ended on it", async () => {
+  const repo = 'caraminden/peek-auras';
+  const runningRuns = `repos/${repo}/actions/runs?status=in_progress&per_page=50`;
+  const gh = github({ [`repos/${repo}/actions/runs?status=queued&per_page=20`]: { workflow_runs: [] }, [runningRuns]: { workflow_runs: [] } });
+  const sights: PoolSight[] = [];
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: () => {}, pool: (s) => void sights.push(s) });
+  await w.tick(0);
+  assert.ok(sights[0].repos.has(repo));
+  delete gh.pages[runningRuns];
+  await w.tick(POOL.pollMs);
+  assert.ok(!sights[1].repos.has(repo), 'the in-progress list failed: none of its jobs can be called ended');
 });
 
 /** An in-memory pool_jobs with the store's three calls. */
@@ -229,7 +291,12 @@ function books(rows: PoolRow[] = []) {
     rows,
     poolLook(l: PoolLook) {
       looks.push(l);
-      for (const r of l.seen) if (!rows.some((x) => x.repo === r.repo && x.job_id === r.job_id)) rows.push({ ...r, placed_machine: null, placed_at: null, runner: null, ran_on: null, started_at: null, ended_at: null });
+      for (const r of l.seen) {
+        const had = rows.find((x) => x.repo === r.repo && x.job_id === r.job_id);
+        if (had) had.ended_at = null;
+        else rows.push({ ...r, placed_machine: null, placed_at: null, runner: null, ran_on: null, started_at: null, ended_at: null });
+      }
+      for (const r of l.placed) Object.assign(rows.find((x) => x.repo === r.repo && x.job_id === r.job_id)!, { placed_machine: r.machine, placed_at: l.at });
       for (const r of l.ran) Object.assign(rows.find((x) => x.repo === r.repo && x.job_id === r.job_id)!, { runner: r.runner, ran_on: r.ran_on, started_at: r.started_at });
       for (const r of l.ended) Object.assign(rows.find((x) => x.repo === r.repo && x.job_id === r.job_id)!, { ended_at: l.at });
     },
@@ -258,6 +325,11 @@ test('the watcher keeps the books, counts running jobs as used room, and logs ea
     ],
   );
   assert.equal(store.rows.length, 3);
+  assert.deepEqual(
+    store.rows.map((r) => r.placed_machine),
+    [1, 1, null],
+    'placed where',
+  );
   assert.equal(logs.length, 2);
   assert.match(logs[0], /^Runner pool \(watching\): would start caraminden\/peek-auras "job 1" \(job 1\) on cara-desktop, place 1 of 3$/);
   // The same look again: nothing new written or logged.
@@ -287,6 +359,37 @@ test('the watcher keeps the books, counts running jobs as used room, and logs ea
   assert.equal(store.rows.find((r) => r.job_id === 1)!.ended_at, now);
   assert.equal(store.rows.find((r) => r.job_id === 3)!.ended_at, null);
   assert.equal(v.watching, true);
+  // Job 1 listed again (its run had fallen off a list): its row opens again.
+  now += POOL.pollMs;
+  pool.pass(sight([j(1, { status: 'in_progress', runner: 'DESK-2' }), j(2)], [1, 2, 3]));
+  assert.equal(store.rows.find((r) => r.job_id === 1)!.ended_at, null);
+});
+
+test("the pool's books in the real table: seen, placed, ran, ended, seen again, and each scheme's last start", () => {
+  const store = new Store(':memory:');
+  const seen = (job_id: number, project_id: number) => ({ repo: 'o/peek', job_id, run_id: 9, project_id, name: `job ${job_id}`, labels: '["self-hosted"]', size: 4, ship: 0, first_seen: NOW });
+  store.poolLook({ seen: [seen(1, PEEK), seen(2, PEEK), seen(3, MANDATE)], ran: [], placed: [{ repo: 'o/peek', job_id: 1, machine: 4 }], ended: [], at: NOW });
+  store.poolLook({
+    seen: [],
+    ran: [
+      { repo: 'o/peek', job_id: 1, runner: 'DESK-1', ran_on: 4, started_at: NOW + 1 },
+      { repo: 'o/peek', job_id: 2, runner: 'DESK-2', ran_on: 6, started_at: NOW + 2 },
+    ],
+    placed: [],
+    ended: [{ repo: 'o/peek', job_id: 3 }],
+    at: NOW + 3,
+  });
+  const row = (id: number) => store.poolOpen().find((r) => r.job_id === id);
+  assert.deepEqual({ ...row(1)!, labels: JSON.parse(row(1)!.labels) }, { ...seen(1, PEEK), labels: ['self-hosted'], placed_machine: 4, placed_at: NOW, runner: 'DESK-1', ran_on: 4, started_at: NOW + 1, ended_at: null });
+  assert.equal(row(3), undefined, 'ended');
+  // A second start doesn't move started_at; a job seen again after it ended opens again, the rest of its row kept.
+  store.poolLook({ seen: [seen(3, MANDATE)], ran: [{ repo: 'o/peek', job_id: 1, runner: 'DESK-9', ran_on: 4, started_at: NOW + 50 }], placed: [], ended: [], at: NOW + 4 });
+  assert.equal(row(1)!.started_at, NOW + 1);
+  assert.equal(row(3)!.first_seen, NOW);
+  assert.deepEqual(
+    store.poolLastStarts().map((r) => ({ ...r })),
+    [{ project_id: PEEK, at: NOW + 2, machine: 6 }],
+  );
 });
 
 test("a runner's machine is the one whose hostname its name starts with", () => {
@@ -298,4 +401,7 @@ test("a runner's machine is the one whose hostname its name starts with", () => 
   assert.equal(machineOfRunner('DESK-3', pcs), 1);
   assert.equal(machineOfRunner('desk-2-linux-1', pcs), 2);
   assert.equal(machineOfRunner('laptop', pcs), null);
+  // A pool slot (P2) names its machine by id.
+  assert.equal(machineOfRunner('pool-m2-w1-j55', pcs), 2);
+  assert.equal(machineOfRunner('pool-m7-l1-ab12cd', pcs), null);
 });

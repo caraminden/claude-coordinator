@@ -224,7 +224,9 @@ export class ShipWatch {
     const jobLabels: string[][] = [];
     const heavy: QueuedHeavy[] = [];
     for (const r of runs) if (Number.isInteger(r?.id)) sight.runs.add(`${repo}#${r.id}`);
-    for (const r of runs.filter((r) => Number.isInteger(r?.id)).slice(0, QUEUED_RUNS)) {
+    // The pool reads every listed run's jobs, the oldest first in its line (a 304 costs nothing); the counts keep the newest QUEUED_RUNS.
+    const ids = runs.filter((r) => Number.isInteger(r?.id));
+    for (const [k, r] of (this.deps.pool ? ids : ids.slice(0, QUEUED_RUNS)).entries()) {
       const jobs = ((await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used)) as GhJobsBody | null)?.jobs ?? [];
       sight.known.add(`${repo}#${r.id}`);
       for (const j of jobs) {
@@ -232,6 +234,7 @@ export class ShipWatch {
         const asks = j.labels.filter((l) => typeof l === 'string');
         const seen = seenJob(repo, r, j);
         if (seen) sight.jobs.push(seen);
+        if (k >= QUEUED_RUNS) continue;
         const kind = heavyKind(asks);
         // Its other labels still ask for runners (#2064); the heavy one is Citadel's to hand out.
         for (const l of asks) if (l !== 'self-hosted' && l.toLowerCase() !== kind?.label) labels.add(l.toLowerCase());
@@ -255,6 +258,8 @@ export class ShipWatch {
     const runs = ((await this.read(`repos/${repo}/actions/runs?status=in_progress&per_page=50`, as, used)) as GhRunsBody | null)?.workflow_runs ?? [];
     for (const r of runs.filter((r) => Number.isInteger(r?.id))) {
       sight.runs.add(`${repo}#${r.id}`);
+      // Read as queued a moment ago (it started between the two lists): its jobs are in sight once already.
+      if (sight.known.has(`${repo}#${r.id}`)) continue;
       const path = `repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`;
       const updated = String(r.updated_at ?? '');
       const last = this.runRead.get(path);
@@ -280,10 +285,14 @@ export class ShipWatch {
     const had = this.cache.get(path);
     // Asked already in this look (a ship's run's jobs, read for its ships and again for the pool): no second call.
     if (used.has(path) && had) return had.body;
-    used.add(path);
     const r = await this.get(path, had?.etag ?? null, as);
-    if (r.status === 304 && had) return had.body;
+    // Marked only once answered: a failed read asked again in this look asks GitHub again, never passing the old body off as new.
+    if (r.status === 304 && had) {
+      used.add(path);
+      return had.body;
+    }
     if (r.status === 200) {
+      used.add(path);
       this.cache.set(path, { etag: r.etag, body: r.body });
       return r.body;
     }

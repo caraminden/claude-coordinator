@@ -22,15 +22,15 @@ export type PoolRow = {
 
 /** One look's changes, written together. */
 export type PoolLook = {
-  /** Jobs seen for the first time (a row already there is left as it is). */
+  /** Jobs seen for the first time, or again after the pool thought they ended (their row opens again, the rest as it was). */
   seen: Pick<PoolRow, 'repo' | 'job_id' | 'run_id' | 'project_id' | 'name' | 'labels' | 'size' | 'ship' | 'first_seen'>[];
   /** Jobs a runner took: which, on which machine (null: none Citadel knows), since when. */
   ran: { repo: string; job_id: number; runner: string; ran_on: number | null; started_at: number }[];
+  /** Jobs the pool would start (P1) or started on a machine at `at`: the newest place each. */
+  placed: { repo: string; job_id: number; machine: number }[];
   /** Jobs that ended (or went) at `at`. */
   ended: { repo: string; job_id: number }[];
   at: number;
-  /** Ended rows older than this go. */
-  keepAfter: number;
 };
 
 export const poolQueries = {
@@ -38,13 +38,14 @@ export const poolQueries = {
     const nested = this.db.isTransaction;
     if (!nested) this.db.exec('BEGIN');
     try {
-      const seen = this.db.prepare('INSERT OR IGNORE INTO pool_jobs (repo, job_id, run_id, project_id, name, labels, size, ship, first_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      const seen = this.db.prepare('INSERT INTO pool_jobs (repo, job_id, run_id, project_id, name, labels, size, ship, first_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (repo, job_id) DO UPDATE SET ended_at = NULL');
       for (const r of look.seen) seen.run(r.repo, r.job_id, r.run_id, r.project_id, r.name, r.labels, r.size, r.ship, r.first_seen);
       const ran = this.db.prepare('UPDATE pool_jobs SET runner = ?, ran_on = ?, started_at = COALESCE(started_at, ?) WHERE repo = ? AND job_id = ?');
       for (const r of look.ran) ran.run(r.runner, r.ran_on, r.started_at, r.repo, r.job_id);
+      const placed = this.db.prepare('UPDATE pool_jobs SET placed_machine = ?, placed_at = ? WHERE repo = ? AND job_id = ?');
+      for (const r of look.placed) placed.run(r.machine, look.at, r.repo, r.job_id);
       const ended = this.db.prepare('UPDATE pool_jobs SET ended_at = ? WHERE repo = ? AND job_id = ? AND ended_at IS NULL');
       for (const r of look.ended) ended.run(look.at, r.repo, r.job_id);
-      this.db.prepare('DELETE FROM pool_jobs WHERE ended_at IS NOT NULL AND ended_at < ?').run(look.keepAfter);
       if (!nested) this.db.exec('COMMIT');
     } catch (err) {
       if (!nested)

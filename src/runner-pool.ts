@@ -31,8 +31,6 @@ export const POOL = {
   reapMs: 2 * 60_000,
   /** A running run's jobs are read again at least this often when GitHub says the run didn't change (API budget, P0). */
   runningMs: 60_000,
-  /** Ended jobs' rows are kept this long. */
-  keepMs: 14 * 24 * 3600_000,
   /** Threads a job counts as: a plain CI job, and a heavy kind by its `citadel-heavy-<kind>` label (an unknown kind as a build). */
   sizes: { ci: COST.ci, heavy: HEAVY_SIZES as Readonly<Record<string, number>>, heavyUnknown: HEAVY_SIZES.apk },
 } as const;
@@ -91,7 +89,9 @@ export interface PoolMachine {
   session: boolean;
   /** The schemes its CI switch lends to. */
   schemes: readonly number[];
-  /** Threads free for CI now: the owner's limit less what runs there, CI jobs and minion turns together. */
+  /** Threads CI may use there at most: the owner's CI limit, less the minion turns running there. */
+  limit: number;
+  /** Threads free for CI now: `limit` less the CI jobs running there. */
   free: number;
   /** Why it takes no new job now ("is offline", "is paused", P4's "Cara is in a game"); null: it may. */
   off: string | null;
@@ -173,7 +173,8 @@ export function place(i: PlaceIn): Placed[] {
     const on = can.filter((m) => !m.off);
     if (!on.length) return out(null, can.map((m) => `${m.name} ${m.off}`).join('; '));
     const open = on.filter((m) => !held.has(m.id));
-    if (!open.length) return out(null, `held for a bigger job ahead of it: ${[...new Set(on.map((m) => `${held.get(m.id)!.name} on ${m.name}`))].join(', ')}`);
+    // The held job isn't named: it may be another scheme's, which this job's people can't see.
+    if (!open.length) return out(null, `held for a bigger job ahead of it on ${on.map((m) => m.name).join(', ')}`);
     const warm = i.warm.get(job.scheme) ?? null;
     const [fit] = rank(
       open.filter((m) => free.get(m.id)! >= n.size).map((m) => ({ ...m, free: free.get(m.id)! })),
@@ -183,9 +184,12 @@ export function place(i: PlaceIn): Placed[] {
       free.set(fit.id, free.get(fit.id)! - n.size);
       return out(fit.id, null);
     }
+    // Only a machine whose whole limit fits it is waited for (held): holding one it can never fit would starve it.
+    const big = open.filter((m) => m.limit >= n.size);
+    if (!big.length) return out(null, `too big for now: needs ${plural(n.size, 'thread')}, and the most CI may use on any machine for it is ${Math.max(...open.map((m) => m.limit))}`);
     // rank() leaves out machines with nothing free: one more thread each keeps their order and lets a full one be waited for.
     const [best] = rank(
-      open.map((m) => ({ ...m, free: free.get(m.id)! + 1 })),
+      big.map((m) => ({ ...m, free: free.get(m.id)! + 1 })),
       { warm },
     );
     const room = `room on ${name(best.id)}: needs ${plural(n.size, 'thread')}, ${free.get(best.id)!} free`;
@@ -202,6 +206,8 @@ export interface PoolRunner {
   machine: number;
   /** The job it was made for. */
   job: number;
+  /** Its labels, the job's: a swap is only with a job that asks for the same ones. */
+  labels: readonly string[];
   at: number;
 }
 
@@ -234,10 +240,15 @@ export function settle(runners: readonly PoolRunner[], took: readonly Took[], no
   }
   // A swap: the job made for a runner that took another is still waiting, and a runner still waiting whose own job
   // was taken stands for that one instead, so no job is booked twice and none is lost.
-  const spare = runners.filter((r) => ran.has(key(r.repo, r.name)) && !held.has(r.job)).map((r) => r.job);
+  const kind = (r: PoolRunner) =>
+    `${r.repo.toLowerCase()}\0${[...r.labels]
+      .map((l) => l.toLowerCase())
+      .sort()
+      .join(',')}`;
+  const spare = runners.filter((r) => ran.has(key(r.repo, r.name)) && !held.has(r.job));
   for (const r of pending) {
-    const i = held.has(r.job) ? spare.findIndex((j) => runners.find((o) => o.job === j)?.repo.toLowerCase() === r.repo.toLowerCase()) : -1;
-    const job = !held.has(r.job) ? r.job : i >= 0 ? spare.splice(i, 1)[0] : null;
+    const i = held.has(r.job) ? spare.findIndex((o) => kind(o) === kind(r)) : -1;
+    const job = !held.has(r.job) ? r.job : i >= 0 ? spare.splice(i, 1)[0].job : null;
     holds.set(r.name, { machine: r.machine, job });
     if (job !== null) held.add(job);
   }
@@ -248,8 +259,6 @@ export function settle(runners: readonly PoolRunner[], took: readonly Took[], no
 
 /** A machine that lends CI, as the server knows it; the pool takes what CI runs there off `limit` to get its free room. */
 export interface PoolPc extends Omit<PoolMachine, 'free'> {
-  /** Threads CI may use there now before CI's own jobs: the owner's CI limit, less the minion turns running there. */
-  limit: number;
   /** Its runner agents' hostnames: a runner's name starts with one. */
   hosts: readonly string[];
 }
@@ -282,9 +291,11 @@ export interface PoolView {
 
 type Open = { repo: string; id: number; run: number; scheme: number; size: number; runner: string | null; ranOn: number | null };
 
-/** Which machine a runner is on, by the hostname its name starts with (the longest that fits). */
+/** Which machine a runner is on: a pool slot's `pool-m<id>-` (P2's src/runner-slots.ts), else the hostname its name starts with (the longest that fits). */
 export function machineOfRunner(runner: string, pcs: readonly Pick<PoolPc, 'id' | 'hosts'>[]): number | null {
   const name = runner.toLowerCase();
+  const slot = /^pool-m(\d+)-/.exec(name);
+  if (slot) return pcs.find((p) => p.id === Number(slot[1]))?.id ?? null;
   let best: { id: number; len: number } | null = null;
   for (const p of pcs) for (const h of p.hosts.map((x) => x.toLowerCase())) if (h && (name === h || name.startsWith(`${h}-`)) && h.length > (best?.len ?? 0)) best = { id: p.id, len: h.length };
   return best?.id ?? null;
@@ -331,7 +342,7 @@ export class RunnerPool {
       }
     }
     const pcs = this.d.machines();
-    const look: PoolLook = { seen: [], ran: [], ended: [], at: now, keepAfter: now - POOL.keepMs };
+    const look: PoolLook = { seen: [], ran: [], placed: [], ended: [], at: now };
     const first = this.d.first()?.toLowerCase() ?? null;
     const waiting: PoolJob[] = [];
     const listed = new Set<string>();
@@ -366,11 +377,10 @@ export class RunnerPool {
       look.ended.push({ repo: o.repo, job_id: o.id });
       this.open.delete(key);
     }
-    if (look.seen.length || look.ran.length || look.ended.length) this.d.store.poolLook(look);
     // CI's room in use on each machine: the jobs running there now, by their size.
     const used = new Map<number, number>();
     for (const o of this.open.values()) if (o.runner && o.ranOn !== null) used.set(o.ranOn, (used.get(o.ranOn) ?? 0) + o.size);
-    const machines = pcs.map(({ limit, hosts: _, ...m }) => ({ ...m, free: Math.max(0, limit - (used.get(m.id) ?? 0)) }));
+    const machines = pcs.map(({ hosts: _, ...m }) => ({ ...m, free: Math.max(0, m.limit - (used.get(m.id) ?? 0)) }));
     const placed = place({ jobs: waiting, machines, now, lastStart: this.lastStart, warm: this.warm });
     const nameOf = (id: number | null) => (id === null ? null : (machines.find((m) => m.id === id)?.name ?? `machine ${id}`));
     const said = new Map<string, number>();
@@ -378,9 +388,12 @@ export class RunnerPool {
       if (p.machine === null) continue;
       const key = `${p.job.repo}#${p.job.id}`;
       said.set(key, p.machine);
-      if (this.said.get(key) !== p.machine) this.d.log(`Runner pool (watching): would start ${p.job.repo} "${p.job.name}" (job ${p.job.id}${p.job.ship ? ', a ship' : ''}) on ${nameOf(p.machine)}, place ${p.place} of ${placed.length}`);
+      if (this.said.get(key) === p.machine) continue;
+      look.placed.push({ repo: p.job.repo, job_id: p.job.id, machine: p.machine });
+      this.d.log(`Runner pool (watching): would start ${p.job.repo} "${p.job.name}" (job ${p.job.id}${p.job.ship ? ', a ship' : ''}) on ${nameOf(p.machine)}, place ${p.place} of ${placed.length}`);
     }
     this.said = said;
+    if (look.seen.length || look.ran.length || look.placed.length || look.ended.length) this.d.store.poolLook(look);
     this.current = {
       at: now,
       watching: true,

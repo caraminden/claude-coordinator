@@ -247,7 +247,7 @@ export function renderProgress() {
   // Phones show this line in place of the state (#492), so an idle chat's line leads with it (and a bare "Finished" adds nothing to it).
   // The server working for it (#727) leads the line in place of the finished plan's step: "Server" and its land stage.
   const server = !running && workingBy(view.ticket) === 'server' && !jobOf(view.ticket);
-  const step = server || !line ? '' : view.ticket.worker_wait ? 'Working' : live ? stepName(p, running) : narrow.matches && !running ? (stripped === 'Finished' ? headState(view.ticket) : `${headState(view.ticket)} · ${stripped}`) : stripped;
+  const step = server || !line ? '' : view.ticket.worker_wait ? 'Working' : live ? stepName(p, running) : narrow.matches && !running ? (stripped === 'Finished' || stripped === 'Waiting on you' ? headState(view.ticket) : `${headState(view.ticket)} · ${stripped}`) : stripped;
   const doing = !w && live ? nowDoing(view.turnActions, Date.now()) : '';
   const now = w ? waitNow(w) : doing;
   // The step count sits in its own chip, so a phone's cut-off text never hides it; the turn's action

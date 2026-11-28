@@ -80,7 +80,7 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
 
 1. A title and one line on what the project is, with a pointer to the README for layout and
    running it.
-   A repo with no `README.md` gets one first: copy `templates/README.md` and fill in every
+   A repo with no `README.md` gets one first: copy `references/readme-template.md` to `README.md` and fill in every
    `<...>` (what it is, how to run and check it, how a change ships, the Layout table below).
    An existing README stays as it is, apart from adding the Layout table when it has none.
    The README it points at has a "## Layout" table (path → what it owns, with globs or folder

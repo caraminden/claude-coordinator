@@ -426,5 +426,6 @@ if (!edge && (what === 'rclick' || what === 'all')) {
     if (loads.length) await ready();
   }
 }
+console.log(`fails ${fails}`);
 writeFileSync(path.join(root, 'last.txt'), `fails ${fails}\n`);
 await quit(fails ? 1 : 0);

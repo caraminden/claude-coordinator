@@ -20,7 +20,7 @@ import { HEAVY_SIZES, heavyKind } from './heavy-place.ts';
 import { COST, rank } from './machine-balancer.ts';
 import type { PoolSight } from './ci-ships.ts';
 import type { PoolLook, PoolRow } from './db/runner-pool.ts';
-import { machineReasons, type FallbackLook } from './runner-fallback.ts';
+import { type FallbackLook, machineReasons, noMachine } from './runner-fallback.ts';
 import { poolName, slotPrefix, MAX_SLOTS, type SlotReport } from './runner-slots.ts';
 
 /** The per-scheme switch, kept in src/ci-runner.ts (out of an import loop); its callers import it from here too. */
@@ -108,6 +108,8 @@ export interface PoolMachine {
   limit: number;
   /** Threads free for CI now: `limit` less the CI jobs running there. */
   free: number;
+  /** P5: the owner's CI limit before minion turns take their share; a job within it waits for room there, never falls back. Left out: `limit`. */
+  cap?: number;
   /** Why it takes no new job now ("is offline", "is paused", P4's "Cara is in a game"); null: it may. */
   off: string | null;
 }
@@ -121,11 +123,6 @@ export interface Placed {
   /** Where it starts now; null: it waits, and `why` says why. */
   machine: number | null;
   why: string | null;
-  /**
-   * No machine could take it now (none lends its scheme CI, runs what it needs, is on, or has a limit it fits), as against
-   * waiting for room on one that could (P5: only this starts the 10 minutes to a fallback, src/runner-fallback.ts).
-   */
-  none: boolean;
 }
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
@@ -186,16 +183,16 @@ export function place(i: PlaceIn): Placed[] {
   const held = new Map<number, PoolJob>();
   const name = (id: number) => i.machines.find((m) => m.id === id)?.name ?? `machine ${id}`;
   return line(i.jobs, i.now, i.lastStart).map(({ job, step }, k): Placed => {
-    const out = (machine: number | null, why: string | null, none = false): Placed => ({ job, place: k + 1, step, machine, why, none });
+    const out = (machine: number | null, why: string | null): Placed => ({ job, place: k + 1, step, machine, why });
     const n = job.needs;
     const free = job.standing ? seen : real;
     const lent = i.machines.filter((m) => m.schemes.includes(job.scheme));
-    if (!lent.length) return out(null, 'no machine lends CI to its scheme', true);
-    if (!n.os) return out(null, 'its labels name no Windows or Linux runner (a `<scheme>-ci` or `<scheme>-ci-linux` label)', true);
+    if (!lent.length) return out(null, 'no machine lends CI to its scheme');
+    if (!n.os) return out(null, 'its labels name no Windows or Linux runner (a `<scheme>-ci` or `<scheme>-ci-linux` label)');
     const can = lent.filter((m) => m.os.includes(n.os!) && (!n.session || m.session));
-    if (!can.length) return out(null, n.session ? 'no machine lending its scheme CI has a person signed in on Windows' : `no machine lending its scheme CI runs ${OS_WORD[n.os]}`, true);
+    if (!can.length) return out(null, n.session ? 'no machine lending its scheme CI has a person signed in on Windows' : `no machine lending its scheme CI runs ${OS_WORD[n.os]}`);
     const on = can.filter((m) => !m.off);
-    if (!on.length) return out(null, can.map((m) => `${m.name} ${m.off}`).join('; '), true);
+    if (!on.length) return out(null, can.map((m) => `${m.name} ${m.off}`).join('; '));
     const open = on.filter((m) => !held.has(m.id));
     // The held job isn't named: it may be another scheme's, which this job's people can't see.
     if (!open.length) return out(null, `held for a bigger job ahead of it on ${on.map((m) => m.name).join(', ')}`);
@@ -211,7 +208,7 @@ export function place(i: PlaceIn): Placed[] {
     }
     // Only a machine whose whole limit fits it is waited for (held): holding one it can never fit would starve it.
     const big = open.filter((m) => m.limit >= n.size);
-    if (!big.length) return out(null, `too big for now: needs ${plural(n.size, 'thread')}, and the most CI may use on any machine for it is ${Math.max(...open.map((m) => m.limit))}`, true);
+    if (!big.length) return out(null, `too big for now: needs ${plural(n.size, 'thread')}, and the most CI may use on any machine for it is ${Math.max(...open.map((m) => m.limit))}`);
     // rank() leaves out machines with nothing free: one more thread each keeps their order and lets a full one be waited for.
     const [best] = rank(
       big.map((m) => ({ ...m, free: free.get(m.id)! + 1 })),
@@ -384,8 +381,8 @@ export interface PoolDeps {
   standing?(repo: string, scheme: number): string[];
   /** Start one one-job runner (src/runner-slots.ts RunnerSlots.start); rejects, or answers ok false, when it didn't start. Left out, the pool only watches. */
   start?(ask: { repo: string; scheme: number; machine: number; os: Os; slot: number; labels: string[]; job: number }): Promise<{ name: string; ok: boolean; output: string }>;
-  /** P5: each look's pool jobs, whether a machine could take each, for the fallback (src/runner-fallback.ts); left out, none falls back. */
-  fallback?: { look(jobs: FallbackLook[]): void };
+  /** P5: each look's pool jobs, whether any machine could take each, and the repos whose jobs were read (src/runner-fallback.ts); left out, none falls back. */
+  fallback?: { look(jobs: FallbackLook[], read: ReadonlySet<string>): void };
 }
 
 /** The lowest slot not in `busy`, so the warmest folder is reused; null when all MAX_SLOTS are. */
@@ -559,10 +556,15 @@ export class RunnerPool {
       this.d.log(`Runner pool (watching): would start ${p.job.repo} "${p.job.name}" (job ${p.job.id}${p.job.ship ? ', a ship' : ''}) on ${nameOf(p.machine)}, place ${p.place} of ${placed.length}`);
     }
     this.said = said;
-    // P5: a pool job no machine can take (not one waiting for room) moves on after FALLBACK.afterMs. Citadel's own ships
-    // keep their own fallback (tools/land/ci.sh), and heavy jobs theirs (src/heavy-place.ts).
+    // P5: a pool job no machine could take (not one waiting for room there) moves on after FALLBACK.afterMs. Citadel's own
+    // ships keep their own fallback (tools/land/ci.sh), and heavy jobs theirs (src/heavy-place.ts).
+    const fallen = placed.filter((p) => p.machine === null && !p.job.standing && !(p.job.ship && p.job.first) && !heavyKind(labelsOf(p.job.repo, p.job.id).map((l) => l.toLowerCase())));
     this.d.fallback?.look(
-      placed.filter((p) => !p.job.standing && !(p.job.ship && p.job.first) && !heavyKind(labelsOf(p.job.repo, p.job.id).map((l) => l.toLowerCase()))).map((p) => ({ job: p.job, none: p.machine === null && p.none && !covered.has(`${p.job.repo}#${p.job.id}`), reasons: p.none ? machineReasons(p.job, machines) : [] })),
+      fallen.map((p) => {
+        const none = !covered.has(`${p.job.repo}#${p.job.id}`) && noMachine(p.job, machines);
+        return { job: p.job, labels: labelsOf(p.job.repo, p.job.id), none, reasons: none ? machineReasons(p.job, machines) : [] };
+      }),
+      sight.repos,
     );
     if (look.seen.length || look.ran.length || look.placed.length || look.ended.length) this.d.store.poolLook(look);
     const lineJob = (j: PoolJob, o: { place: number; step: number; machine: string | null; why: string | null; starting: boolean }): PoolLineJob => ({

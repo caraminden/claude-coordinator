@@ -233,6 +233,33 @@ export async function ghPost(path: string, as: GithubEnv, fields: Record<string,
   }
 }
 
+/**
+ * A call with a JSON body whose answer's JSON is wanted too (P5's one-job runner config for perigee, src/runner-fallback.ts).
+ * The answer can hold a credential: it is returned, never logged. Rejects when gh prints no HTTP status at all.
+ */
+export async function ghSend(method: 'POST' | 'DELETE', path: string, as: GithubEnv, body?: object): Promise<{ status: number; body: unknown }> {
+  ghTally.add(path, 0);
+  const p = run('gh', ['api', '-i', '-X', method, path, ...(body ? ['--input', '-'] : [])], { env: asEnv(as), timeout: 30_000, maxBuffer: 1 << 22 });
+  p.child.stdin?.end(body ? JSON.stringify(body) : '');
+  let out: string;
+  try {
+    out = (await p).stdout;
+  } catch (err) {
+    const { stdout } = thrown(err);
+    out = typeof stdout === 'string' ? stdout : '';
+    if (!/^HTTP\/\S+ \d+/.test(out)) throw err;
+  }
+  const status = Number(/^HTTP\/\S+ (\d+)/.exec(out)?.[1] ?? 0);
+  const at = out.search(/\r?\n\r?\n/);
+  let parsed: unknown = null;
+  try {
+    parsed = at < 0 ? null : JSON.parse(out.slice(at).trim() || 'null');
+  } catch {
+    parsed = null;
+  }
+  return { status, body: parsed };
+}
+
 export class RateLimited extends Error {}
 
 /** Whether GitHub's answer says to slow down: a 429, or a 403 whose message names the rate limit. */

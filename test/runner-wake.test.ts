@@ -441,9 +441,9 @@ test('the relay sends each runner agent its part, and a row whose runner agent i
   };
   const win = stream();
   const wsl = stream();
-  // As the connect route does: the new agent says plans=1, the one from before says nothing.
+  // As the connect route does: the new agent says plans=1 and update=1 (#2310), the one from before says neither.
   relay.runnerPlans.set(`${pc.id}:windows`, true);
-  relay.connectAgent(pc, win.r, { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+  relay.connectAgent(pc, win.r, { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows', selfUpdate: true });
   relay.runnerPlans.set(`${pc.id}:linux`, false);
   relay.connectAgent(pc, wsl.r, { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'linux' });
   try {
@@ -453,9 +453,10 @@ test('the relay sends each runner agent its part, and a row whose runner agent i
       [`data: ${JSON.stringify({ plan: { runners: 2, queued: { 'o/peek': 1 } } })}\n\n`],
     );
     assert.ok(!wsl.sent.some((d) => d.includes('"plan"')));
-    assert.deepEqual(relay.view(store.getMachine(pc.id)!).runner_update, { os: ['linux'], url: 'http://perigee:8574' });
+    assert.deepEqual(relay.view(store.getMachine(pc.id)!).runner_update, { os: ['linux'], url: 'http://perigee:8574', plans: true });
+    // Plans but no self-update: still offered, as an agent that can't update itself (#2310).
     relay.runnerPlans.set(`${pc.id}:linux`, true);
-    assert.equal(relay.view(store.getMachine(pc.id)!).runner_update, null);
+    assert.deepEqual(relay.view(store.getMachine(pc.id)!).runner_update, { os: ['linux'], url: 'http://perigee:8574', plans: false });
   } finally {
     win.r.end();
     wsl.r.end();

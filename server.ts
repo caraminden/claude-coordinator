@@ -325,7 +325,11 @@ async function loadAssets() {
   const hashes = new Map([...assets].map(([name, body]) => [name, createHash('sha256').update(body).digest('hex').slice(0, 16)]));
   const statics = await staticTable(assets, version, hashes, dark);
   const runnerBodies = new Map<string, Buffer>();
-  for (const name of RUNNER_FILES) runnerBodies.set(name, await readFile(join(import.meta.dirname, 'tools', 'ci-runner', name)));
+  // A copy without tools/ci-runner (a test's or a preview's) boots: an OS missing a file gets no list (runnerManifests).
+  for (const name of RUNNER_FILES) {
+    const body = await readFile(join(import.meta.dirname, 'tools', 'ci-runner', name)).catch(() => null);
+    if (body) runnerBodies.set(name, body);
+  }
   // Swapped together after the last await: SIGHUP's caller sets liveCommit in the same tick, so /api/health never pairs the new version with the old commit (#1628).
   ASSETS = assets;
   ASSET_VERSION = version;

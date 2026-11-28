@@ -462,7 +462,12 @@ const readJsonFile = (file) => {
 };
 
 export class SelfUpdate {
-  /** `report(body)` sends where the update stands to Citadel; `exit(code)` ends the process (a test's records it). */
+  /**
+   * `report(body)` sends where the update stands to Citadel; `exit(code)` ends the process (a test's records it).
+   * @param {{ jobs: { dir: string, appUrl: string, busy: string | null, draining: string | null }, slots: { slots: object, ticking: boolean },
+   *   report: (body: { state: string, version: string, why: string }) => Promise<unknown>, supervised: boolean,
+   *   exit?: (code: number) => void, get?: (url: URL, init?: RequestInit) => Promise<Response>, now?: () => number, log?: (line: string) => void }} opts
+   */
   constructor({ jobs, slots, report, supervised, exit = (code) => process.exit(code), get = globalThis.fetch, now = Date.now, log = () => {} }) {
     Object.assign(this, { jobs, slots, report, supervised, exit, get, now, log, dir: jobs.dir, target: null, running: false, said: '', waitingSince: 0, retryAt: 0 });
   }

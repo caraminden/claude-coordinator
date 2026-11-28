@@ -156,7 +156,7 @@ test('it never swaps under a job or a one-job runner, and after a while holds ne
 test("an agent started without its supervisor doesn't swap, as it couldn't start itself again", async () => {
   const s = setup();
   try {
-    const bare = new SelfUpdate({ jobs: s.jobs, slots: s.slots, supervised: false, report: async (b: never) => void s.reports.push(b), exit: () => assert.fail('no swap') });
+    const bare = new SelfUpdate({ jobs: s.jobs, slots: s.slots, supervised: false, report: async (b) => void s.reports.push(b), exit: () => assert.fail('no swap') });
     await bare.want(s.want);
     assert.deepEqual(s.fetched, []);
     assert.match(s.reports.at(-1)!.why, /without --supervise/);
@@ -189,7 +189,7 @@ test('the supervisor starts it again on UPDATED, rolls back a new version that e
     assert.match(lines.join('\n'), /stopped before it connected \(exit 3\)/);
     assert.ok(!existsSync(join(s.dir, 'runner-slot.ps1')), 'a file the update added goes too');
     // The old version, connected again, doesn't take the version that failed.
-    const old = new SelfUpdate({ jobs: s.jobs, slots: s.slots, supervised: true, report: async (b: never) => void s.reports.push(b), exit: () => assert.fail('not the failed version again') });
+    const old = new SelfUpdate({ jobs: s.jobs, slots: s.slots, supervised: true, report: async (b) => void s.reports.push(b), exit: () => assert.fail('not the failed version again') });
     s.fetched.length = 0;
     await old.want(s.want);
     assert.deepEqual(s.fetched, []);

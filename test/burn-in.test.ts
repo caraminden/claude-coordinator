@@ -426,8 +426,21 @@ test('a race between copies is still caught when they run 2 at a time, and passe
   const caught = paced({ 'test/clash.test.ts': CLASH }, { BURN_IN_CPUS: '2' });
   assert.equal(caught.r.status, 1, caught.r.stdout + caught.r.stderr);
   assert.match(caught.r.stdout, /^burn-in: test\/clash\.test\.ts: failed in \d+ of 10 copies at once \(at most 2 at a time\)/m);
-  const serial = paced({ 'test/clash.test.ts': CLASH }, { BURN_IN_CPUS: '1' });
-  assert.equal(serial.r.status, 0, `one at a time it can't clash: ${serial.r.stdout}`);
+  // One copy alone passes, so the fixture is a race between copies, not a plain red.
+  const alone = paced({ 'test/clash.test.ts': CLASH }, { BURN_IN_CPUS: '2', BURN_IN_COPIES: '1' });
+  assert.equal(alone.r.status, 0, `one copy can't clash: ${alone.r.stdout}`);
+});
+
+test('copies never run fewer than 2 at a time, so they still overlap: on 1 CPU, or a file whose own concurrency fills the runner', () => {
+  const one = paced({ 'test/clash.test.ts': CLASH }, { BURN_IN_CPUS: '1' });
+  assert.equal(one.r.status, 1, one.r.stdout);
+  assert.match(one.r.stdout, /\(at most 2 at a time\)/);
+  const dir = repo({ 'test/wide.test.ts': wide('4') });
+  mkdirSync(join(dir, 'probe'));
+  const r = ship(dir, { BURN_IN_PROBE: join(dir, 'probe'), BURN_IN_CPUS: '4' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts runs concurrency 4 inside each copy, so its copies run 2 at a time, the fewest that still overlap; it may load the runner past its CPUs$/m);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts: 10 of 10 copies at once \(at most 2 at a time\) passed/m);
 });
 
 test("on a 4-CPU runner a ship caps a file's own concurrency too: copies x in-file checks stay within 4 (#2073's rule)", () => {
@@ -445,7 +458,7 @@ test("a ship's file asking concurrency: true runs its copies 2 at a time, said, 
   mkdirSync(join(dir, 'probe'));
   const r = ship(dir, { BURN_IN_PROBE: join(dir, 'probe'), BURN_IN_CPUS: '4' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts asks concurrency: true inside each copy, more than this runner's 4 CPUs, so its copies run 2 at a time/m);
+  assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts asks concurrency: true inside each copy, more than this runner's 4 CPUs, so its copies run 2 at a time, the fewest that still overlap; have it read BURN_IN_INNER/m);
   assert.match(r.stdout, /^burn-in: test\/wide\.test\.ts: 10 of 10 copies at once \(at most 2 at a time\) passed/m);
 });
 

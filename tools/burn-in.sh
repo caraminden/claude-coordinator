@@ -192,6 +192,7 @@ fi
 base=${2:?usage: burn-in.sh --ship <base>}
 limit=${BURN_IN_LIMIT:-150} mapped_max=${BURN_IN_MAPPED:-3} cpus=${BURN_IN_CPUS:-$(nproc 2>/dev/null || echo 4)}
 [[ $cpus =~ ^[1-9][0-9]*$ ]] || { echo "burn-in: BURN_IN_CPUS must be a whole number, not $cpus"; exit 1; }
+[ "$cpus" -ge 2 ] || cpus=2 # copies one at a time can't race each other
 git rev-parse -q --verify "$base^{commit}" >/dev/null || { echo "burn-in: SKIPPED: no commit $base to compare with, so nothing was burned in"; exit 0; }
 rc=0
 out=$("$tools/citadel-node" --no-warnings "$tools/affected.ts" --base "$base" 2>&1) || rc=$?
@@ -254,12 +255,14 @@ for f in "${files[@]}"; do
     slow+=("$f")
     continue
   fi
-  # This runner's CPUs (fit, above): all its copies run, at most fit_k at a time. A file whose own concurrency can't be
-  # capped runs them 2 at a time, the fewest that still overlap (a race between copies needs two), said, rather than
-  # refusing the ship for how it is written.
-  if ! fit "$f" "$copies" "$cpus"; then
-    fit_k=$((copies < 2 ? copies : 2))
-    echo "burn-in: $f asks concurrency: $fit_c inside each copy, more than this runner's $cpus CPUs, so its copies run $fit_k at a time; have it read BURN_IN_INNER (as test/boot-check.test.ts does)"
+  # This runner's CPUs (fit, above): all its copies run, at most fit_k at a time, and never fewer than 2 at a time, the
+  # fewest that still overlap (a race between copies needs two). A file whose own concurrency leaves room for fewer, or
+  # can't be capped at all, runs 2 at a time, said, rather than refusing the ship for how it is written.
+  why=''
+  fit "$f" "$copies" "$cpus" || why="asks concurrency: $fit_c inside each copy, more than this runner's $cpus CPUs"
+  if [ "$fit_k" -lt 2 ] && [ "$copies" -ge 2 ]; then
+    fit_k=2
+    echo "burn-in: $f ${why:-runs concurrency $fit_c inside each copy}, so its copies run 2 at a time, the fewest that still overlap; ${why:+have it read BURN_IN_INNER (as test/boot-check.test.ts does)}${why:-it may load the runner past its CPUs}"
   fi
   rc=0 t0=$SECONDS
   if [ -n "$fit_inner" ]; then BURN_IN_INNER=$fit_inner burn_one "$f" "$copies" "$left" "$fit_k" || rc=$?

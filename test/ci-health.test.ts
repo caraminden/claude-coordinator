@@ -352,6 +352,7 @@ function world({ delve = false } = {}) {
       if (q) quiet.push(key);
       return mandateUp.ok;
     },
+    pool: undefined as ((p: { id: number }) => string[] | null) | undefined,
   };
   return { store, peek, gh, puts, parts, from, quiet, links, mandateUp, deps, health: new CiHealth(store, deps) as CiHealth };
 }

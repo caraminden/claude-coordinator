@@ -8,7 +8,7 @@ import type { Lanes } from './lanes.ts';
 import { handoffSheet, SHEET_CHECK, SHEET_FAILED } from './live-facts.ts';
 import { sleepKey } from './needs.ts';
 import { COMPACT_COMMAND, handoffPrompt, leadHandoffPrompt, minionHandoffPrompt } from './prompts.ts';
-import type { KillResume, LimitResume, NetResume } from './resumes.ts';
+import type { FailResume, KillResume, LimitResume, NetResume } from './resumes.ts';
 import { contextKey, freshKey, handoffKey } from './turn-keys.ts';
 import type { QueuedMessage } from './turn-messages.ts';
 import type { Runner, TurnState } from './runner.ts';
@@ -51,6 +51,7 @@ export interface FreshDeps {
   limitWait: (ticketId: number) => LimitResume | null;
   netWait: (ticketId: number) => NetResume | null;
   killWait: (ticketId: number) => KillResume | null;
+  failWait: (ticketId: number) => FailResume | null;
   parked: (t: TicketFields) => boolean;
   next: (ticketId: number) => void;
   lanes: Lanes;
@@ -102,8 +103,8 @@ export class Fresh {
   /** A fresh start's next step, if it needs a turn of its own: the handoff ask, or the /compact fallback. */
   freshStep(ticketId: number): QueuedMessage | null {
     const f = this.d.store.getSetting<FreshState>(freshKey(ticketId));
-    // After a network outage, its resume (holding any queued messages) goes first: a step now would fail too and replace that wait.
-    if (!f || f.summary || this.d.netWait(ticketId) || this.d.killWait(ticketId)) return null;
+    // After a network outage, its resume (holding any queued messages) goes first: a step now would fail too and replace that wait. A failed turn's retry too (#2258).
+    if (!f || f.summary || this.d.netWait(ticketId) || this.d.killWait(ticketId) || this.d.failWait(ticketId)) return null;
     // A message queued for a fresh start Citadel asked for by itself goes first, before its handoff or
     // its /compact fallback; the step follows that turn (#423).
     if (f.auto && this.d.queued(ticketId)) return null;

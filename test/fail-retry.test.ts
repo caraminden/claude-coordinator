@@ -25,14 +25,16 @@ const prompts = join(root, 'prompts.log');
 writeFileSync(
   fake,
   `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync } = require('node:fs');
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 let input = '';
 process.stdin.on('data', (d) => (input += d));
 const wait = setInterval(() => {
   if (!input.includes('\\n') || !existsSync(${JSON.stringify(release)})) return;
   clearInterval(wait);
   appendFileSync(${JSON.stringify(prompts)}, input);
-  const result = readFileSync(${JSON.stringify(release)}, 'utf8');
+  let result = readFileSync(${JSON.stringify(release)}, 'utf8');
+  // "once:<words>": these words this turn, "ok" for the next.
+  if (result.startsWith('once:')) { result = result.slice(5); writeFileSync(${JSON.stringify(release)}, 'ok'); }
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: result !== 'ok', result }));
   process.exit(result === 'ok' ? 0 : 1);
 }, 20);
@@ -80,14 +82,13 @@ const BOOM = 'API Error: 500 Internal server error';
 
 test('a failed turn is retried once, telling the minion why, and its Taskmaster hears nothing when the retry works', async () => {
   const id = minion();
-  setRelease(BOOM);
+  setRelease(`once:${BOOM}`);
   const before = turnsRun();
   runner.send(id, 'Cara', 'go');
   await until('the failed turn', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.ok(runner.failWait(id), 'it waits for its retry');
   assert.equal(store.getTicket(id)!.note, BOOM, 'the note keeps its own words');
   assert.match(events(id, 'error').at(-1)!, /retries it by itself once in about a minute/);
-  setRelease('ok');
   await until('the retry', () => turnsRun() === before + 2 && !runner.isRunning(id) && store.getTicket(id)!.status === 'idle');
   assert.match(lastPrompt(), /Your last turn failed[\s\S]*API Error: 500 Internal server error[\s\S]*check the state of your work/);
   assert.equal(runner.failWait(id), null);

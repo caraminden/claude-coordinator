@@ -823,6 +823,7 @@ export class Runner {
       limitWait: (id) => this.limitWait(id),
       netWait: (id) => this.netWait(id),
       killWait: (id) => this.killWait(id),
+      failWait: (id) => this.failWait(id),
       parked: (t) => this.parked(t),
       next: (id) => this.next(id),
       lanes: this.lanes,
@@ -3012,7 +3013,7 @@ export class Runner {
    */
   private async launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}, carriesOn = false): Promise<{ ended: Promise<void> } | undefined> {
     // An account switch alone isn't a resume here: it carries on its person's own turn on another account.
-    const resumed = !!(retries.restart || retries.limit || retries.net || retries.kill);
+    const resumed = !!(retries.restart || retries.limit || retries.net || retries.kill || retries.fail);
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
@@ -3136,6 +3137,7 @@ export class Runner {
       this.setFailNote(ticket.id, { note: note.length > 60 ? `${note.slice(0, 59)}…` : note });
       this.setStatus(ticket.id, 'error');
       this.onTurnError(ticket.id, thrown(err).message!, event.id);
+      if (retries.fail) this.onRetryFailed(ticket.id, retryFailedText("it was retried once, but the retry's launch couldn't be built", thrown(err).message ?? ''));
       return;
     }
     const { plan, dir, system, parts, pins, github, unit, reviewAt, hold } = built;

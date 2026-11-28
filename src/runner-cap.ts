@@ -1,5 +1,5 @@
 // One Peek build while Citadel ships (#1902; Josh, 2026-11-24, picked "One Citadel job, one Peek build", and 2026-11-25 "Yes, use
-// labels"): while a ship is in Citadel's line, Peek's spare build runners on the CI desktop lose the label its jobs ask for, so one
+// labels"): while a ship holds Citadel's CI desktop (src/ci-hold.ts shipNow: not for ships testing on GitHub, ADR 0044), Peek's spare build runners on the CI desktop lose the label its jobs ask for, so one
 // build runs there at a time. A job already running finishes; the rest wait in GitHub's queue, and start once the label is back.
 //  - What is taken off is written down before GitHub is asked, so a restart puts it back. With Citadel down it stays off.
 //  - RUNNER_CAP_MS at most in one stretch of ships: then the labels go back until the line is clear.

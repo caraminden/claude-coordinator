@@ -200,6 +200,16 @@ test('the kept runner going offline hands the label to one that is online', asyn
   assert.deepEqual(w.can(), ALL, 'with none online, nothing is capped');
 });
 
+test('the kept runner going offline while GitHub still calls it busy hands the label on (2026-11-27, DESKTOP-G248IJ8)', async () => {
+  const w = world();
+  const cap = w.boot();
+  w.why = 'a ship is in line';
+  await cap.tick(0);
+  Object.assign(w.runners[0], { status: 'offline', busy: true });
+  await cap.tick(MIN);
+  assert.deepEqual(w.can(), ['DESK-2', 'OTHER']);
+});
+
 test('a label that cannot be put back is tried every minute and told to the Taskmaster once', async () => {
   const w = world();
   const cap = w.boot();

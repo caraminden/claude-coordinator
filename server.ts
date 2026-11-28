@@ -2311,7 +2311,7 @@ const shipWatch = new ShipWatch({
   },
 });
 if (!BOOT_CHECK) shipWatch.start();
-// Deploys first (#1902, Josh 2026-11-24): while a ship is in Citadel's line, optional work stays off the CI desktop.
+// Deploys first (#1902, Josh 2026-11-24): while a ship holds the CI desktop, optional work stays off it (ships testing on GitHub don't: ADR 0044).
 const tellHeld = (repo: string, text: string) => {
   const p = schemeOf(repo);
   for (const t of p ? taskmastersFor(store, p.id) : []) runner.send(t.id, APP_NAME, text, [], runner.isOverlord(t) ? { everyone: true } : {});

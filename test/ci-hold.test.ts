@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, OWN_CAP_MS, REPORT_GAP_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, type WaitingJob, withoutHeld } from '../src/ci-hold.ts';
+import { CiHold, type HoldState, heldRows, isNight, MAIN_SETTLE_MS, MAIN_WAIT_MS, OWN_CAP_MS, REPORT_GAP_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, type WaitingJob, withoutHeld, placeOf } from '../src/ci-hold.ts';
 
 // Deploys first (#1902): while a ship is in line, nothing optional runs on the CI desktop.
 const OWN = 'o/citadel';
@@ -8,12 +8,14 @@ const DAY = Date.parse('2026-11-24T20:00:00Z'); // noon Pacific
 const NIGHT = Date.parse('2026-11-25T08:00:00Z'); // midnight Pacific
 const MIN = 60_000;
 
-type Run = { id: number; path: string; display_title: string; head_branch: string; status: string; conclusion: string | null; run_attempt: number; run_started_at: string; html_url: string };
+type Run = { id: number; path: string; display_title: string; head_branch: string; status: string; conclusion: string | null; run_attempt: number; run_started_at: string; html_url: string /** Its suite runs on GitHub's runners (the shards), not the desktop's test job. */; gh?: boolean };
 
 function world(now = DAY, saved: unknown = null) {
   const w = {
     now,
     line: 0,
+    /** The repo variable CI_RUNNER: most tests here are of ships on the desktop (its value `desktop`); null is unset, GitHub's (#2209). */
+    ciRunner: 'desktop' as string | null,
     off: false,
     down: false,
     runs: [] as (Run & { repo: string })[],
@@ -75,7 +77,20 @@ function world(now = DAY, saved: unknown = null) {
       if (w.down) throw new Error('GitHub is down');
       const ref = /git\/ref\/heads\/(.+)$/.exec(path);
       if (ref) return { status: w.refs.has(ref[1]) ? 200 : 404, etag: null, body: {} };
+      if (path.endsWith('/actions/variables/CI_RUNNER')) return w.ciRunner === null ? { status: 404, etag: null, body: {} } : { status: 200, etag: null, body: { name: 'CI_RUNNER', value: w.ciRunner } };
       const jobs = /runs\/(\d+)\/jobs/.exec(path);
+      if (jobs && w.runs.find((x) => x.id === Number(jobs[1]))?.gh)
+        return {
+          status: 200,
+          etag: null,
+          body: {
+            jobs: [
+              { name: 'test', conclusion: 'skipped' },
+              { name: 'times', conclusion: 'success' },
+              { name: 'shard (0)', conclusion: null },
+            ],
+          },
+        };
       if (jobs)
         return {
           status: 200,
@@ -83,6 +98,8 @@ function world(now = DAY, saved: unknown = null) {
           body: {
             jobs: [
               {
+                name: 'test',
+                conclusion: null,
                 steps: [
                   { name: 'full suite', status: 'completed' },
                   { name: 'rerun failed files alone', status: w.retries.has(Number(jobs[1])) ? 'in_progress' : 'pending' },
@@ -1371,4 +1388,84 @@ test('a held job whose minion closed is not in the 2-hour note', async () => {
   await w.tick();
   await w.tick(REPORT_MS);
   assert.equal(w.reports.length, 0);
+});
+
+// Only what shares the desktop with ships (#2256): since #2209 ships test on GitHub's runners and the desktop is their fallback.
+test("a branch's run on GitHub's runners is never stopped for ships, on GitHub or the desktop, and isn't the desktop's", async () => {
+  const w = world();
+  w.ciRunner = null;
+  w.line = 2;
+  w.land({ gh: true });
+  w.add('tests', { file: 'tests.yml', gh: true }); // dispatched with where=github on ticket/7-x
+  w.add('tests', { file: 'tests.yml', gh: true, status: 'queued' });
+  await w.for(10 * MIN);
+  assert.deepEqual(w.posts, [], 'GitHub runs share nothing with the desktop');
+  w.ciRunner = 'desktop';
+  w.land();
+  await w.for(10 * MIN);
+  assert.deepEqual(w.posts, [], "nor with a ship on the desktop: it is not stopped for GitHub's job cap either (ADR 0044)");
+  assert.deepEqual(
+    w.hold.state(w.now).running.map((r) => r.kind),
+    ['ship'],
+    "the desktop's list has only the desktop's ship",
+  );
+});
+
+test("with ships on GitHub the line holds nothing on the desktop; a ship fallen back to the desktop holds as before, and so does the runner cap's gate", async () => {
+  const w = world();
+  w.ciRunner = null; // unset: ships' pushes go to GitHub
+  w.line = 1;
+  w.land({ gh: true });
+  const heavy = w.heavy();
+  await w.for(10 * MIN);
+  assert.deepEqual(w.posts, []);
+  assert.equal(w.hold.shipNow(w.now), null, "Peek's runners keep their label (src/runner-cap.ts)");
+  const s = w.hold.state(w.now);
+  assert.equal(s.why, null);
+  assert.deepEqual(
+    s.running.map((r) => r.kind),
+    ['heavy'],
+    "a GitHub ship run isn't the desktop's",
+  );
+  assert.match(s.busy ?? '', /heavy job/, 'busy names the desktop job, not the ship');
+  const suite = w.add('tests', { file: 'tests.yml', status: 'queued' }); // a desktop suite started by hand
+  assert.equal(await w.ask(suite), false, 'it waits for the heavy job (one at a time), not for ships');
+  assert.doesNotMatch(w.hold.state(w.now).held.find((h) => h.run === suite.id)?.why ?? '', /ship/);
+  // GitHub didn't start the shards: land.sh cancels and starts the run on the desktop (where=desktop).
+  w.runs[0].status = 'completed';
+  w.land();
+  await w.tick();
+  assert.match(w.posts.join(','), new RegExp(`cancel ${heavy.id}\\b`), 'a ship on the desktop stops optional work');
+  assert.match(w.hold.shipNow(w.now) ?? '', /ship/);
+});
+
+test("the ship line still holds while CI_RUNNER sends ships' pushes to the desktop, and a run's jobs say where it goes", async () => {
+  const w = world();
+  w.ciRunner = 'desktop';
+  w.line = 1;
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), 'a ship is in line');
+  assert.equal(
+    placeOf([
+      { name: 'test', conclusion: 'skipped' },
+      { name: 'times', conclusion: null },
+    ]),
+    'github',
+  );
+  assert.equal(
+    placeOf([
+      { name: 'test', conclusion: 'skipped' },
+      { name: 'times', conclusion: 'skipped' },
+      { name: 'shard (3)', conclusion: 'in_progress' },
+    ]),
+    'github',
+  );
+  assert.equal(
+    placeOf([
+      { name: 'test', conclusion: null },
+      { name: 'times', conclusion: 'skipped' },
+    ]),
+    'desktop',
+  );
+  assert.equal(placeOf([]), null);
 });

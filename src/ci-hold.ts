@@ -21,6 +21,10 @@
 // ship line does, never two at once, the longest held first. A ship, its own check and the early next train never wait for one; main's run still stops one
 // once it may start, and heavy jobs and suites still wait for it to end, but go before the next proof when they may start. No proof starts
 // while a ship's red tests run again alone (one already running goes on).
+// Only what shares the desktop with ships (#2256, ADR 0044): since #2209 ships test on GitHub's runners, so the ship line holds
+// nothing while they do (the repo variable CI_RUNNER isn't `desktop`); a ship's run that fell back to the desktop holds as
+// before. A tests.yml run on GitHub's runners (a ship's, or one dispatched with where=github) is left alone and counts for
+// nothing here, told from its jobs as land.sh does: a `test` job not skipped is the desktop's, a `times` or shard job GitHub's.
 // Left out: desktop.yml (a release build), other schemes' push-started builds, which the runner agents squeeze (src/ci-ships.ts).
 // A job asks before it starts (POST /api/ci-hold; citadel-heavy reads hold.json). Fails open: a job that can't ask, or a
 // GitHub this can't read, means optional work goes ahead; nothing here is asked by a ship. Off switch: <deploy state>/hold-off.
@@ -70,6 +74,8 @@ const RATE_LIMITED_MS = 5 * 60_000;
 const SHIP_RUN_MS = 60 * 60_000;
 /** Reruns that failed in a row, RECANCEL_MS apart, before the job is given up and its minion (or Taskmaster) told: an hour. */
 const MAX_MISSES = 60;
+/** How often the repo variable CI_RUNNER (where ships' pushes run) is read again. */
+const ROUTE_MS = 5 * 60_000;
 /** tests.yml's step that runs a ship's red test files again, alone (land.sh's CI_RERUN_STEP). */
 const RETRY_STEP = 'rerun failed files alone';
 const STATUSES = ['queued', 'in_progress', 'pending'];
@@ -228,6 +234,13 @@ function shortWhy(why: string): string {
   return /long job/.test(why) ? 'waits for its hours' : 'ships first';
 }
 
+/** Where a tests.yml run's suite runs, from its jobs (land.sh's test, tools/land/ci.sh): null while GitHub lists none that says. */
+export function placeOf(jobs: { name?: string; conclusion?: string | null }[]): 'desktop' | 'github' | null {
+  const ran = jobs.filter((j) => j.conclusion !== 'skipped');
+  if (ran.some((j) => j.name === 'test')) return 'desktop';
+  return ran.some((j) => j.name === 'times' || /^shard \(/.test(j.name ?? '')) ? 'github' : null;
+}
+
 /** CI health's GitHub reads with the held runs as waiting: a run stopped for a ship starts again, so its cancel is nobody's red and nobody need start another. */
 export function withoutHeld(get: GhGet, isHeld: (run: number) => boolean): GhGet {
   return async (path, etag, as) => {
@@ -280,6 +293,10 @@ export class CiHold {
   /** The one flake proof that may run now. */
   private proof: Slot | null = null;
   private looked = false;
+  /** Where each tests.yml run seen goes, once its jobs say (placeOf). */
+  private places = new Map<number, 'desktop' | 'github'>();
+  /** Whether ships' pushes run on the desktop (CI_RUNNER=desktop), and when that was read. */
+  private route = { at: -Infinity, desktop: false };
   /** When each run was first seen on a runner. */
   private running0 = new Map<number, number>();
   /** Runs told to go, and when: those stay, whatever is found beside them later. */
@@ -359,11 +376,30 @@ export class CiHold {
     return !this.offNow && [...this.held.values()].some((h) => h.kind === 'main' && h.repo === this.d.own()?.toLowerCase() && this.mainPast(h, now)) ? "main's full test run waited its 4 hours and goes first" : null;
   }
 
-  /** Why a ship holds the desktop now, or null. An old look at GitHub doesn't count: the line alone does. */
+  /** Why a ship holds the desktop now, or null. An old look at GitHub doesn't count: the line alone does, while ships test on the desktop. */
   private shipWhy(now: number): string | null {
-    const n = this.d.line();
+    const n = this.route.desktop ? this.d.line() : 0;
     if (n) return n === 1 ? 'a ship is in line' : `${n} ships are in line`;
     return this.fresh(now) && this.seen.ship ? "a ship's tests are running" : null;
+  }
+
+  /** Whether ships' pushes test on the desktop: the repo variable CI_RUNNER=desktop. Unset (GitHub's, ADR 0043) or unreadable, they don't. */
+  private async readRoute(own: string, as: GithubEnv, now: number) {
+    if (now - this.route.at < ROUTE_MS) return;
+    const r = await (this.d.get ?? ghGet)(`repos/${own}/actions/variables/CI_RUNNER`, null, as).catch(() => null);
+    if (r && rateLimited(r)) throw new RateLimited();
+    if (r?.status === 200 || r?.status === 404) this.route = { at: now, desktop: r.status === 200 && String((r.body as { value?: unknown } | null)?.value ?? '').toLowerCase() === 'desktop' };
+  }
+
+  /** Where a tests.yml run's suite goes; null while its jobs don't say yet. */
+  private async placeOf(repo: string, run: GhRun, as: GithubEnv): Promise<'desktop' | 'github' | null> {
+    const had = this.places.get(run.id);
+    if (had) return had;
+    const r = await (this.d.get ?? ghGet)(`repos/${repo}/actions/runs/${run.id}/jobs?per_page=100`, null, as);
+    if (rateLimited(r)) throw new RateLimited();
+    const place = r.status === 200 ? placeOf((r.body as { jobs?: { name?: string; conclusion?: string | null }[] } | null)?.jobs ?? []) : null;
+    if (place) this.places.set(run.id, place);
+    return place;
   }
 
   private fresh(now: number) {
@@ -504,16 +540,25 @@ export class CiHold {
     let main = false;
     const running: RunningRow[] = [];
     const ships: number[] = [];
+    const listed = new Set<number>();
     for (const repo of this.repos()) {
       const as = this.d.as(repo);
       if (!as) continue;
       try {
+        if (repo === own) await this.readRoute(own, as, now);
         for (const status of STATUSES) {
           const list: GhRun[] = (await this.read(`repos/${repo}/actions/runs?status=${status}&per_page=100`, as, used))?.workflow_runs ?? [];
           for (const run of list) {
             const kind = Number.isInteger(run?.id) ? kindOf(run, repo === own) : null;
             const old = now - Date.parse(run.run_started_at ?? run.created_at ?? '') >= SHIP_RUN_MS;
             if (!kind || ((kind === 'ship' || kind === 'main') && old)) continue;
+            if (kind === 'ship' || kind === 'suite' || kind === 'main') {
+              listed.add(run.id);
+              // On GitHub's runners it shares nothing with the desktop. Not known yet: a ship's counts, as one running on a
+              // runner does (only the desktop's test job asks), and a queued run waits for the next look.
+              const place = await this.placeOf(repo, run, as);
+              if (place === 'github' || (place === null && kind !== 'ship' && run.status !== 'in_progress')) continue;
+            }
             if (repo === own && run.status === 'in_progress')
               running.push({ kind, what: kind === 'ship' ? "a ship's tests" : run.display_title || NAMES[kind], url: run.html_url ?? null, ticket: kind === 'proof' || kind === 'heavy' ? this.d.ticket(repo, run.head_branch ?? '', heavyId(kind, run.display_title ?? '')) : null });
             if (kind === 'ship') {
@@ -530,6 +575,7 @@ export class CiHold {
       }
     }
     for (const path of this.cache.keys()) if (!used.has(path) && path.includes('?status=')) this.cache.delete(path);
+    for (const id of this.places.keys()) if (!listed.has(id)) this.places.delete(id);
     const unseen = !this.fresh(now); // looks failed: a ship may have come and gone
     this.seen = { at: now, ship, main };
     this.shipFree = this.shipWhy(now) ? null : unseen ? now : (this.shipFree ?? now);

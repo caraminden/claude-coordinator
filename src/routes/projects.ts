@@ -435,7 +435,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
     runner.emit(id, 'note', { text: `Third-fix flag: looks like ${repeat.map((m) => `#${m.number}`).join(', ')}, so its brief starts with "diagnose first"${tier ? ` and it runs on ${tier.to}` : ''}.` });
   }
   // A Plot has its own branch by default (#2272); without one only when Builds is off or its members are all in other schemes, which can't be told apart here, so a warning.
-  if (body.lead === true && !owner && project.builds !== 'off')
+  if (body.lead === true && !owner && !build && project.builds !== 'off')
     notes.push("Plots get a branch by default: a Plot goes without one only when the scheme's Builds setting is off, or all its members are in other schemes (they ship to their own main). Otherwise make it with build and build_owner: true, as the Taskmaster prompt says. It was still created.");
   // A brief an agent wrote (the Taskmaster's) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
   if (caller) {

@@ -1,5 +1,6 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
+import { answerableCard, answerText } from '../card-answer.ts';
 import { azureSpeech } from '../azure-speech.ts';
 import { CARD_STOP, money, SPLIT, splitCeiling, START, startHoldKey } from '../minion-budget.ts';
 import { parseSpend } from '../outside-spend.ts';
@@ -1114,16 +1115,7 @@ export const ticketRoutes: Route[] = [
       const { store, runner } = app;
       // Room for pasted screenshots, as /messages has (the card's box takes images too).
       const body = await readJson(req, 45_000_000);
-      const card = store.eventsOfKinds(id, ['question']).find((e) => JSON.parse(e.data).id === body.questionId);
-      if (!card) throw new HttpError(404, 'No such question');
-      // Its answer can only come after it: the chat's earlier messages are never read.
-      if (store.eventsOfKinds(id, ['user_message'], card.id).some((e) => JSON.parse(e.data).answer?.questionId === body.questionId)) {
-        throw new HttpError(409, 'That question has already been answered');
-      }
-      const data = JSON.parse(card.data);
-      if (data.settled) throw new HttpError(409, data.settled.dismissed ? `${data.settled.by} dismissed this card` : data.settled.by ? `${data.settled.by} already marked this seen` : 'Claude took this as answered in the chat');
-      if (data.doc) throw new HttpError(409, 'This card is answered on its page: open it and press Send there');
-      if (data.secret) throw new HttpError(409, 'This card takes a secret: type it into its field and press Save');
+      const { card, data } = answerableCard(store, id, body.questionId);
       // A notice (#687): Got it takes it out of the addressee's list, and sends the asker nothing.
       if (data.notice) {
         runner.startNow.touch(id, session.uid);
@@ -1203,15 +1195,7 @@ export const ticketRoutes: Route[] = [
         runner.recordAnswer(id, session.name, `My answer to your Runs on card: ${answers[0].selected[0]}.`, { answer: { questionId: body.questionId, answers } });
         return json(res, 202, ticketView(app, id));
       }
-      const text = questions
-        .map((q: CardQuestion, i: number) => {
-          const { selected, other } = answers[i];
-          // The text typed with a pick expands on it; typed alone, it is the answer.
-          const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
-          return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
-        })
-        .join('\n\n')
-        .concat(data.cabalForm && [FORM_GO, 'Start the cabal'].includes(String(answers[0]?.selected[0])) ? `\n\n${approveRoster(app, data.cabalForm, session)}` : ''); // (the old label too, on cards asked before #2270) a Plot's forming card (#2091): its go approves the rows it showed, and the lead reads which
+      const text = answerText(questions, answers).concat(data.cabalForm && [FORM_GO, 'Start the cabal'].includes(String(answers[0]?.selected[0])) ? `\n\n${approveRoster(app, data.cabalForm, session)}` : ''); // (the old label too, on cards asked before #2270) a Plot's forming card (#2091): its go approves the rows it showed, and the lead reads which
       const answer = { answer: { questionId: body.questionId, answers } };
       const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
       // Held from here, before the first wait: a second answer while this one saves its pictures or a ship is checked is refused.

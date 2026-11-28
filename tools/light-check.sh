@@ -66,7 +66,7 @@ light_check() {
     CITADEL_HEAVY_FALLBACK_FILE="$wt.why" CITADEL_HEAVY_QUEUED_FILE="$wt.queued" CITADEL_HEAVY_WHAT="light check of $branch" CITADEL_HEAVY_WHO=land.sh \
     timeout -k 30 "$limit" "${heavy[@]}" bash tools/light-check-run.sh "$m") >"$wt.out" 2>&1 9>&- 7>&- 6>&- 5>&- 4>&- </dev/null &
   pid=$!
-  trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; light_check_done; exit 143' TERM INT HUP
+  trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null || true; light_check_done; exit 143' TERM INT HUP
   rc=0; wait "$pid" || rc=$?
   trap - TERM INT HUP
   exec 4>&-

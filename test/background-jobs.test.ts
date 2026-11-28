@@ -32,7 +32,7 @@ function scheduled() {
   const notes: unknown[] = [];
   const sends: { id: number; from: string; text: string }[] = [];
   const made: string[] = [];
-  const waits = { limit: new Set<number>(), net: new Set<number>(), kill: new Set<number>() };
+  const waits = { limit: new Set<number>(), net: new Set<number>(), kill: new Set<number>(), fail: new Set<number>() };
   const runs = new ScheduledRuns({
     store: s.store,
     newMinion: async (project, m, by) => {
@@ -47,6 +47,7 @@ function scheduled() {
       limitWait: (id: number) => (waits.limit.has(id) ? { ticket: id, at: 0, tries: 1 } : null),
       netWait: (id: number) => (waits.net.has(id) ? { ticket: id, tries: 1 } : null),
       killWait: (id: number) => (waits.kill.has(id) ? { ticket: id, tries: 1, resumes: 0 } : null),
+      failWait: (id: number) => (waits.fail.has(id) ? { ticket: id, at: 0, retries: {}, error: 'boom' } : null),
     } as any,
     broadcast: s.broadcast,
     by: 'Citadel',
@@ -115,7 +116,7 @@ test('a slot is skipped while the last run still works, and a start that throws 
   assert.equal(store.schedules.get(broken.id)!.last_error, 'no worktree');
 });
 
-test('a slot is skipped while the last run waits on a usage limit, the network or a kill resume, but not once it gave up (C4)', async () => {
+test('a slot is skipped while the last run waits on a usage limit, the network, a kill resume or a failed turn waiting to retry, but not once it gave up (C4)', async () => {
   const { store, project, runs, made, waits } = scheduled();
   const last = minion(store, project.id, 'last run');
   // As a limited turn leaves it: status error, state limited, and the runner holding its resume.
@@ -135,6 +136,10 @@ test('a slot is skipped while the last run waits on a usage limit, the network o
   await runs.run(store.schedules.get(sch.id)!);
   assert.deepEqual(made, [], 'and a kill wait (#1364)');
   waits.kill.clear();
+  waits.fail.add(last.id);
+  await runs.run(store.schedules.get(sch.id)!);
+  assert.deepEqual(made, [], 'and a failed turn waiting for its one retry (#2258)');
+  waits.fail.clear();
   // Gave up: still state limited, but nothing will resume it, so the schedule carries on.
   waits.net.clear();
   await runs.run(store.schedules.get(sch.id)!);

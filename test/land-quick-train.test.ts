@@ -50,6 +50,12 @@ test('gap train: off by default, the same line ships as it did before it existed
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4', 'f5.txt: 5', 'f6.txt: 6', 's7.txt: 7']);
   assert.equal(l.deployed().length, 4);
   assert.deepEqual(quickCalls(l.r.dir), []);
+  // Each full train's top had its CI run (2+3, 4+5, 6+7), and the early next trains went as they do today.
+  for (const t of ['ticket/3-x', 'ticket/5-x', 'ticket/7-x']) assert.match(l.c.calls(), new RegExp(`head_sha=${git(l.r.source, 'rev-parse', t)}`), t);
+  assert.deepEqual(
+    retro(l.r.dir, 'early train').map((x) => x.replace(/ · \d+s head start$/, '')),
+    ["early train · ticket/4-x + 1 riders onto ticket/2-x's train sha · pushed sha", 'early train · ticket/4-x · counted', "early train · ticket/6-x + 1 riders onto ticket/4-x's train sha · pushed sha", 'early train · ticket/6-x · counted'],
+  );
   const said = done.map((d) => d.stderr).join('\n');
   assert.doesNotMatch(said, /quick train|quick check/);
   // Only the judged lines #1912 logs today.

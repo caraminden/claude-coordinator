@@ -86,3 +86,13 @@ test('gap train: with nothing in line that needs the full suite it ships at once
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4']);
   l.done();
 });
+
+test('gap train: LAND_QUICK_MAX caps a quick train at that many ships, its front included', async () => {
+  const l = await line(mixed, (d) => ({ ...quick(d), LAND_QUICK_MAX: '1' }), on);
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /land: quick train: ticket\/5-x goes right after this train, on a quick check/);
+  assert.doesNotMatch(done[5].stderr, /it was a quick train/);
+  assert.deepEqual(l.subjects().slice(0, 5), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f5.txt: 5']);
+  l.done();
+});

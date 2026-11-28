@@ -11,7 +11,7 @@
 # <state>/quick/<branch> as "<its head> <answer>".
 #
 # On, while a full train's CI runs (top_gate), its front plans the gap train before any early next train (quick_plan):
-# the first qualifying ship waiting in line and up to LAND_QUICK_MAX (6) more qualifying ones behind it, in line order,
+# the first qualifying ship waiting in line and qualifying ones behind it, up to LAND_QUICK_MAX (6) ships, in line order,
 # stacked on the full train's top. Not while a ship a person placed waits (it keeps its spot), with an early run already
 # stacked on this train (that full run is never thrown away), on a pipeline train, or with no side runner registered.
 #   <state>/quick-train: "<the full top> <the quick top> <its front's ticket> <its front's branch> <riders' tickets, or ->
@@ -49,6 +49,13 @@ quick_ok() {
 # The plan, into q_base q_top q_tn q_br q_riders q_by. 1: none.
 quick_read() { read -r q_base q_top q_tn q_br q_riders q_by 2>/dev/null <"$state/quick-train" && [ -n "${q_by:-}" ]; }
 
+# The plan's files go, and [<why>] its retro line; its riders stay as they are (on the full train just built).
+quick_forget() {
+  rm -f "$state/quick-train" "$state/quick-stacked" "$state/quick-verdict"
+  [ -z "${1:-}" ] || retro_log "quick train · $branch · dropped · $1"
+  return 0
+}
+
 # The plan goes, and its riders back in line as they were (the ones still riding it).
 quick_void() {
   local q_base q_top q_tn q_br q_riders q_by t v x
@@ -85,7 +92,7 @@ quick_stack() {
   echo "$base $r $own_q" >"$state/quick-stacked.tmp$$"
   out=$(
     early_memo=$state/quick-stacked.tmp$$ quick_pick=1 branch=$br own=$own_q old=$base lane=full tip=$own_q DEPLOY_QUEUE_TICKET=$tn
-    LAND_TRAIN_MAX=${LAND_QUICK_MAX:-6}
+    LAND_TRAIN_MAX=$((${LAND_QUICK_MAX:-6} - 1))
     train_n=() train_br=() train_tip=() train_was=() train_held_tips='' QUEUE_TRAIN=train
     train_only=''
     [ $# = 0 ] || train_only=" $* "
@@ -162,19 +169,21 @@ quick_ready() {
   quick_void "its front didn't take its place in line"
 }
 
-# <top> <base>: the quick check. Prints "green", "red: <files>" or "none: <why>".
-quick_check_run() {
-  local top=$1 base=$2 wt v rc=0 heavy limit=${LAND_QUICK_LIMIT:-720} queue n t1=$SECONDS
+# <top> <base>: the quick check, in a subshell of its own: a stop (quick_kill) leaves no worktree behind, as the light
+# check's trap does. Prints "green", "red: <files>" or "none: <why>".
+quick_check_run() (
+  top=$1 base=$2 rc=0 limit=${LAND_QUICK_LIMIT:-720} t1=$SECONDS pid=''
   n=$(quick_side) || n=''
-  [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "none: CI's side runner isn't registered"; return 0; }
-  wt=$(mktemp -d "${TMPDIR:-/tmp}/land-quick-check.XXXXXX") || { echo "none: no scratch folder"; return 0; }
-  git worktree add -q --detach "$wt" "$top" >/dev/null 2>&1 || { rmdir "$wt" 2>/dev/null; echo "none: no scratch worktree"; return 0; }
+  [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "none: CI's side runner isn't registered"; exit 0; }
+  wt=$(mktemp -d "${TMPDIR:-/tmp}/land-quick-check.XXXXXX") || { echo "none: no scratch folder"; exit 0; }
+  done_() { git worktree remove --force "$wt" >/dev/null 2>&1 || true; rmdir "$wt" 2>/dev/null || true; rm -f "$wt.out" "$wt.why"; }
+  trap '[ -z "$pid" ] || { kill -TERM "$pid" 2>/dev/null; wait "$pid"; }; done_; exit 143' TERM INT HUP
+  git worktree add -q --detach "$wt" "$top" >/dev/null 2>&1 || { done_; echo "none: no scratch worktree"; exit 0; }
   # One at a time on the side runner, with the light checks (tools/light-check.sh).
   if ! { exec 4>"$state/light-check.lock" && flock -w "${LAND_LIGHT_CHECK_LOCK_WAIT:-300}" 4; }; then
-    exec 4>&-
-    git worktree remove --force "$wt" >/dev/null 2>&1 || true
+    done_
     echo "none: another check held the side runner for $((SECONDS - t1)) s"
-    return 0
+    exit 0
   fi
   limit=$((limit - SECONDS + t1))
   [ "$limit" -ge 60 ] || limit=60
@@ -185,24 +194,24 @@ quick_check_run() {
   (cd "$wt" && exec env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 \
     CITADEL_HEAVY_SHIP=1 CITADEL_HEAVY_CI_QUEUE="$queue" CITADEL_HEAVY_FALLBACK_FILE="$wt.why" \
     CITADEL_HEAVY_WHAT="quick check of $branch's quick train" CITADEL_HEAVY_WHO=land.sh \
-    timeout -k 30 "$limit" "${heavy[@]}" bash tools/light-check-run.sh "$base") >"$wt.out" 2>&1 9>&- 7>&- 6>&- 5>&- 4>&- </dev/null || rc=$?
-  exec 4>&-
+    timeout -k 30 "$limit" "${heavy[@]}" bash tools/light-check-run.sh "$base") >"$wt.out" 2>&1 9>&- 7>&- 6>&- 5>&- 4>&- </dev/null &
+  pid=$!
+  wait "$pid" || rc=$?
+  pid=''
   v=$(sed -n 's/^light check: //p' "$wt.out" 2>/dev/null | tail -n 1) || v=''
   [ -n "$v" ] || v="no verdict: nothing ran on CI ($(head -n 1 "$wt.why" 2>/dev/null || echo "exit $rc"))"
-  git worktree remove --force "$wt" >/dev/null 2>&1 || true
-  rmdir "$wt" 2>/dev/null || true
-  rm -f "$wt.out" "$wt.why"
+  done_
   case $v in
     green | red:\ *) echo "$v" ;;
     *) echo "none: ${v#no verdict: }" ;;
   esac
-}
+)
 
 # The quick front's side while it waits (queue_wait_check): takes its place once a plan names it, and starts its check.
 quick_wait() {
   local q_base q_top q_tn q_br q_riders q_by
-  quick_on || return 0
-  if quick_read && [ "$q_tn" = "${DEPLOY_QUEUE_TICKET##*/}" ] && [ "$q_br" = "$branch" ]; then
+  quick_on || [ "${QUEUE_TRAIN:-}" = quick ] || return 0
+  if quick_on && quick_read && [ "$q_tn" = "${DEPLOY_QUEUE_TICKET##*/}" ] && [ "$q_br" = "$branch" ]; then
     if [ "${QUEUE_TRAIN:-}" != quick ]; then
       QUEUE_TRAIN=quick
       queue_phase "next: a quick train right after the full train ahead"
@@ -263,7 +272,7 @@ quick_at_lock() {
   quick_go='' quick_again='' quick_only=''
   [ "${QUEUE_TRAIN:-}" = quick ] || return 0
   QUEUE_TRAIN=train
-  quick_read && [ "$q_tn" = "${DEPLOY_QUEUE_TICKET##*/}" ] || { quick_stop; return 0; }
+  quick_on && quick_read && [ "$q_tn" = "${DEPLOY_QUEUE_TICKET##*/}" ] || { quick_stop; return 0; }
   if [ "$(git -C "$SOURCE" rev-parse main)" != "$q_base" ]; then
     quick_stop
     say "quick train: main isn't at the full train's top it was checked on, so $branch goes on as a full train's front"
@@ -322,13 +331,13 @@ quick_gate() {
     v=$(quick_check_run "$tip" "$old")
     if [ "$v" != green ]; then
       say "quick train: checked again without the ships it pointed at, it wasn't green ($v), so CI runs on it as a full train"
-      quick_void
+      quick_forget "checked again, not green"
       return 1
     fi
     say "quick train: checked again without them, green on $(git rev-parse --short "$tip")"
   elif [ "$tip" != "$q_top" ]; then
     say "quick train: it came out different from the train its quick check ran on, so CI runs on it as a full train"
-    quick_void
+    quick_forget "built different from its checked top"
     return 1
   fi
   rc=quick
@@ -355,6 +364,7 @@ quick_alone() {
   n=$(quick_side) || n=''
   [[ $n =~ ^[1-9][0-9]*$ ]] || return 0
   quick_go=1 quick_again=1 quick_pick=1
+  [ "${LAND_TRAIN_MAX:-6}" -lt "${LAND_QUICK_MAX:-6}" ] || LAND_TRAIN_MAX=$((${LAND_QUICK_MAX:-6} - 1))
   say "quick train: nothing in line needs the full suite, so $branch ships at once on a quick check on CI's side runner"
   retro_log "quick train · $branch · at once, the line empty"
 }
@@ -368,8 +378,8 @@ quick_landed() {
     echo "$tip" >"$state/quick-untested"
     rm -f "$state/quick-train" "$state/quick-stacked"
     retro_log "quick train shipped · $label · $((${#train_n[@]} + 1)) ships, no CI run · $(git rev-parse --short "$tip")"
-  elif [ "${rc:-}" != light ]; then
-    rm -f "$state/quick-untested"
+  elif [ "${rc:-}" != light ] && [ -e "$state/quick-untested" ]; then
+    rm -f "$state/quick-untested" || true
   fi
   return 0
 }

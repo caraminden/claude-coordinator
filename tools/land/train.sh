@@ -353,6 +353,7 @@ quick_train_line() (
   out=$(timeout 10 "${judge[@]}" --main main --base "$base" --risk "${LAND_RISK:-}" --mode "$mode")
   retro_log "quick train · $label · ${out:-not: could not be judged}"
   # With the gap train on (tools/land/quick.sh), the answer is kept for the front that plans one.
+  ! quick_on || find "$state/quick" -type f -mmin +1440 -delete 2>/dev/null || true # a day, as train_dir's verdicts
   ! quick_on || { mkdir -p -m 700 "$state/quick" && echo "$(git rev-parse HEAD) ${out:-not:}" >"$state/quick/${branch//\//-}"; }
 ) >/dev/null 2>&1 9>&- 7>&- 6>&- 5>&- </dev/null || true
 

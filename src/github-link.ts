@@ -373,7 +373,12 @@ export class GithubLink {
  * `login` is null: Citadel's link isn't what pushes there, so the chat's push notes don't name it.
  */
 export function onWorker(github: TurnGithub, machine: string, signedIn: boolean | null, who: string): TurnGithub {
-  if (signedIn) return { ...github, login: null, line: `GitHub: this turn runs for ${who} on ${machine}, so gh and git push use the GitHub login signed in there, not the one linked in Citadel.` };
+  if (signedIn)
+    return {
+      ...github,
+      login: null,
+      line: `GitHub: this turn runs for ${who} on ${machine}, so gh and git push use the GitHub login signed in there, not the one linked in Citadel. Citadel sees only that a sign-in is there: if \`gh auth status\` shows none or it is refused, the turn can't push, open pull requests or dispatch workflows; say so in your reply, and never push from another account or login to get round it.`,
+    };
   const there = signedIn === false ? `no GitHub login is signed in on ${machine}` : `Citadel can't tell whether a GitHub login is signed in on ${machine}`;
   return {
     ...github,

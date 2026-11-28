@@ -457,17 +457,17 @@ test("a turn the line puts on a machine is told what that worker's GitHub sign-i
     const none = await githubLine();
     assert.doesNotMatch(none.line, /go out as @joshdev/, "Josh's linked login isn't what a push there uses");
     assert.match(none.line, /runs for Josh on w1, and no GitHub login is signed in on w1, so it can't push/);
-    // A push there gets no "Pushed as @joshdev" note: that login was never in the turn.
+    // A push there gets no note naming Citadel's link: not "Pushed as @joshdev" (never in the turn), nor "link GitHub in Settings" when it fails.
     const ev = (o: unknown) => `${JSON.stringify(o)}\n`;
     writeFileSync(
       join(none.dir, 'stream.jsonl'),
       ev({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu9', name: 'Bash', input: { command: 'git push origin HEAD' } }] } }) +
-        ev({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu9', is_error: false, content: 'ok' }] } }) +
+        ev({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu9', is_error: true, content: "fatal: could not read Username for 'https://github.com'" }] } }) +
         ev({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'after the push' }] } }),
       { flag: 'a' },
     );
     await until('the stream read past the push', () => store.listEvents(t.id).some((e) => e.data.includes('after the push')));
-    assert.ok(!notes(t.id).some((n) => n.startsWith('Pushed as')), notes(t.id).join('\n'));
+    assert.ok(!notes(t.id).some((n) => n.startsWith('Pushed as') || n.startsWith("Couldn't push")), notes(t.id).join('\n'));
     await end(none.dir);
 
     signedIn = true;

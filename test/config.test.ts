@@ -49,6 +49,7 @@ test('an empty environment gives every default', () => {
     readerStuckMs: undefined,
     readerSweepMs: undefined,
     readerBootWait: undefined,
+    warmWait: undefined,
   });
 });
 

@@ -3098,6 +3098,12 @@ if (config.front) {
   );
   if (STATICS) throughFront.statics(STATICS);
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
+  // test/boot-window.test.ts: this await holds the boot while the front thread already hands this thread requests (#2260).
+  if (SETTLED_ROUTE && config.warmWait) {
+    console.log('Main test hook: warming slowly');
+    for (const until = Date.now() + 30_000; !(await stat(config.warmWait).catch(() => null)) && Date.now() < until; ) await sleep(50);
+    console.log('Main test hook: warmed');
+  }
   if (!BOOT_CHECK || PREVIEW) await cabals.warm(3000); // the readers' first snapshot carries the open cabals, not none (#2203)
   readersLive = publishLive({
     handed: handover?.handed,

@@ -85,6 +85,8 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     readerStuckMs: Number(env.CITADEL_READER_STUCK_MS) || undefined,
     readerSweepMs: Number(env.CITADEL_READER_SWEEP_MS) || undefined,
     readerBootWait: env.CITADEL_READER_BOOT_WAIT,
+    /** Tests only: a path the main thread waits for at the cabal warm-up, the await while it already takes requests (#2260). */
+    warmWait: env.CITADEL_TEST_WARM_WAIT,
   };
 }
 

@@ -691,10 +691,16 @@ test('the switch: a scheme is on the pool only once a member turns it on, and of
   await assert.rejects(patch({ on: 'yes' }), /on must be true/);
 });
 
-import { poolLocked } from '../src/ci-runner.ts';
-
-test('until P6 moves every scheme over, only Theory of Crafting can be switched on; any scheme can switch off (Cara, 2026-11-28, "Lock until move-over")', () => {
-  assert.equal(poolLocked('Theory of Crafting', true), null);
-  assert.match(poolLocked('Peek', true) ?? '', /Only Theory of Crafting/);
-  assert.equal(poolLocked('Peek', false), null);
+test('until P6 moves every scheme over, only Theory of Crafting can be switched on; any scheme can switch off (Cara, 2026-11-28, "Lock until move-over")', async () => {
+  const store = new Store(':memory:');
+  const peek = store.getProject(store.createProject('Peek', null).id)!;
+  const patch = (body: unknown) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
+    const res = { setHeader() {}, writeHead: () => res, end() {} };
+    return ciPoolRoutes[1].handler({ req, res, app: { store }, project: peek } as never);
+  };
+  await assert.rejects(patch({ on: true }), (e: { status?: number; message: string }) => e.status === 409 && /Only Theory of Crafting/.test(e.message));
+  assert.equal(store.getSetting(poolKey(peek.id)), null, 'refused before anything is written');
+  await patch({ on: false });
+  assert.equal(poolOn(store, peek.id), false);
 });

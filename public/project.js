@@ -599,6 +599,7 @@ async function switchChat(main, seq) {
     personNotes,
     pins,
     builds,
+    cabals,
     buildPreviews,
     artifacts,
     shared,

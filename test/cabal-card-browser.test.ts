@@ -108,3 +108,14 @@ test("a resync's answer doesn't take back a card the stream brought meanwhile", 
   await waitFor(page, 'the list to redraw', `document.querySelector('.cabal-card .thread-row') || document.querySelector('.g-build .thread-row')`);
   assert.equal(await page.eval(`!!document.querySelector('.cabal-card .thread-row') && !document.querySelector('.g-build')`), true, 'the card the stream brought stays');
 });
+
+// Cara, 2026-11-27: "the special overseer UI went away". The quick chat switch rebuilt the view without the Plots,
+// so the card was gone until the server next sent them.
+test("a chat click in the scheme keeps the Plot's card (#2274)", { skip }, async () => {
+  const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card')`);
+  await page.eval(`location.hash = '#/p/1/t/8'`);
+  await waitFor(page, 'the other chat', `import('/base.js').then((m) => { window.shown = m.view.id; }) && window.shown === 102`);
+  assert.equal(await page.eval(`import('/base.js').then((m) => m.view.cabals?.length ?? 0)`), 1);
+  assert.ok(await page.eval(`!!document.querySelector('.cabal-card')`));
+});

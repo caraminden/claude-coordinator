@@ -978,7 +978,8 @@ dialog.viewer #chat-cabal { display: none; }
 .cabal-acts a.small { font-size: 0.85em; color: var(--accent); display: inline-flex; align-items: center; min-height: 24px; }
 .cabal-meter { order: 9; flex-basis: 100%; display: flex; gap: 1px; height: 6px; border-radius: 3px; overflow: hidden; margin-bottom: var(--space-2); }
 .cabal-meter i, .cabal-dot { background: var(--line); }
-.cabal-meter i { flex: 1; }
+.cabal-meter i { flex: 1; position: relative; }
+.cabal-meter i[data-ask]::after { content: ""; position: absolute; inset: 0; margin: auto; width: 4px; height: 4px; border-radius: 50%; background: var(--panel); } /* an open question to the Overseer */
 :is(.cabal-meter i, .cabal-dot):is([data-s="merged"], [data-s="shipped"]) { background: var(--done); }
 :is(.cabal-meter i, .cabal-dot)[data-s="running"] { background: var(--running); animation: cabal-pulse 1.6s ease-in-out infinite; }
 :is(.cabal-meter i, .cabal-dot)[data-s="blocked"] { background: var(--error); }

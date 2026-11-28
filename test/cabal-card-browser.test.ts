@@ -29,12 +29,22 @@ const STUB = pageStub(
   if (location.search === '?clean') { lead.title = 'One runner pool'; cabals[0].title = lead.title; }
   // ?note: the Overseer's own status note follows the state word (#2282).
   if (location.search === '?note') lead.note = 'P3 #2275 building; ships switched off after P5';
+  // ?mix: members in every state, roster order scrambled; B1 and B2 both have an open blocking ask, B1's turn is running (#2288).
+  if (location.search === '?mix') {
+    const mix = [member('R', 'roster', 'next up'), member('B1', 'blocked', 'blocked'), member('M', 'merged', 'merged'), member('RN', 'running', 'building'), member('B2', 'blocked', 'blocked'), member('S', 'sealed', 'sealed')];
+    mix.forEach((m, i) => { m.id = 300 + i; m.number = 30 + i; });
+    cabals[0].members = mix;
+  }
+  // ?leadcard: the Overseer has a question of its own.
+  if (location.search === '?leadcard') lead.open_cards = [{ minion: 101, kind: 'question', what: 'question', label: 'Q', href: '#/p/1/t/7?e=9' }];
   window.stubCabals = cabals;
+  const row = (id, status) => ({ id, project_id: 1, kind: 'ticket', number: id - 270, title: 'm' + id, status, build: 10, updated_at: 0, created_at: 0 });
+  const mixRows = [row(301, 'running'), row(303, 'running'), row(304, 'idle')];
   // ?waits: a member with a question card waiting on people (#2277).
   const waiter = { id: 201, project_id: 1, kind: 'ticket', number: 21, title: 'H2 work', status: 'idle', build: 10, updated_at: 0, created_at: 0, open_cards: [{ minion: 201, kind: 'question', what: 'question', label: 'Q', href: '#/p/1/t/21?e=5' }] };
   function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
-    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: location.search === '?waits' ? [lead, other, waiter] : [lead, other], seen: {}, person_notes: {}, pins: [], cabals: location.search === '?late' && !window.formed ? [] : cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
+    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: location.search === '?waits' ? [lead, other, waiter] : location.search === '?mix' ? [lead, other, ...mixRows] : [lead, other], seen: {}, person_notes: {}, pins: [], cabals: location.search === '?late' && !window.formed ? [] : cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
     let m;
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: m[1] === '100' ? coordinator : lead });
@@ -137,15 +147,39 @@ test("a chat click in the scheme keeps the Plot's card (#2274)", { skip }, async
 
 // #2277 (Cara, 2026-11-27): the Overseer is the header; a shut card lists every started member, an open one adds the not-started
 // lines. A member's waiting card shows as the header's chip too, and one click opens it.
-test("a shut card lists its started members and the header's chip opens a waiting card; open adds the not-started lines", { skip }, async () => {
+test("a shut card lists its started members and a member's card is its row's chip, not the header's; open adds the not-started lines", { skip }, async () => {
   const page = await browser.page(`${base}?waits#/p/1`, { width: 1280, height: 800 });
-  await waitFor(page, 'the chip to draw', `document.querySelector('.cabal-top .card-badge')`);
+  await waitFor(page, 'the chip to draw', `document.querySelector('.thread-row .card-badge')`);
   const count = (sel: string) => page.eval<number>(`document.querySelectorAll('.cabal-card ${sel}').length`);
   assert.deepEqual([await count('.thread-row'), await count('.cabal-planned'), await count('.cabal-lead + * .thread-row')], [1, 0, 0], 'shut: the started member, no Overseer row, no not-started line');
   await page.eval(`document.querySelector('.cabal-toggle').click()`);
   assert.deepEqual([await count('.thread-row'), await count('.cabal-planned')], [1, 1], 'open: adds the not-started line');
-  await page.eval(`window.hashes = []; addEventListener('hashchange', (e) => hashes.push(new URL(e.newURL).hash)); document.querySelector('.cabal-top .card-badge').click()`);
-  await waitFor(page, 'the card', `hashes.includes('#/p/1/t/21?e=5')`);
+  // Cara, 2026-11-28: "a minions chip shouldnt also show up on the Overseer": the member's card is its own row's chip, the header has none.
+  assert.equal(await count('.cabal-top .card-badge'), 0, "a member's card isn't rolled up into the header");
+  assert.equal(await count('.thread-row .card-badge'), 1, "it stays on the member's own row");
+});
+
+test("the header's chip shows the Overseer's own waiting card", { skip }, async () => {
+  const page = await browser.page(`${base}?leadcard#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the chip to draw', `document.querySelector('.cabal-top .card-badge')`);
+});
+
+// #2288 (Cara, 2026-11-28: "Blue, plus a question dot"; "fill green, then blue, then grey").
+test('the bar fills finished, then at work, then not started; a working member with an open question stays blue with a dot, a stopped one is red', { skip }, async () => {
+  const page = await browser.page(`${base}?mix#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the bar to draw', `document.querySelectorAll('.cabal-meter i').length === 6`);
+  const segs = await page.eval<[string, boolean, string][]>(`[...document.querySelectorAll('.cabal-meter i')].map((i) => [i.dataset.s, i.hasAttribute('data-ask'), i.title])`);
+  assert.deepEqual(
+    segs.map((s) => s[0]),
+    ['merged', 'running', 'running', 'blocked', 'roster', 'sealed'],
+  );
+  assert.deepEqual(
+    segs.map((s) => s[1]),
+    [false, true, false, false, false, false],
+    'only the building member with a question carries the dot',
+  );
+  assert.match(segs[1][2], /^B1 #31 B1 work: building, with a question open with the Overseer$/);
+  assert.match(segs[3][2], /^B2 #34 B2 work: waiting on the Overseer's answer$/);
 });
 
 // #2282 (Cara, 2026-11-28): the section heading is "Plot 10: <title>" (an old "Build 10:" prefix dropped; a Plot with no number is its title), "current"

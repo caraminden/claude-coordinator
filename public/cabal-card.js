@@ -1,9 +1,9 @@
 // A cabal as one card in the minions list (#2092; Josh, 2026-11-25, picked "B · One crew card"): the Overseer's tag and
 // title, a meter with a segment a member, the counts, and the open asks in red. A click shows its members under it with
 // no request: the cards come with the scheme (src/cabal-cards.ts) and the rows are the page's own.
-import { h, me, phase, threadHref } from './base.js';
+import { h, phase, threadHref } from './base.js';
 import { money } from './cabal.js';
-import { cardFor, cardsYours } from './threadstate.js';
+import { cardsYours } from './threadstate.js';
 /** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types/list.js' */
 
 /** The cards open on this page, by lead id: they stay open across redraws. A card starts shut (Cara, 2026-11-26). */
@@ -11,29 +11,21 @@ export const openCabals = /** @type {Set<number>} */ (new Set());
 /** The card just opened by a click: only its next draw fades its members in, or every redraw would replay it (#2181). */
 let opening = /** @type {number | null} */ (null);
 
-/**
- * The Overseer with its members' cards waiting on people as its own, for the header's chip: a click opens the oldest of them all.
- * @param {Row} lead @param {Row[]} mine
- * @returns {Row}
- */
-export function overseerRow(lead, mine) {
-  // A card open to anyone stays yours to answer, not the lead's assignee's.
-  const theirs = mine.filter((t) => t.id !== lead.id).flatMap((t) => (t.open_cards ?? []).map((c) => ({ ...c, to: cardFor(c, t) || me || undefined })));
-  // Event ids grow with time, so ordering by the one in each link keeps the chip's "open the oldest" true across rows.
-  const age = (/** @type {{ href: string }} */ c) => Number(/[?&]e=(\d+)/.exec(c.href)?.[1] ?? 0);
-  return theirs.length ? { ...lead, open_cards: [...(lead.open_cards ?? []), ...theirs].sort((a, b) => age(a) - age(b)) } : lead;
-}
-
 /** The Overseer's title without the "Build 11:", "Plot 11:" or "Build 11 ·" prefix older ones carry: the header says the Plot itself (Cara, 2026-11-27). */
 export const plainTitle = (/** @type {string} */ title) => title.replace(/^\s*(?:Build|Plot)\s+\d+\s*[:·–-]\s*/i, '').trim() || title;
 
 /** A member's state now: its row's own news moves it between building and open before the cards are read again. */
-/** @param {CabalCard['members'][number]} m @param {Row | undefined} t */
+/** @param {CabalCard['members'][number]} m @param {Row | undefined} t @returns {{ state: string, word: string, ask?: boolean }} */
 function liveMember(m, t) {
+  // An open blocking question isn't "stuck" while the turn works: blue with a question dot, red only once it has stopped to wait (Cara, 2026-11-28: "Blue, plus a question dot").
+  if (t && m.state === 'blocked') return t.status === 'running' ? { state: 'running', word: 'building, with a question open with the Overseer', ask: true } : { state: 'blocked', word: "waiting on the Overseer's answer" };
   if (t && m.state === 'idle' && t.status === 'running') return { state: 'running', word: 'building' };
   if (t && m.state === 'running' && t.status !== 'running') return { state: 'idle', word: 'open' };
   return m;
 }
+
+/** Where a segment sits in the bar: 0 finished, 1 at work, 2 not started. */
+const stage = (/** @type {string} */ state) => (state === 'merged' || state === 'shipped' ? 0 : ['running', 'blocked', 'idle'].includes(state) ? 1 : 2);
 
 /**
  * @param {CabalCard} c
@@ -55,8 +47,9 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
   if (fresh) opening = null;
   const lead = rows.find((t) => t.id === c.lead);
   const leadTicket = tickets.get(c.lead) ?? lead;
-  // The Overseer is the header, not a second row (Cara, 2026-11-27: "probably the header is good enough?"): its state and every waiting card show there.
-  const cards = leadTicket ? (overseerRow(leadTicket, mine).open_cards ?? []) : [];
+  // The Overseer is the header, not a second row (Cara, 2026-11-27: "probably the header is good enough?"): its state and its own waiting cards show there.
+  // A member's card stays its row's chip (Cara, 2026-11-28: "a minions chip shouldnt also show up on the Overseer. Only if the overseer has a question itself does it need to show one").
+  const cards = leadTicket?.open_cards ?? [];
   // Shut: every started member, in its own row; open adds the sealed and not-started ones (Cara, 2026-11-27: "the collapsed version still shows all active minions, and the expanded one shows the not started").
   const sealed = (/** @type {Row} */ t) => c.members.some((m) => m.id === t.id && m.state === 'sealed');
   const members = rows.filter((t) => t.id !== c.lead && (open || !sealed(t)));
@@ -105,13 +98,16 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
         ? h(
             'span',
             { class: 'cabal-meter' },
-            ...c.members.map((m) => {
-              const now = liveMember(m, m.id == null ? undefined : tickets.get(m.id));
-              const name = [m.label, m.number != null ? `#${m.number}` : '', m.title].filter(Boolean).join(' ');
-              const seg = h('i', { 'data-s': now.state, title: `${name}: ${now.word}` });
-              // The list redraws on every bit of news: a building segment rejoins the shared pulse, or each redraw starts it over (#2197).
-              return now.state === 'running' ? phase(seg, 1600) : seg;
-            }),
+            // Filled like a progress bar (Cara, 2026-11-28: "fill green, then blue, then grey"): finished, then at work, then not started, roster order within each.
+            ...c.members
+              .map((m) => ({ m, now: liveMember(m, m.id == null ? undefined : tickets.get(m.id)) }))
+              .sort((a, b) => stage(a.now.state) - stage(b.now.state))
+              .map(({ m, now }) => {
+                const name = [m.label, m.number != null ? `#${m.number}` : '', m.title].filter(Boolean).join(' ');
+                const seg = h('i', { 'data-s': now.state, 'data-ask': now.ask ? '' : null, title: `${name}: ${now.word}` });
+                // The list redraws on every bit of news: a building segment rejoins the shared pulse, or each redraw starts it over (#2197).
+                return now.state === 'running' ? phase(seg, 1600) : seg;
+              }),
           )
         : '',
       h(

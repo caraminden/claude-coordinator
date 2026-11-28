@@ -5,7 +5,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { overseerRow } from '../public/cabal-card.js';
 import { cabalSplit, threadSections } from '../public/threadgroups.js';
 import { CabalCards, cabalCards, nextUp } from '../src/cabal-cards.ts';
 import { Store } from '../src/db.ts';
@@ -153,22 +152,4 @@ test('a card never moves the next build up, keeps its goal members, and stays wh
     [[2]],
   );
   assert.equal(cabalSplit([all[2]] as never, [sevens] as never, all as never).cards.length, 0);
-});
-
-test("a shut card's Overseer row carries its members' waiting cards, oldest first, each still owed by its own person (#2181)", () => {
-  const card = (e: number, to?: string) => ({ minion: 1, kind: 'question', what: 'question', label: 'Q', href: `#/p/1/t/1?e=${e}`, ...(to ? { to } : {}) });
-  const lead = { id: 1, assignee: 'Cara', open_cards: [card(30)] };
-  const josh = { id: 2, assignee: 'Josh', open_cards: [card(10)] };
-  const named = { id: 3, assignee: 'Josh', open_cards: [card(20, 'Tess')] };
-  const row = overseerRow(lead as never, [lead, josh, named] as never);
-  assert.deepEqual(
-    row.open_cards?.map((c) => [c.href.split('e=')[1], c.to]),
-    [
-      ['10', 'Josh'],
-      ['20', 'Tess'],
-      ['30', undefined],
-    ],
-    "the chip opens the oldest of them all, and a member's card stays its assignee's, not the lead's",
-  );
-  assert.equal(overseerRow(lead as never, [lead] as never), lead, 'no member waits: the lead row as it is');
 });

@@ -59,7 +59,7 @@
 .g-cabal { --gc: hsl(265 45% 52%); }
 .g-cabal > h3 { color: var(--gc); }
 /* A cabal's card (#2092, public/cabal-card.js): a summary whose name opens the Overseer's chat and whose arrow opens the box, its members' rows under it. */
-.cabal-card { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: var(--space-1) 0; transition: border-color 0.15s; }
+.cabal-card { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: var(--space-1) 0; } /* no transition: every redraw makes a new card, and one under the pointer would fade its outline in again (#2280) */
 .cabal-card:hover, .cabal-card[data-open] { border-color: var(--gc); }
 .sidebar .cabal-sum { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-2); }
 .cabal-top { display: flex; align-items: flex-start; gap: var(--space-2); }

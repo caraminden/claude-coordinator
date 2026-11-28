@@ -135,3 +135,39 @@ test("a shut card lists its started members and the header's chip opens a waitin
   await page.eval(`window.hashes = []; addEventListener('hashchange', (e) => hashes.push(new URL(e.newURL).hash)); document.querySelector('.cabal-lead .card-badge').click()`);
   await waitFor(page, 'the card', `hashes.includes('#/p/1/t/21?e=5')`);
 });
+
+// Cara, 2026-11-27: "I am still getting the flickering" (#2280). The list rebuilds the card on every bit of news, and a
+// new card under a resting pointer began its hover fade again: the outline snapped to grey and came back, each redraw.
+// Nothing in the list may start a transition because of a redraw alone.
+test('a redraw under a resting pointer leaves the card as it was: no outline fading back in (#2280)', { skip }, async () => {
+  const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .thread-row')`);
+  const at = await page.eval<{ x: number; y: number }>(`(() => { const r = document.querySelector('.cabal-meter').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 2 }; })()`);
+  await page.mouse(at.x - 3, at.y);
+  await page.mouse(at.x, at.y);
+  const fades = `document.getElementById('threads').getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition).map((a) => a.effect.target.className + ' ' + a.transitionProperty)`;
+  await waitFor(page, 'the hover to settle', `document.querySelector('.cabal-card').matches(':hover') && !${fades}.length`);
+  for (const step of ['shut', 'open']) {
+    if (step === 'open') {
+      await page.eval(`document.querySelector('.cabal-toggle').click()`);
+      await waitFor(page, 'the open card to settle', `document.querySelector('.cabal-card[data-open]') && !${fades}.length`);
+    }
+    const seen = await page.eval<{ before: string; frames: { hover: boolean; border: string; fades: string[] }[] }>(`(async () => {
+      const { renderSidebar } = await import('./sidebar.js');
+      const border = () => getComputedStyle(document.querySelector('.cabal-card')).borderTopColor;
+      const before = border();
+      renderSidebar();
+      const frames = [];
+      for (let i = 0; i < 3; i++) {
+        await new Promise(requestAnimationFrame);
+        frames.push({ hover: document.querySelector('.cabal-card').matches(':hover'), border: border(), fades: ${fades} });
+      }
+      return { before, frames };
+    })()`);
+    assert.deepEqual(
+      seen.frames,
+      [0, 1, 2].map(() => ({ hover: true, border: seen.before, fades: [] })),
+      `${step}: every frame after the redraw shows the hovered card as before it`,
+    );
+  }
+});

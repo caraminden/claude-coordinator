@@ -240,7 +240,7 @@ const waited = (ms: number) => (ms < 3_600_000 ? `${Math.round(ms / 60_000)} min
 export function timelineText(store: Store, seen: Board): string {
   const lead = store.getTicket(seen.lead.id)!;
   const rows = new Map(store.cabalRows(lead.id).map((r) => [r.id, r]));
-  const out = [`${seen.name} Plot timeline (Pacific). Board: #/p/${seen.lead.project_id}/cabal/${seen.lead.number} · ${overseerOf(seen)} spent ${money(seen.lead.spend)}, the Plot ${money(seen.counts.spend)}`, 'Members:'];
+  const out = [`${/^Plot \d/.test(seen.name) ? seen.name : `${seen.name} Plot`} timeline (Pacific). Board: #/p/${seen.lead.project_id}/cabal/${seen.lead.number} · ${overseerOf(seen)} spent ${money(seen.lead.spend)}, the Plot ${money(seen.counts.spend)}`, 'Members:'];
   for (const m of seen.members) {
     const row = rows.get(m.row);
     const t = row?.ticket_id != null ? store.getTicket(row.ticket_id) : undefined;
@@ -278,7 +278,7 @@ export function timelineText(store: Store, seen: Board): string {
 export function boardText(b: Board, me: Pick<TicketFields, 'number' | 'project_id'> | null = null): string {
   const c = b.counts;
   const out = [
-    `${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.working} at work, up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
+    `${/^Plot \d/.test(b.name) ? b.name : `${b.name} Plot`} (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.working} at work, up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
   ];
   if (b.red) out.push(`RED (${pacificClock(b.red.at)}): ${b.red.text}`);
   out.push(b.asks.length ? `Open asks (${b.asks.length}):` : 'No open asks.');

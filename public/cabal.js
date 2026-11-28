@@ -35,7 +35,7 @@ function boardHead(b, projectId) {
     h(
       'div',
       { class: 'cabal-head' },
-      h('b', {}, `${b.name} Plot`),
+      h('b', {}, /^Plot \d/.test(b.name) ? b.name : `${b.name} Plot`),
       h(
         'span',
         { class: 'cabal-sub' },
@@ -255,7 +255,11 @@ async function readPage(p) {
 /** @param {NonNullable<typeof page>} p */
 function drawPage(p) {
   const b = p.board;
-  const head = h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, b ? `${b.name} Plot` : 'Plot board'), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${p.projectId}/t/${p.number}`, title: "Back to the Overseer's chat", 'aria-label': 'Close' }, icon('close'))));
+  const head = h(
+    'div',
+    { class: 'ticket-head' },
+    h('div', { class: 'row' }, h('h2', {}, b ? (/^Plot \d/.test(b.name) ? b.name : `${b.name} Plot`) : 'Plot board'), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${p.projectId}/t/${p.number}`, title: "Back to the Overseer's chat", 'aria-label': 'Close' }, icon('close'))),
+  );
   if (!b) return p.el.replaceChildren(head, emptyCard('No board here.', p.error ?? '', { mark: '?' }));
   const redraw = () => drawPage(p);
   p.el.replaceChildren(

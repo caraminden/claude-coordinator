@@ -259,3 +259,6 @@ public/minion-rules.js: test/held-list.test.ts
 src/wake.ts: test/held-starts.test.ts
 kit/skills/android-app/scripts/gen-icons.mjs: test/icon-gen.test.ts
 tools/deploy.sh: test/pressure.test.ts
+tools/ci-runner/install-runner-agent.ps1: test/runner-self-update.test.ts
+tools/ci-runner/install-runner-agent.sh: test/runner-self-update.test.ts
+server.ts: test/runner-self-update.test.ts

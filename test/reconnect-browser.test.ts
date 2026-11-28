@@ -57,11 +57,13 @@ const STUB = pageStub(`
     if (path === 'api/projects/1/properties') return reply(200, { keys: [] });
   }
   if (location.search === '?desktop') window.citadelDesktop = { show() {} };
+  if (location.search === '?hang') window.citadelStreamOpenMs = 300;
   window.streams = [];
   window.EventSource = class {
     static CONNECTING = 0; static OPEN = 1; static CLOSED = 2;
     readyState = 0;
-    constructor() { streams.push(this); setTimeout(() => { this.readyState = 1; this.onopen?.(); }); }
+    // ?hang: the first stream request is never answered, as one a booting server took and dropped (#2260).
+    constructor() { streams.push(this); if (location.search === '?hang' && streams.length === 1) return; setTimeout(() => { this.readyState = 1; this.onopen?.(); }); }
     close() { this.readyState = 2; }
   };
   // What a browser does when the server ends the stream: an error, then it retries on its own.
@@ -107,6 +109,15 @@ test('a stream back within the moment never shows the chip', { skip }, async () 
   await waitFor(page, 'the scheme page', `streams.at(-1)?.readyState === 1`);
   // Timed in the page, as above: back after 300 ms, then a look once the 1.5 s would have run out.
   assert.equal(await page.eval(`dropStream(), new Promise((r) => setTimeout(() => { reopenStream(); setTimeout(() => r(!!${chip}), 1700); }, 300))`), false);
+});
+
+test('a stream request that never answers is dropped and asked again, at the start and after a drop (#2260)', { skip }, async () => {
+  const page = await browser.page(`${base}?hang#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'a second stream, open, the hung first one closed', `streams.length === 2 && streams[1].readyState === 1 && streams[0].readyState === 2`);
+  // Dropped: the browser's own retry of the same EventSource is never answered either, and no further error comes.
+  await page.eval(`dropStream()`);
+  await waitFor(page, 'a third stream, open', `streams.length === 3 && streams[2].readyState === 1 && streams[1].readyState === 2`);
+  await waitFor(page, 'no chip once it is back', `!${chip}`);
 });
 
 // ---------- what a reconnect owes (#1854) ----------

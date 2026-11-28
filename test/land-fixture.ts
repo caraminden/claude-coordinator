@@ -211,6 +211,18 @@ case "$*" in "api rate_limit "*) [ "\${FAKE_QUOTA:-}" != down ] || exit 1; echo 
 # a plain number n (FAKE_RUNNERS, FAKE_RUNNERS_WAIT, a FAKE_RUNNERS_FILE that isn't JSON) answers "n <FAKE_REGISTERED, else n>".
 jqx=\${4:-}
 runners() { case "$jqx" in *'\\(length)'*) echo "$1 \${FAKE_REGISTERED:-$1}" ;; *) echo "$1" ;; esac; }
+# A runner list as JSON (FAKE_RUNNERS_FILE) answered for the --jq filter in $4 without jq (CI's desktop runner has none, #2326):
+# the runners with the filter's label, as "<online> <registered>", the online idle ones for a filter naming .busy, else how many.
+jsonrunners() {
+  local label rows
+  label=$(grep -o '[.]name == "[^"]*"' <<<"$jqx" | head -n 1 | cut -d'"' -f2)
+  rows=$(sed 's/{"name":"[^"]*","status"/\\n&/g' "$1" | grep '"labels"' | grep "\\"name\\":\\"$label\\"")
+  case "$jqx" in
+    *'\\(length)'*) echo "$(grep -c '"status":"online"' <<<"$rows") $(grep -c . <<<"$rows")" ;;
+    *'.busy == false'*) grep '"status":"online"' <<<"$rows" | grep -c '"busy":false' ;;
+    *) grep -c . <<<"$rows" ;;
+  esac
+}
 echo "$*" >>"${calls}"
 case "$*" in
   *"/actions/runs?head_sha="*)
@@ -287,8 +299,8 @@ case "$*" in
     fi ;;
   *citadel-ci-linux-check*) echo "\$FAKE_CHECK_RUNNERS" ;;
   *"/actions/runs?status="*) echo "\${FAKE_ACTIVE:-0}" ;;
-  *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { runners "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq -r "$4" "\$FAKE_RUNNERS_FILE"; else runners "$(cat "\$FAKE_RUNNERS_FILE")"; fi; else runners "\${FAKE_RUNNERS:-1}"; fi ;;
-  *"/actions/runners "*) [ -z "\${FAKE_RUNNERS_ODD:-}" ] || [ $(($(grep -c '/actions/runners ' "${calls}") % 2)) = 1 ] || { echo >>"${calls}.gone"; runners 0; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq -r "$4" "\$FAKE_RUNNERS_FILE"; else runners "$(cat "\$FAKE_RUNNERS_FILE")"; fi; else runners "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { runners "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jsonrunners "\$FAKE_RUNNERS_FILE"; else runners "$(cat "\$FAKE_RUNNERS_FILE")"; fi; else runners "\${FAKE_RUNNERS:-1}"; fi ;;
+  *"/actions/runners "*) [ -z "\${FAKE_RUNNERS_ODD:-}" ] || [ $(($(grep -c '/actions/runners ' "${calls}") % 2)) = 1 ] || { echo >>"${calls}.gone"; runners 0; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jsonrunners "\$FAKE_RUNNERS_FILE"; else runners "$(cat "\$FAKE_RUNNERS_FILE")"; fi; else runners "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs"*'shard ('*) [ "\${FAKE_GH_JOBS:-}" != down ] || exit 1; echo "\${FAKE_GH_JOBS:-0 20 0}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;
   *"/actions/runs/"[0-9]*"/jobs "*"burn in new and changed tests"*) printf '%b' "\${FAKE_BURN:-}" ;;

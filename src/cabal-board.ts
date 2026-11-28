@@ -148,7 +148,7 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
     const where = t?.project_id ?? r.project_id ?? lead.project_id;
     const scheme = where === lead.project_id ? null : (store.getProject(where)?.name ?? `scheme ${where}`);
     // A Plot's branch that shipped to main is deleted: its members' merges can't be read from git, but their own Merged notes still say so (#2327).
-    const branchGone = !scheme && lead.build != null && !ref;
+    const branchGone = !scheme && lead.build != null && !!repoDir && !ref;
     const state = await stateOf(t, ship?.kind ?? null, scheme ? null : ref, repoDir, asks, deps, branchGone);
     members.push({
       row: r.id,

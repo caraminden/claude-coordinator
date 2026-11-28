@@ -59,7 +59,11 @@ before(async () => {
   const rOff = mkdtempSync(join(tmpdir(), 'list-reads-off-'));
   roots.push(rOff);
   cpSync(join(r60, 'data'), join(rOff, 'data'), { recursive: true }); // the same rows, before either server writes
-  [s10, s60, off] = await Promise.all([boot(seed(10)), boot(r60), boot(rOff, { CITADEL_READ_SCOPE: '0' })]);
+  // One after another: ten copies of this file at once (the ship's burn-in) then boot ten servers together, as any
+  // one-server file does. All three at once made thirty, and none said its port within the 20 s it is given (#2286).
+  s10 = await boot(seed(10));
+  s60 = await boot(r60);
+  off = await boot(rOff, { CITADEL_READ_SCOPE: '0' });
 });
 after(async () => {
   await Promise.all([s10, s60, off].map((s) => s?.stop()));

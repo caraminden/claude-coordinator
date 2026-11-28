@@ -3,7 +3,6 @@
 import { HttpError, json, readJson, type Route } from '../http.ts';
 import { managesMachine } from '../access.ts';
 import { poolKey, poolOn } from '../runner-pool.ts';
-import { poolLocked } from '../ci-runner.ts';
 import { offWords } from '../owner-busy.ts';
 
 export const ciPoolRoutes: Route[] = [
@@ -50,8 +49,6 @@ export const ciPoolRoutes: Route[] = [
     async handler({ req, res, app, project }) {
       const { on } = await readJson(req, 1_000);
       if (typeof on !== 'boolean') throw new HttpError(400, 'on must be true (the runner pool) or false (standing runners)');
-      const locked = poolLocked(project!.name, on);
-      if (locked) throw new HttpError(409, locked);
       if (on) app.store.setSetting(poolKey(project!.id), true);
       else app.store.deleteSetting(poolKey(project!.id));
       console.log(`Runner pool: ${project!.name} is now on ${on ? 'the runner pool' : 'its standing runners'}`);

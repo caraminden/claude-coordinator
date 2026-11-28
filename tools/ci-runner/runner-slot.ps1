@@ -17,9 +17,15 @@
     State    prints one JSON line per slot task: repo, slot, whether it is running, the job its runner took (job) and
              the launcher's exit code once it ended (exit).
 
-  SYSTEM never writes inside a slot folder, which a job can write: the launcher, running as NETWORK SERVICE, links the
-  slot to the runner copy and wipes the last runner's files itself. Stop's deletes remove links, never what they name.
-  It never touches the standing runners (C:\actions-runner-*), never restarts the PC.
+  Start -Session (runner pool P6, #2305) is for a `<scheme>-desktop` job, which opens windows, draws and reads the
+  screen: the slot's task runs as the person signed in at the console instead (Interactive, their own desktop, as
+  add-runner.ps1 -Session -Visible did), under conhost --headless so no console shows. Measured in P0 (#2266): an
+  on-demand Interactive task for the signed-in person starts in their session. The slot folder is the scheme's same
+  warm slot, which that person may then modify too.
+
+  SYSTEM never writes inside a slot folder, which a job can write: the launcher, running as NETWORK SERVICE (or the
+  signed-in person), links the slot to the runner copy and wipes the last runner's files itself. Stop's deletes remove
+  links, never what they name. It never touches the standing runners (C:\actions-runner-*), never restarts the PC.
 
 .EXAMPLE
   .\runner-slot.ps1 -Op Start -Scheme 2 -Slot 1 -Once 0123... -CitadelUrl 'http://perigee.tail59477f.ts.net:8574'
@@ -35,6 +41,8 @@ param(
   [int]$Slot,
   [string]$Once,
   [string]$CitadelUrl,
+  # Start only: run the slot's runner in the signed-in person's session (a `<scheme>-desktop` job).
+  [switch]$Session,
   [string]$MachineToken = $env:CC_MACHINE_TOKEN,
   # Tests and the P2 proof only; the agent never passes it.
   [string]$Pool = 'C:\citadel-pool'
@@ -157,9 +165,12 @@ $task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $name -ErrorAction Silen
 
 # Every NETWORK SERVICE process of this slot: the launcher's tree (its command line, which only this script sets, names
 # the slot) and anything running from the slot folder. Never another account's: SYSTEM ends only what the slot's own did.
+# A session slot's (Start -Session) are the signed-in person's: the task's own account, read from its registration.
 function Get-SlotProcess {
   $all = @(Get-CimInstance -ClassName Win32_Process)
-  $ns = { param($p) try { (Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop).User -eq 'NETWORK SERVICE' } catch { $false } }
+  $owners = @('NETWORK SERVICE')
+  if ($task -and $task.Principal.LogonType -eq 'Interactive' -and $task.Principal.UserId) { $owners += ($task.Principal.UserId -split '\\')[-1] }
+  $ns = { param($p) try { $owners -contains (Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop).User } catch { $false } }
   $roots = @($all | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like "*launch-slot.ps1*-Slot `"$dir`"*" })
   $seen = @{}
   $queue = [Collections.Generic.Queue[object]]::new()
@@ -198,6 +209,13 @@ if (-not (Test-Path -LiteralPath $current)) { Stop-With 'no runner copy on this 
 $version = (Get-Content -LiteralPath $current -Raw).Trim()
 if (-not (Test-Path -LiteralPath (Join-Path $Copies "$version\bin\Runner.Listener.exe"))) { Stop-With "the runner copy v$version is incomplete: run Update." }
 
+# A desktop job's runner: the person signed in at the console (DOMAIN\name), or nobody to run it for.
+$person = $null
+if ($Session) {
+  $person = [string](Get-CimInstance -ClassName Win32_ComputerSystem).UserName
+  if (-not $person) { Stop-With 'nobody is signed in at the console, so a desktop job has no session to run in.' }
+}
+
 Lock-Pool
 $repoDir = Split-Path -Parent $dir
 if (-not (Test-Path -LiteralPath $repoDir)) { New-Item -ItemType Directory -Path $repoDir | Out-Null }
@@ -207,14 +225,28 @@ if (-not (Test-Path -LiteralPath $dir)) {
   & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*${NetworkService}:(OI)(CI)M" | Out-Null
   if ($LASTEXITCODE -ne 0) { Stop-With "icacls couldn't set $dir's rights (exit $LASTEXITCODE)." }
 }
+if ($person) {
+  # Explicit grants, which Lock-Pool's /grant:r of other accounts leaves be: read on the pool (the copy, the launcher),
+  # modify on this slot, inherited by what is in it, so its warm build serves both kinds of job.
+  & icacls.exe $Pool /grant "${person}:(OI)(CI)RX" | Out-Null
+  if ($LASTEXITCODE -ne 0) { Stop-With "icacls couldn't let $person read $Pool (exit $LASTEXITCODE)." }
+  & icacls.exe $dir /grant "${person}:(OI)(CI)M" | Out-Null
+  if ($LASTEXITCODE -ne 0) { Stop-With "icacls couldn't let $person write $dir (exit $LASTEXITCODE)." }
+}
 # The launcher sits in the pool's root, which NETWORK SERVICE can read but not change.
 $launcher = Join-Path $Pool 'launch-slot.ps1'
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'launch-slot.ps1') -Destination $launcher -Force
 
 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $taskArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$launcher`" -Slot `"$dir`" -Once $Once -CitadelUrl $CitadelUrl"
-$action = New-ScheduledTaskAction -Execute $ps -Argument $taskArgs -WorkingDirectory $dir
-$principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\NETWORK SERVICE" -LogonType ServiceAccount -RunLevel Limited
+if ($person) {
+  # On the person's own desktop, where a desktop job's windows must show (add-runner.ps1 -Visible); no console of its own.
+  $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\conhost.exe') -Argument "--headless `"$ps`" $taskArgs" -WorkingDirectory $dir
+  $principal = New-ScheduledTaskPrincipal -UserId $person -LogonType Interactive -RunLevel Limited
+} else {
+  $action = New-ScheduledTaskAction -Execute $ps -Argument $taskArgs -WorkingDirectory $dir
+  $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\NETWORK SERVICE" -LogonType ServiceAccount -RunLevel Limited
+}
 # Below normal, as keep-runners.ps1 holds the standing runners; no time limit a job could hit (GitHub's own ends it).
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew -Priority 7 -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -Force -TaskPath $TaskPath -TaskName $name -Action $action -Principal $principal -Settings $settings | Out-Null

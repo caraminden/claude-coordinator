@@ -125,13 +125,14 @@ export class RunnerSlots {
     if (!Number.isInteger(slot) || slot < 1 || slot > MAX_SLOTS) throw new HttpError(400, `slot must be 1 to ${MAX_SLOTS}`);
     if (!Array.isArray(labels) || !labels.length || labels.length > 10 || !labels.every((l) => typeof l === 'string' && /^[\w.-]{1,100}$/.test(l))) throw new HttpError(400, 'labels must be 1 to 10 runner labels');
     if (job !== undefined && (!Number.isSafeInteger(job) || job < 1)) throw new HttpError(400, 'job must be a GitHub job id');
-    // shortcut: a desktop job needs the signed-in person's session, which a slot's NETWORK SERVICE task isn't; refused
-    // until the pool starts session runners (spec P6).
-    if (labels.some((l) => l.endsWith('-desktop'))) throw new HttpError(400, "a desktop job's runner needs a session; one-job slots don't start those yet");
+    // A desktop job opens windows and reads the screen: its runner runs in the signed-in person's session (P6, #2305;
+    // runner-slot.ps1 -Session), which only Windows has.
+    const session = labels.some((l) => l.toLowerCase().endsWith('-desktop'));
+    if (session && os !== 'windows') throw new HttpError(400, "a desktop job's runner needs a Windows session");
     const name = poolName(machine.id, os, slot, job);
     const config = await this.tokens.jit(machine, project, name, labels);
     const once = this.once.put(config);
-    const r = await this.relay.runnerJob(machine.id, { op: 'start', scheme: project.id, slot, once, name }, os, START_MS);
+    const r = await this.relay.runnerJob(machine.id, { op: 'start', scheme: project.id, slot, once, name, ...(session ? { session: true } : {}) }, os, START_MS);
     if (!r.ok) {
       // Never started (or its launcher never asked): GitHub keeps the registration, so take this one off now.
       this.once.drop(once);

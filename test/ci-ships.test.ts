@@ -1,7 +1,7 @@
 // The ship watcher (#1268): which runners are on a ship run's job now, from GitHub, sent to the runner agents.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { queuedOn, ShipWatch, shipsOn, type Ship } from '../src/ci-ships.ts';
+import { queuedOn, ShipWatch, shipsOn, type PoolSight, type Ship } from '../src/ci-ships.ts';
 
 /** A fake GitHub: paths to bodies, a 304 for a path asked again with the etag it gave, and every path asked. */
 function github(pages: Record<string, unknown>) {
@@ -243,6 +243,24 @@ test('a queued heavy job (#2120) comes back as one to place, not as waiting CI n
   assert.deepEqual([...counts], [[repo, 1]]);
   assert.deepEqual([...labels.get(repo)!], ['peek-ci-linux']);
   assert.deepEqual(heavy, [{ repo, id: 51, run: 5, name: 'apk', labels: ['self-hosted', 'peek-ci-linux', 'citadel-heavy-apk'] }]);
+});
+
+test("a pool scheme's heavy job goes to the pool, sized by its kind, never to the label handout (P6)", async () => {
+  const repo = 'caraminden/peek';
+  const gh = github({
+    [runs(repo)]: { workflow_runs: [] },
+    [queuedRuns(repo)]: { workflow_runs: [{ id: 5 }] },
+    [jobs(repo, 5)]: { jobs: [{ id: 51, name: 'apk', status: 'queued', labels: ['self-hosted', 'peek-ci-linux', 'citadel-heavy-apk'] }] },
+  });
+  const heavy: unknown[] = [];
+  const sights: PoolSight[] = [];
+  const w = new ShipWatch({ repos: () => [repo], as: () => ({}), send: () => {}, get: gh.get, log: () => {}, queued: () => {}, heavy: (h) => void heavy.push(...h), pooled: () => true, pool: (s) => void sights.push(s) });
+  await w.tick(0);
+  assert.deepEqual(heavy, []);
+  assert.deepEqual(
+    sights[0].jobs.map((j) => [j.id, j.labels]),
+    [[51, ['self-hosted', 'peek-ci-linux', 'citadel-heavy-apk']]],
+  );
 });
 
 test("a watch with no queued hook never reads queued runs, and a failed read of them doesn't touch the ships", async () => {

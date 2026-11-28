@@ -289,7 +289,7 @@ export function cleanScreen(v: unknown): ScreenState | null {
 }
 
 /** One job for a CI runner agent (#328): add, list or remove one scheme's runners on its PC. */
-export type RunnerJob = { op: 'add'; scheme: number; count: number } | { op: 'list' } | { op: 'remove'; scheme: number } | { op: 'start'; scheme: number; slot: number; once: string; name: string };
+export type RunnerJob = { op: 'add'; scheme: number; count: number } | { op: 'list' } | { op: 'remove'; scheme: number } | { op: 'start'; scheme: number; slot: number; once: string; name: string; session?: true };
 /** What the agent answers: whether its script exited 0, and the end of what it printed. */
 export type RunnerJobResult = { ok: boolean; output: string };
 // Downloading the 100 MB runner and configuring four instances takes minutes; a stuck script ends at the agent's own limit first.

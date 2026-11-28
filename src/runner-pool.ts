@@ -353,7 +353,7 @@ export interface PoolView {
 type Open = { repo: string; id: number; run: number; scheme: number; name: string; size: number; runner: string | null; ranOn: number | null; startedAt: number | null };
 
 /** A one-job runner the pool started, until its agent says it ended or stopped, its job ends, or it is forgotten. */
-type Started = PoolRunner & { scheme: number; os: Os; slot: number; size: number; jobName: string; took: boolean; ran: boolean };
+type Started = PoolRunner & { scheme: number; os: Os; slot: number; size: number; jobName: string; took: boolean; ran: boolean; session: boolean };
 
 /** Which machine a runner is on: a pool slot's `pool-m<id>-` (P2's src/runner-slots.ts), else the hostname its name starts with (the longest that fits). */
 export function machineOfRunner(runner: string, pcs: readonly Pick<PoolPc, 'id' | 'hosts'>[]): number | null {
@@ -422,11 +422,11 @@ export class RunnerPool {
 
   /**
    * The machines that could take the scheme's jobs now: lending it CI and not off; none when one of its queued jobs fits no
-   * such machine (its OS, or a session P6 starts). For CI health's "fine" (a pool scheme has no standing runner to be online).
+   * such machine (its OS, or a signed-in session for a desktop job). For CI health's "fine" (a pool scheme has no standing runner to be online).
    */
   able(scheme: number): string[] {
     const can = this.d.machines().filter((m) => m.schemes.includes(scheme) && !m.off);
-    const fits = (n: Needs) => n.os !== null && !n.session && can.some((m) => m.os.includes(n.os!));
+    const fits = (n: Needs) => n.os !== null && can.some((m) => m.os.includes(n.os!) && (!n.session || m.session));
     return (this.queued.get(scheme) ?? []).every(fits) ? can.map((m) => m.name) : [];
   }
 
@@ -481,8 +481,6 @@ export class RunnerPool {
       const pooled = !!this.d.start && (this.d.pooled?.(s.id) ?? false);
       const left = pooled ? (this.d.standing?.(j.repo, s.id) ?? []) : [];
       if (left.length) held.set(key, `its standing runners are still there (${left.join(', ')}); the pool starts its jobs once they're gone`);
-      // shortcut: a desktop job's runner needs the owner's logon session, which a slot isn't (src/runner-slots.ts refuses it); P6 starts those.
-      else if (pooled && needs.session) held.set(key, 'a desktop job needs a runner in the signed-in session, which the pool starts from P6 on');
       queued.set(s.id, [...(queued.get(s.id) ?? []), needs]);
       waiting.push({ repo: j.repo, id: j.id, run: j.run, name: j.name, scheme: s.id, ship, first: ship && j.repo === first, since: Number.isFinite(j.created) ? j.created : now, needs, standing: !pooled || held.has(key) });
     }
@@ -545,10 +543,10 @@ export class RunnerPool {
           continue;
         }
         const r = this.begin(p.job, p.machine, labelsOf(p.job.repo, p.job.id), now);
-        if (r) {
+        if (typeof r !== 'string') {
           look.placed.push({ repo: p.job.repo, job_id: p.job.id, machine: p.machine });
           covered.set(key, r);
-        } else p.why = `every slot of its scheme on ${nameOf(p.machine)} is busy`;
+        } else p.why = `${r} on ${nameOf(p.machine)}`;
         p.machine = null;
         continue;
       }
@@ -559,7 +557,8 @@ export class RunnerPool {
     }
     this.said = said;
     // P5: a pool job no machine could take (not one waiting for room there) moves on after FALLBACK.afterMs. Citadel's own
-    // ships keep their own fallback (tools/land/ci.sh), and heavy jobs theirs (src/heavy-place.ts).
+    // ships keep their own fallback (tools/land/ci.sh). A heavy job waits for a machine, as it did for the label handout
+    // (src/heavy-place.ts), never sent to GitHub's minutes or perigee.
     const fallen = placed.filter((p) => p.machine === null && !p.job.standing && !(p.job.ship && p.job.first) && !heavyKind(labelsOf(p.job.repo, p.job.id).map((l) => l.toLowerCase())));
     this.d.fallback?.look(
       fallen.map((p) => {
@@ -611,19 +610,23 @@ export class RunnerPool {
   }
 
   /** Start a one-job runner for `job` on `machine` in its scheme's lowest free slot there, booked at once so the next look doesn't start a second; null when every slot is busy. */
-  private begin(job: PoolJob, machine: number, labels: string[], now: number): Started | null {
+  /** Start the job's runner in a free slot, or say why none (the machine's name follows). */
+  private begin(job: PoolJob, machine: number, labels: string[], now: number): Started | string {
     const os = job.needs.os!;
     const prefix = (n: number) => slotPrefix(machine, os, n);
     const busy = new Set<number>();
     for (const r of this.started.values()) if (r.scheme === job.scheme && r.machine === machine && r.os === os) busy.add(r.slot);
+    // One desktop job of a scheme at a time on a machine, as its one session runner was: two would draw on one screen.
+    // shortcut: a desktop runner started before a server restart isn't in `started`, so one more can start beside it; track open jobs' labels if that bites.
+    if (job.needs.session && [...this.started.values()].some((r) => r.scheme === job.scheme && r.machine === machine && r.session)) return 'its scheme already runs a desktop job';
     for (const o of this.open!.values()) {
       if (o.scheme !== job.scheme || !o.runner) continue;
       for (let n = 1; n <= MAX_SLOTS; n++) if (o.runner.toLowerCase().startsWith(prefix(n))) busy.add(n);
     }
     const slot = freeSlot(busy);
-    if (slot === null) return null;
+    if (slot === null) return 'every slot of its scheme is busy';
     const name = poolName(machine, os, slot, job.id);
-    const rec: Started = { name, repo: job.repo, machine, job: job.id, labels, at: now, scheme: job.scheme, os, slot, size: job.needs.size, jobName: job.name, took: false, ran: false };
+    const rec: Started = { name, repo: job.repo, machine, job: job.id, labels, at: now, scheme: job.scheme, os, slot, size: job.needs.size, jobName: job.name, took: false, ran: false, session: job.needs.session };
     this.started.set(name, rec);
     this.lastStart.set(job.scheme, now);
     const key = `${job.repo}#${job.id}`;

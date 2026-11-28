@@ -534,6 +534,12 @@ test("a start names a scheme, a slot of 1 to 16, a one-time id and the runner's 
   assert.match(win.command, /powershell\.exe$/);
   assert.deepEqual(win.args.slice(5), [join('C:\\agent', 'runner-slot.ps1'), '-Op', 'Start', '-Scheme', '3', '-Slot', '2', '-Once', ONCE, '-CitadelUrl', 'http://perigee:8574']);
   assert.deepEqual(jobCommand(checkJob(start(2)), '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'start', '3', '2', ONCE, 'u']);
+  // A desktop job's start (P6): only `session: true`, which runs the script with -Session, and never on Linux.
+  const desk = checkJob({ ...start(2), session: true });
+  assert.equal(desk.session, true);
+  assert.deepEqual(jobCommand(desk, 'C:\\agent', 'u', 'C:\\Windows', 'windows').args.slice(-1), ['-Session']);
+  assert.throws(() => jobCommand(desk, '/a', 'u', undefined, 'linux'), /Windows session/);
+  for (const session of [false, 'true', 1]) assert.throws(() => checkJob({ ...start(2), session }), /refused/, String(session));
   // A stop goes by the slot folder's repo name only: it asks Citadel nothing, so it works once the loan has ended.
   assert.deepEqual(jobCommand({ op: 'stop', repo: 'peek', slot: 2 }, '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'stop', 'peek', '2']);
   assert.deepEqual(jobCommand({ op: 'stop', repo: 'peek', slot: 2 }, 'C:\\agent', 'u', 'C:\\Windows', 'windows').args.slice(6), ['-Op', 'Stop', '-Repo', 'peek', '-Slot', '2']);

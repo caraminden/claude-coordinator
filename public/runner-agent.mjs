@@ -55,11 +55,12 @@ export function checkJob(job) {
     if (!Number.isInteger(job.count) || job.count < 1 || job.count > MAX_RUNNERS) throw new Error(`count must be 1 to ${MAX_RUNNERS}`);
     return { id: job.id, op: 'add', scheme: scheme(job.scheme), count: job.count };
   }
-  if (job.op === 'start' && keys === 'id,name,once,op,scheme,slot') {
+  // session (P6, #2305): a `<scheme>-desktop` job's runner, in the signed-in person's session; only ever true.
+  if (job.op === 'start' && (keys === 'id,name,once,op,scheme,slot' || (keys === 'id,name,once,op,scheme,session,slot' && job.session === true))) {
     if (!Number.isInteger(job.slot) || job.slot < 1 || job.slot > MAX_SLOTS) throw new Error(`slot must be 1 to ${MAX_SLOTS}`);
     if (typeof job.once !== 'string' || !/^[0-9a-f]{48}$/.test(job.once)) throw new Error('once must be the one-time id Citadel minted');
     if (typeof job.name !== 'string' || !POOL_NAME.test(job.name)) throw new Error("name must be the runner's pool name");
-    return { id: job.id, op: 'start', scheme: scheme(job.scheme), slot: job.slot, once: job.once, name: job.name };
+    return { id: job.id, op: 'start', scheme: scheme(job.scheme), slot: job.slot, once: job.once, name: job.name, ...(job.session ? { session: true } : {}) };
   }
   throw new Error(`refused: this agent only adds, lists and removes runners and starts one-job runners (got op ${JSON.stringify(job?.op)} with ${keys || 'nothing'})`);
 }
@@ -89,6 +90,7 @@ export function jobCommand(job, dir, appUrl, systemRoot = process.env.SystemRoot
 function slotCommand(job, dir, appUrl, systemRoot, os) {
   if (job.op === 'stop' && !REPO_NAME.test(job.repo ?? '')) throw new Error("stop needs the slot folder's repo name");
   if (os === 'linux') {
+    if (job.session) throw new Error("a desktop job's runner needs a Windows session");
     const args = [join(dir, SLOT_SCRIPT.linux), job.op];
     if (job.op === 'start') args.push(String(job.scheme), String(job.slot), job.once, appUrl);
     if (job.op === 'stop') args.push(job.repo, String(job.slot));
@@ -96,6 +98,7 @@ function slotCommand(job, dir, appUrl, systemRoot, os) {
   }
   const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, SLOT_SCRIPT.windows), '-Op', job.op[0].toUpperCase() + job.op.slice(1)];
   if (job.op === 'start') args.push('-Scheme', String(job.scheme), '-Slot', String(job.slot), '-Once', job.once, '-CitadelUrl', appUrl);
+  if (job.op === 'start' && job.session) args.push('-Session');
   if (job.op === 'stop') args.push('-Repo', job.repo, '-Slot', String(job.slot));
   return { command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args };
 }

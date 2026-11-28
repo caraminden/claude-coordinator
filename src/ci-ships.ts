@@ -241,7 +241,8 @@ export class ShipWatch {
         // Its other labels still ask for runners (#2064); the heavy one is Citadel's to hand out.
         for (const l of asks) if (l !== 'self-hosted' && l.toLowerCase() !== kind?.label) labels.add(l.toLowerCase());
         if (kind) {
-          if (Number.isSafeInteger(j.id)) heavy.push({ repo, id: Number(j.id), run: Number(r.id), name: String(j.name ?? ''), labels: asks });
+          // A pool scheme's heavy job is the pool's to place by its size (P6, #2305): the label handout never sees it.
+          if (!pooled && Number.isSafeInteger(j.id)) heavy.push({ repo, id: Number(j.id), run: Number(r.id), name: String(j.name ?? ''), labels: asks });
           continue;
         }
         n++;

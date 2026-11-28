@@ -151,10 +151,23 @@ test('a start mints for the slot, sends the agent only the one-time id, and the 
   assert.ok(!JSON.stringify(job).includes('THE-CONFIG'), 'the config never goes to the agent');
   assert.equal(w.rs.once.take(job.once), 'THE-CONFIG');
   assert.equal(w.rs.once.take(job.once), null);
-  // A desktop job needs a person's session, which a slot's task isn't (P6).
+  // A desktop job needs a person's session, which only Windows has (P6).
   for (const bad of [{ slot: 0 }, { slot: 17 }, { labels: [] }, { labels: ['a b'] }, { job: -1 }, { labels: ['peek-auras-desktop'] }]) {
     await assert.rejects(w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'], ...bad }), { status: 400 }, JSON.stringify(bad));
   }
+});
+
+test("a desktop job's start asks the Windows agent for the signed-in session, and a plain one never does (P6)", async () => {
+  const w = slots();
+  await w.rs.start(w.project, w.machine, { os: 'windows', slot: 1, labels: ['self-hosted', 'Peek-Auras-desktop'], job: 7 });
+  await w.rs.start(w.project, w.machine, { os: 'windows', slot: 2, labels: ['self-hosted', 'peek-auras-ci'], job: 8 });
+  assert.deepEqual(
+    w.sent.map((j) => j.op === 'start' && [j.slot, j.session]),
+    [
+      [1, true],
+      [2, undefined],
+    ],
+  );
 });
 
 test('a start the agent refuses drops its id and takes off the runner it minted, and only that one', async () => {

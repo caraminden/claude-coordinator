@@ -549,7 +549,7 @@ test("which machines could take a pool scheme's jobs: lending it CI, not off, an
   const w = poolWorld();
   assert.deepEqual(w.pool.able(TOC), ['cara-desktop']);
   assert.deepEqual(w.pool.able(42), []);
-  // A Windows-only PC can't take ToC's waiting Linux job, so ToC isn't fine there; nor is a job that needs a session (P6).
+  // A Windows-only PC can't take ToC's waiting Linux job, so ToC isn't fine there; nor a desktop job where nobody is signed in (P6).
   w.desk.os = ['windows'];
   w.pool.pass(w.sight([w.j(w.toc, 11)]));
   assert.deepEqual(w.pool.able(TOC), []);
@@ -557,7 +557,10 @@ test("which machines could take a pool scheme's jobs: lending it CI, not off, an
   w.pool.pass(w.sight([w.j(w.toc, 11)]));
   assert.deepEqual(w.pool.able(TOC), ['cara-desktop']);
   w.pool.pass(w.sight([w.j(w.toc, 12, { labels: ['self-hosted', 'theory-of-crafting-desktop'] })]));
+  assert.deepEqual(w.pool.able(TOC), ['cara-desktop'], 'a desktop job runs in the signed-in session there');
+  w.desk.session = false;
   assert.deepEqual(w.pool.able(TOC), []);
+  w.desk.session = true;
   w.pool.pass(w.sight([]));
   w.desk.off = 'is offline';
   assert.deepEqual(w.pool.able(TOC), []);
@@ -691,16 +694,22 @@ test('the switch: a scheme is on the pool only once a member turns it on, and of
   await assert.rejects(patch({ on: 'yes' }), /on must be true/);
 });
 
-test('until P6 moves every scheme over, only Theory of Crafting can be switched on; any scheme can switch off (Cara, 2026-11-28, "Lock until move-over")', async () => {
-  const store = new Store(':memory:');
-  const peek = store.getProject(store.createProject('Peek', null).id)!;
-  const patch = async (body: unknown) => {
-    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
-    const res = { setHeader() {}, writeHead: () => res, end() {} };
-    await ciPoolRoutes[1].handler({ req, res, app: { store }, project: peek } as never);
-  };
-  await assert.rejects(patch({ on: true }), { status: 409, message: /Only Theory of Crafting/ });
-  assert.equal(store.getSetting(poolKey(peek.id)), null, 'refused before anything is written');
-  await patch({ on: false });
-  assert.equal(poolOn(store, peek.id), false);
+test("a pool scheme's desktop jobs start in the signed-in session, one at a time per machine, beside its plain jobs (P6)", () => {
+  const w = poolWorld({ pooled: new Set([PEEK]), limit: 16 });
+  const desk = (id: number) => w.j(w.peek, id, { labels: ['self-hosted', 'peek-auras-desktop'] });
+  const v = w.pool.pass(w.sight([desk(21), desk(22), w.j(w.peek, 23)]));
+  assert.deepEqual(
+    w.starts.map((s) => [s.job, s.slot, s.os]),
+    [
+      [21, 1, 'windows'],
+      [23, 2, 'windows'],
+    ],
+    "the second desktop job waits for the first; the plain job takes the next slot of the scheme's warm folders",
+  );
+  assert.equal(v.line.find((x) => x.id === 22)?.why, 'its scheme already runs a desktop job on cara-desktop');
+  // The first desktop runner ends: the second starts.
+  w.pool.onSlot({ runner: 'pool-m1-w1-j21', event: 'ended' });
+  w.tick(POOL.pollMs);
+  w.pool.pass(w.sight([desk(22), w.j(w.peek, 23, { status: 'in_progress', runner: 'pool-m1-w2-j23' })]));
+  assert.deepEqual(w.starts.at(-1), { repo: w.peek, slot: 1, labels: ['self-hosted', 'peek-auras-desktop'], job: 22, machine: 1, os: 'windows' });
 });

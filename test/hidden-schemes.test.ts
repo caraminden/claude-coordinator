@@ -2,59 +2,24 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
-import { json, type Reply } from './typed.ts';
+import { tempRoot } from './helpers.ts';
+import { bootPeople } from './scheme-boot.ts';
 
 // Hiding a scheme (#226): each person's own, out of their list's badges, never anyone else's.
-const repo = join(import.meta.dirname, '..');
 const tmp = tempRoot('hidden-schemes-');
 const root = tmp.dir;
 after(() => tmp.teardown()); // its children exit and turns (detached, #271) end before the folder goes
-
-let base = '';
-const cookies: Record<string, string> = {};
 
 /** The parts of the API's answers these tests read. */
 type Scheme = { id: number; inbox: number; fresh: number; hidden: boolean; running: boolean; working: number };
 type Inbox = { items: { key: string; card?: { id: number } | null }[] };
 
-async function call<T = unknown>(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<Reply<T>> {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { Cookie: cookies[who], ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return { status: res.status, data: await json<T>(res) };
-}
-
+let call: Awaited<ReturnType<typeof bootPeople>>['call'];
 let joshId = 0;
 before(async () => {
-  const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env,
-      MACHINES_URL: undefined,
-      CITADEL_HOST_SIGNALS: 'fixed',
-      CITADEL_ZONE: TEST_ZONE,
-      PORT: '0',
-      DATA_DIR: join(root, 'data'),
-      CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'),
-      COORDINATOR_PASSWORD: 'test-password-123',
-      SESSION_SECRET: 'x'.repeat(40),
-    },
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  base = `http://127.0.0.1:${await listeningPort(server)}`;
-  const res = await fetch(`${base}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-  });
-  cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
-  const { data: made } = await call<{ person: { id: number }; token: string }>('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
-  joshId = made.person.id;
-  const invite = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'josh-password-1' }) });
-  cookies.Josh = invite.headers.get('set-cookie')!.split(';')[0];
+  const boot = await bootPeople(tmp);
+  call = boot.call;
+  joshId = await boot.person('Josh', 'josh-password-1');
 });
 
 const listed = async (who: string, id: number) => (await call<Scheme[]>(who, '/api/projects')).data.find((p) => p.id === id)!;

@@ -1,60 +1,19 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
-import { json, type Reply } from './typed.ts';
+import { tempRoot } from './helpers.ts';
+import { bootPeople } from './scheme-boot.ts';
 
 // #674 (Cara, 2026-11-14: "I added Alex to the Citadel scheme and now it shows him as if he is in every scheme"):
 // admin reach (the flag, or Citadel membership since #621) still opens every scheme, but GET /api/projects marks
 // which ones the person really owns or was added to, so their lists show those as theirs and the rest apart.
-const repo = join(import.meta.dirname, '..');
 const tmp = tempRoot('member-schemes-');
-const root = tmp.dir;
 after(() => tmp.teardown());
 
-let base = '';
-const cookies: Record<string, string> = {};
-
-async function call<T = unknown>(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<Reply<T>> {
-  const res = await fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers: { Cookie: cookies[who], ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return { status: res.status, data: await json<T>(res) };
-}
-
-async function person(name: string, password: string): Promise<number> {
-  const { data: made } = await call<{ token: string; person: { id: number } }>('Cara', '/api/people', { method: 'POST', body: { name } });
-  const invite = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
-  cookies[name] = invite.headers.get('set-cookie')!.split(';')[0];
-  return made.person.id;
-}
-
+let call: Awaited<ReturnType<typeof bootPeople>>['call'];
+let person: Awaited<ReturnType<typeof bootPeople>>['person'];
 before(async () => {
-  const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env,
-      MACHINES_URL: undefined,
-      CITADEL_HOST_SIGNALS: 'fixed',
-      CITADEL_ZONE: TEST_ZONE,
-      PORT: '0',
-      DATA_DIR: join(root, 'data'),
-      CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'),
-      COORDINATOR_PASSWORD: 'test-password-123',
-      SESSION_SECRET: 'x'.repeat(40),
-    },
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  base = `http://127.0.0.1:${await listeningPort(server)}`;
-  const res = await fetch(`${base}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-  });
-  cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
+  ({ call, person } = await bootPeople(tmp));
 });
 
 const mine = async (who: string) => Object.fromEntries((await call<{ name: string; member: boolean }[]>(who, '/api/projects')).data.map((p) => [p.name, p.member]));

@@ -80,6 +80,9 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
 
 1. A title and one line on what the project is, with a pointer to the README for layout and
    running it.
+   A repo with no `README.md` gets one first: copy `templates/README.md` and fill in every
+   `<...>` (what it is, how to run and check it, how a change ships, the Layout table below).
+   An existing README stays as it is, apart from adding the Layout table when it has none.
    The README it points at has a "## Layout" table (path → what it owns, with globs or folder
    rows for groups), and the plan's check commands include a small test that fails when a module
    in the source folders has no row (Citadel's is `test/layout-map.test.ts`). Where "where does X
@@ -117,7 +120,11 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    of theirs is repeated. A native-app scheme (the plan names a Real hardware part or the
    Real-hardware ledger) always has one: *GitHub's hosted runners (`windows-latest` and the rest) are GPU-less VMs at 100%
    display scaling with square window corners, so a desktop test passing there proves little;
-   only a run on real hardware proves it.* Otherwise, when the repo has none yet, leave the
+   only a run on real hardware proves it.* A scheme whose proof runs on the shared Windows test
+   box (`citadel:run-on-windows`) also gets its fallback for when no Windows tools are in the
+   turn: *If the Windows box isn't in your turn, don't wait for it: run the nearest check this
+   box can (<the stack's headless or software-render run, if it has one>), add what stays
+   unchecked to `docs/unproven.md`, and say so in the ready note.* Otherwise, when the repo has none yet, leave the
    section out.
 3. **Compact instructions**, as is: *When this conversation is compacted, keep each person's
    asks and decisions in their own words with their times, every open question and who owes

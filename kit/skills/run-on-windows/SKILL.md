@@ -15,7 +15,8 @@ The test box is a Windows 11 VM whose screen is always signed in and unlocked. I
 with rounded corners and draws on the CPU (WARP) unless a job asks for the GPU. Its machine is
 `citadel-test-vm`, and its own tools are `mcp__citadel-test-vm-ws__…`. If your turn has
 neither set, no Windows machine is online and lent to your scheme with its tools on: say so (the
-Taskmaster's machines tool shows which) and use CI. Setup and costs:
+Taskmaster's machines tool shows which) and use CI. Proof CI can't give waits for no box: the
+change ships with it listed in the scheme's `docs/unproven.md`, and the ready note says so. Setup and costs:
 Citadel's `tools/win-test-box/README.md`. The loop below is the same through either set.
 
 ## The loop

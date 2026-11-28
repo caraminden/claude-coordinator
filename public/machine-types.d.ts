@@ -20,6 +20,7 @@ export interface WorkerMachine {
   balanced: string | null;
   away: number | null;
   pressed: string | null;
+  reading: { cpu: number | null; mem: number | null } | null;
   limits: WorkerLimit[];
 }
 

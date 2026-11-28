@@ -34,6 +34,8 @@ export interface WorkersTile {
   waits: { count: number; median: number | null; woken: number; cold: number };
   /** The heavy jobs each place holds or has waiting (#2109, src/heavy-now.ts). */
   heavy: HeavyNow;
+  /** perigee's own CPU and memory pressure from Auto's last tick (whole percents), null with none in the last minute. */
+  reading: { cpu: number | null; mem: number | null } | null;
   /** The machines that lend workers (Build 7 T4), one row each. */
   machines: import('../machine-types.js').WorkerMachine[];
 }

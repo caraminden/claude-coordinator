@@ -159,24 +159,46 @@ export function workersPanel(page) {
       : '';
   /** @param {number} id */
   const heavyOn = (id) => w?.heavy.machines.find((m) => m.id === id)?.jobs ?? [];
-  /** @param {WorkerPlace} p @param {HTMLElement | string | null} chip @param {(string | false | null | 0)[][]} notes @param {(HTMLElement | string)[] | false | null} controls */
+  /** @param {WorkerPlace} p @param {HTMLElement | string | null} chip @param {(string | [string, string] | false | null | 0)[][]} notes @param {(HTMLElement | string)[] | false | null} controls */
   const placeRow = (p, chip, notes, controls) =>
     h(
       'div',
       { class: 'st-place', 'data-hue': chip ? 'waiting' : 'running', 'data-place': String(p.id) },
       h('div', { class: 'st-place-head' }, h('b', {}, p.name), chip ?? ''),
       meter(p.size ? p.used / p.size : 0, `${p.used} of ${p.size} ${p.size === 1 ? 'worker' : 'workers'}`),
-      ...notes.map((line) => h('div', { class: 'st-sub muted' }, line.filter(Boolean).join(' · '))),
+      // A note that is a pair [text, tip] shows its text with the tip as a tooltip; the rest are plain.
+      ...notes.map((line) => {
+        const parts = line.filter(Boolean);
+        const tip = parts.find((x) => Array.isArray(x));
+        return h('div', { class: 'st-sub muted', title: tip ? tip[1] : '' }, parts.map((x) => (Array.isArray(x) ? x[0] : x)).join(' · '));
+      }),
       heavyLines(p.id ? heavyOn(p.id) : (w?.heavy.home ?? [])),
       controls ? h('div', { class: 'st-place-act' }, ...controls) : '',
     );
-  /** @param {WorkerMachine} m */
-  const autoLine = (m) => {
-    const { pool } = m;
+  /**
+   * What Auto is doing now, from the place's current reading; the last resize's reason is the tooltip, not the line.
+   * @param {{ size: number, pool: WorkerPlace['pool'] }} p @param {number} min @param {number} max
+   * @param {{ cpu: number | null, mem: number | null } | null} reading @param {string | null} pressed @param {string} [who]
+   * @returns {string | [string, string]}
+   */
+  const autoNow = (p, min, max, reading, pressed, who = 'it') => {
+    const { pool } = p;
     if (pool.fixed) return `Set to ${pool.fixed.size} by ${pool.fixed.by}`;
-    if (m.pressed && m.size <= m.min) return `Auto: at its fewest, though ${m.pressed} (CI's tests there count too)`;
-    return pool.why ? `Auto: moved to ${pool.size} workers ${ago(pool.at)}, ${pool.why}` : 'Auto';
+    const now = `${p.size} ${p.size === 1 ? 'worker' : 'workers'} now`;
+    const load = reading ? [reading.cpu !== null && `CPU pressure ${reading.cpu}%`, reading.mem !== null && `memory pressure ${reading.mem}%`].filter(Boolean).join(', ') : '';
+    const text = !reading
+      ? `Auto: ${now} · no reading from ${who} in the last minute`
+      : pressed
+        ? p.size <= min
+          ? `Auto: at its fewest, though ${pressed} (CI's tests there count too)`
+          : `Auto: ${now} · ${load} · shrinks while ${pressed}`
+        : p.size >= max
+          ? `Auto: ${now}, its most · ${load}`
+          : `Auto: ${now} · ${load || 'no CPU or memory reading'} · grows when a turn waits for ${who} and all its workers are busy`;
+    return pool.why ? [text, `Last change: moved to ${pool.size} workers ${ago(pool.at)}, ${pool.why}`] : text;
   };
+  /** @param {WorkerMachine} m */
+  const autoLine = (m) => autoNow(m, m.min, m.max, m.reading, m.pressed);
   /** @param {WorkerMachine} m */
   const machineRow = (m) =>
     placeRow(
@@ -198,7 +220,8 @@ export function workersPanel(page) {
     const home = { id: 0, name: 'perigee', used: w.used, size: w.size, pool, limits: w.limits };
     const elsewhere = w.machines.reduce((n, m) => n + m.used, 0);
     const value = `${w.used} of ${w.size} working${elsewhere ? `, ${elsewhere} on other computers` : ''}${w.forced ? `, ${w.forced} forced` : ''}${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
-    const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} workers ${ago(pool.at)}, ${pool.why}` : ''}`;
+    const auto = autoNow({ size: w.size, pool }, w.min, w.max, w.reading, null, 'perigee');
+    const size = Array.isArray(auto) ? auto[0] : auto;
     const limits = limitsOf(home, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason.");
     // A computer that runs heavy jobs but lends no workers still says what it runs.
     const others = w.heavy.machines.filter((m) => !w?.machines.some((x) => x.id === m.id)).map((m) => h('div', { class: 'st-place', 'data-hue': 'running', 'data-heavy': String(m.id) }, h('div', { class: 'st-place-head' }, h('b', {}, m.name)), heavyLines(m.jobs)));
@@ -206,13 +229,13 @@ export function workersPanel(page) {
     const homeHeavy = !w.machines.length && w.heavy.home.length ? h('div', { class: 'st-place', 'data-hue': 'running', 'data-heavy': '0' }, h('div', { class: 'st-place-head' }, h('b', {}, home.name)), heavyLines(w.heavy.home)) : null;
     // With a computer connected, perigee is one place of several and its controls are in its row.
     const places = w.machines.length
-      ? h('div', { class: 'hue-rows st-places' }, placeRow(home, null, [[size], ['Takes turns first. While it is full, or someone with no computer connected waits for it, those with their own use that']], [h('label', { class: 'small' }, 'Turns at once', sizePick(home)), limits]), ...w.machines.map(machineRow))
+      ? h('div', { class: 'hue-rows st-places' }, placeRow(home, null, [[auto], ['Takes turns first. While it is full, or someone with no computer connected waits for it, those with their own use that']], [h('label', { class: 'small' }, 'Turns at once', sizePick(home)), limits]), ...w.machines.map(machineRow))
       : null;
     el.replaceChildren(
       h('h4', {}, 'Workers'),
       h('b', { class: 'st-value' }, value),
       w.paused ? h('div', {}, toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`)) : '',
-      h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : places ? 'Taskmasters always run' : `${size} · Taskmasters always run`),
+      h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : places ? 'Taskmasters always run' : h('span', { title: Array.isArray(auto) ? auto[1] : '' }, `${size} · Taskmasters always run`)),
       h('div', { class: 'st-sub muted' }, quickLane(w.lane)),
       h('div', { class: 'st-sub muted' }, waitsLine(w.waits), tooCold(w.waits) ? ' ' : '', tooCold(w.waits) ? toneChip('warn', 'over 10% cold') : ''),
       places ?? '',

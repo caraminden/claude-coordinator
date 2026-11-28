@@ -762,3 +762,16 @@ test("Auto's size follows the balancer's target down, then grows back on Auto's 
   assert.ok(f.turns.pool(7).size < 3, `not back at once: ${f.turns.pool(7).size}`);
   f.turns.stop();
 });
+
+test("a machine's row carries what it reads now: fresh, starved, and none once the sample is old or missing (#2257)", () => {
+  const p = places();
+  const row = () => p.turns.summary().machines[0];
+  p.desk.load = { reading: { cpu: 12, mem: 3 }, box: ok, at: Date.now() };
+  assert.deepEqual([row().reading, row().pressed], [{ cpu: 12, mem: 3 }, null], 'fresh and calm');
+  p.desk.load = { reading: { cpu: 60, mem: 3 }, box: ok, at: Date.now() };
+  assert.deepEqual([row().reading, row().pressed], [{ cpu: 60, mem: 3 }, 'CPU pressure 60%'], 'starved: the reading and what holds it down');
+  p.desk.load = { reading: { cpu: 12, mem: 3 }, box: ok, at: Date.now() - POOL.loadStaleMs - 1 };
+  assert.equal(row().reading, null, 'an old sample is no reading');
+  p.desk.load = null;
+  assert.equal(row().reading, null, 'no sample at all');
+});

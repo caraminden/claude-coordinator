@@ -565,6 +565,31 @@ test('the tile names what put perigee over its size: a card answered, a restart,
   p.turns.stop();
 });
 
+test('the reasons never add up past the excess: once others end, what is left over is named once', async () => {
+  const p = places();
+  p.turns.enter(1);
+  void p.turns.hold(1, () => new Promise(() => {}));
+  p.turns.setLent(1, true);
+  p.turns.enter(2);
+  void p.turns.reattach(3, () => new Promise(() => {}));
+  p.turns.setLent(1, false);
+  assert.deepEqual(p.turns.summary().over, { by: 2, lane: 0, forced: 0, card: 1, restart: 1, home: 0 });
+  await p.turns.hold(2, () => {});
+  assert.deepEqual(p.turns.summary().over, { by: 1, lane: 0, forced: 0, card: 1, restart: 0, home: 0 });
+  p.turns.stop();
+});
+
+test('a quick lane turn that took a worker back for its answered card counts as the card, not the lane', () => {
+  const p = quickPlaces(4);
+  for (const id of [1, 2, 3, 4]) p.turns.enter(id);
+  assert.deepEqual(inLane(p), [4]);
+  void p.turns.hold(4, () => new Promise(() => {}));
+  p.turns.setLent(4, true);
+  p.turns.setLent(4, false);
+  assert.deepEqual(p.turns.summary().over, { by: 1, lane: 0, forced: 0, card: 1, restart: 0, home: 0 });
+  p.turns.stop();
+});
+
 test('within its size, the tile has no over', () => {
   const p = places();
   p.turns.enter(1);

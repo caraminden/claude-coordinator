@@ -505,9 +505,15 @@ export class TurnLine {
   private over() {
     const by = this.used() - this.size();
     if (by <= 0) return null;
-    const home = [...this.granted.values()].filter((g) => !g.place && !g.lent && !inLane(g));
-    const n = (why: Over) => home.filter((g) => g.over === why).length;
-    return { by, lane: home.filter((g) => g.lane?.moved).length, forced: home.filter((g) => g.forced !== undefined).length, card: n('card'), restart: n('restart'), home: n('home') };
+    // One reason a turn, and no more of them than the excess: marks outlive the moment they were past it.
+    const why = [...this.granted.values()].filter((g) => !g.place && !g.lent && !inLane(g)).map((g) => (g.forced !== undefined ? 'forced' : (g.over ?? (g.lane?.moved ? 'lane' : null))));
+    let left = by;
+    const n = (k: Over | 'lane' | 'forced') => {
+      const took = Math.min(left, why.filter((w) => w === k).length);
+      left -= took;
+      return took;
+    };
+    return { by, forced: n('forced'), card: n('card'), home: n('home'), restart: n('restart'), lane: n('lane') };
   }
 
   /** The quick lane for the tile: `moved` counts the turns that started there and take a pool worker now. */

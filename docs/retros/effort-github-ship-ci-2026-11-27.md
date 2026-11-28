@@ -8,7 +8,7 @@ desktop as the fallback".
 | | |
 |---|---|
 | Minions | #2207 (three files fail only on GitHub, Sonnet medium), #2209 (ship CI on GitHub with desktop fallback), #2210 (full suite on GitHub while a ship waits for its go), #2231 (CI page for GitHub ship CI), the last three Opus high[^times] |
-| Cost | $51.09 in all: $0.62, $19.77, $12.58, $18.12[^cost] |
+| Cost | $51.08 in all: $0.62, $19.77, $12.58, $18.12[^cost] |
 | Commits on main | 26: 3, 9, 4, 10[^commits] |
 | Ship attempts | 5: 4 shipped, 1 refused at CI (#2210)[^line] |
 | GitHub CI time per ship | 201 to 302 s (20 shards)[^line] |

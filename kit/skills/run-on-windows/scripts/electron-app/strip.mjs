@@ -2,7 +2,7 @@
 //   node strip.mjs <config URL from rig.ts up's box line> <route>
 // Electron is the defender-copy rig's (%LOCALAPPDATA%\defender-copy). Leaves a shot at %TEMP%\electron-drag.png.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
@@ -28,6 +28,8 @@ const dbg = 20000 + Math.floor(Math.random() * 9000);
 const electron = path.join(process.env.LOCALAPPDATA, 'defender-copy', 'node_modules', 'electron', 'dist', 'electron.exe');
 // Its own profile: a Citadel app already up on the box holds the single-instance lock and would make this one quit.
 const profile = mkdtempSync(path.join(os.tmpdir(), 'citadel-drag-'));
+// STRIP_MAX=1: start maximised, from a saved place as place.mjs does (the narrow shot is then skipped).
+if (process.env.STRIP_MAX) writeFileSync(path.join(profile, 'window.json'), JSON.stringify({ x: 200, y: 150, width: 900, height: 700, maximized: true }));
 const app = spawn(electron, [`--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`, path.join(repo, 'desktop')], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'inherit' });
 
 const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(import.meta.dirname, '..', 'wco', 'mouse.ps1')], { stdio: ['pipe', 'pipe', 'inherit'] });
@@ -116,10 +118,12 @@ const shoot = async (name) => {
   console.log('M', name, JSON.stringify(await measure()));
   console.log('shot', f);
 };
-await shoot('normal');
-await ev('window.resizeTo(420, 700)');
-await sleep(1500);
-await shoot('narrow');
+await shoot(process.env.STRIP_MAX ? 'max' : 'normal');
+if (!process.env.STRIP_MAX) {
+  await ev('window.resizeTo(420, 700)');
+  await sleep(1500);
+  await shoot('narrow');
+}
 ps.stdin.end();
 app.kill();
 fwd.close();

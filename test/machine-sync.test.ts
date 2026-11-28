@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Changed, Frames, Machine, frame, inside, reconcile, restore, snapshot, take } from '../public/machine-sync.mjs';
 import { HttpError, json } from '../src/http.ts';
-import { dropMachineRefs, stateCall, type StateDeps } from '../src/machine-sync.ts';
+import { dropMachineRefs, readsDisk, stateCall, type StateDeps } from '../src/machine-sync.ts';
 import type { Project } from '../src/db.ts';
 import type { Placed } from '../src/machine-turn.ts';
 import { projectSlug } from '../src/sessions.ts';
@@ -1100,6 +1100,13 @@ test('a transfer cut short, or a file that changed while it was read, replaces n
   assert.ok('ok' in (await run(whole, head(real)))[0]);
   assert.equal(readFileSync(join(dir, 'to', 'f'), 'utf8'), 'hello');
   assert.deepEqual(readdirSync(join(dir, '.citadel-sync')), [], 'nothing left half written');
+});
+
+test('the tools that read the worktree here wait for it; the chatty ones do not', () => {
+  for (const p of ['land', 'land/handoff', 'preview', 'mark-image']) assert.equal(readsDisk(`api/tickets/7/${p}`), 'must', p);
+  for (const p of ['questions', 'openrouter', 'jobs']) assert.equal(readsDisk(`api/tickets/7/${p}`), 'may', p);
+  assert.equal(readsDisk('api/contraptions/x/deploy'), 'may');
+  for (const p of ['api/tickets/7/status', 'api/tickets/7/plan', 'api/tickets/7', 'api/tickets/7/minion-message']) assert.ok(!readsDisk(p), p);
 });
 
 test("a closed minion's machine marks go with its worktree; what was kept or sent aside goes only once its branch has it", async () => {

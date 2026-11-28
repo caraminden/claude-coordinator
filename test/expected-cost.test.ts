@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { CREATE_TICKET } from '../src/mcp-minions.ts';
+
 import { ASK, askText, type Budget, expectedCost, markOf, splitCeiling, START_CARD_USD, turnLine, WAKE, withEstimate } from '../src/minion-budget.ts';
 import { agentToken, bootServer, mintedAgentToken } from './helpers.ts';
 import { json, type Refused } from './typed.ts';

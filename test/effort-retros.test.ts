@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { buildOwnerKey, Store, type Project, type Ticket } from '../src/db.ts';
 import { CHAIN_FLOOR, doneKey, EFFORT_KEY, effortBrief, effortFor, EffortRetros, effortsDue, NAMED_FLOOR, QUIET_MS, START_CARD_STEP, TRIES } from '../src/effort-retros.ts';

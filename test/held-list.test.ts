@@ -2,7 +2,7 @@
 // inside their bounds, a chat's view says what is held and Continue / Deliver now send it, a never-hold kind wakes its
 // reader, and no number is typed into tool text.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';

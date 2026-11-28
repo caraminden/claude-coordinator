@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BY_TYPE, CLAUDE_MODELS, EFFORT_LEVELS, FALLBACK, guessType, pickFor, tableText, tierSummary, TIERS } from '../public/model-table.js';

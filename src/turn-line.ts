@@ -216,7 +216,7 @@ export class TurnLine {
   /** The box's memory level at the last tick, which sizes the quick lane. */
   private level: PoolBox['level'] = 'ok';
   /** The reading of Auto's last tick, for the tile. */
-  private seen: { cpu: number | null; mem: number | null; at: number } | null = null;
+  private seen: { cpu: number | null; mem: number | null; at: number; pressed: string | null } | null = null;
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
   private closed = false;
@@ -487,6 +487,7 @@ export class TurnLine {
       machines: this.machinePools(),
       // perigee's own reading from Auto's last tick, null before the first or when it has gone stale.
       reading: this.seen && Date.now() - this.seen.at < POOL.loadStaleMs ? { cpu: this.seen.cpu, mem: this.seen.mem } : null,
+      pressed: this.seen && Date.now() - this.seen.at < POOL.loadStaleMs ? this.seen.pressed : null,
     };
   }
 
@@ -547,11 +548,11 @@ export class TurnLine {
     // A turn still launching when the pause came, or re-attached since.
     if (this.paused()?.stop) this.stopRunning();
     this.level = box.level;
-    this.seen = { cpu: reading.cpu, mem: reading.mem, at: now };
     const own = [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length;
     for (const g of this.granted.values()) if (inLane(g) && now - g.lane!.since >= POOL.laneMs && this.used() - own < this.size() + POOL.laneOver) g.lane!.moved = true;
     const p = this.pool();
     this.starved = starvedBy(reading, box, this.limits());
+    this.seen = { cpu: reading.cpu, mem: reading.mem, at: now, pressed: this.starved ? starveWhy(reading, box, this.limits()) : null };
     this.stalled = new Set(p.fixed ? [] : stalled);
     const full = this.stalled.size ? this.entries.filter((e) => this.full(this.host.asks(e.ticket, e.via).person)).map((e) => e.ticket) : [];
     if (full.join() !== this.heldFull) {

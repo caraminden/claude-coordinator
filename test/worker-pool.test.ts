@@ -775,3 +775,13 @@ test("a machine's row carries what it reads now: fresh, starved, and none once t
   p.desk.load = null;
   assert.equal(row().reading, null, 'no sample at all');
 });
+
+test("perigee's own summary carries its last reading, and what holds it down when starved (#2257)", () => {
+  const p = places();
+  assert.deepEqual([p.turns.summary().reading, p.turns.summary().pressed], [null, null], 'before the first tick');
+  p.turns.tick({ ...calm, cpu: 8, mem: 2 }, [], Date.now(), ok);
+  assert.deepEqual([p.turns.summary().reading, p.turns.summary().pressed], [{ cpu: 8, mem: 2 }, null]);
+  p.turns.tick({ ...calm, cpu: 70, mem: 2 }, [], Date.now(), ok);
+  assert.deepEqual([p.turns.summary().reading, p.turns.summary().pressed], [{ cpu: 70, mem: 2 }, 'CPU pressure 70%']);
+  p.turns.stop();
+});

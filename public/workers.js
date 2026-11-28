@@ -194,11 +194,11 @@ export function workersPanel(page) {
           : `Auto: ${now} · ${load} · shrinks while ${pressed}`
         : p.size >= max
           ? `Auto: ${now}, its most · ${load}`
-          : `Auto: ${now} · ${load || 'no CPU or memory reading'} · grows when a turn waits for ${who} and all its workers are busy`;
+          : `Auto: ${now} · ${load || 'no CPU or memory reading'} · grows when a turn waits and all its workers are busy`;
     return pool.why ? [text, `Last change: moved to ${pool.size} workers ${ago(pool.at)}, ${pool.why}`] : text;
   };
   /** @param {WorkerMachine} m */
-  const autoLine = (m) => autoNow(m, m.min, m.max, m.reading, m.pressed);
+  const autoLine = (m) => autoNow(m, m.min, m.max, m.reading, m.pressed, m.name);
   /** @param {WorkerMachine} m */
   const machineRow = (m) =>
     placeRow(
@@ -220,7 +220,7 @@ export function workersPanel(page) {
     const home = { id: 0, name: 'perigee', used: w.used, size: w.size, pool, limits: w.limits };
     const elsewhere = w.machines.reduce((n, m) => n + m.used, 0);
     const value = `${w.used} of ${w.size} working${elsewhere ? `, ${elsewhere} on other computers` : ''}${w.forced ? `, ${w.forced} forced` : ''}${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
-    const auto = autoNow({ size: w.size, pool }, w.min, w.max, w.reading, null, 'perigee');
+    const auto = autoNow({ size: w.size, pool }, w.min, w.max, w.reading, w.pressed, 'perigee');
     const size = Array.isArray(auto) ? auto[0] : auto;
     const limits = limitsOf(home, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason.");
     // A computer that runs heavy jobs but lends no workers still says what it runs.

@@ -36,6 +36,8 @@ export interface WorkersTile {
   heavy: HeavyNow;
   /** perigee's own CPU and memory pressure from Auto's last tick (whole percents), null with none in the last minute. */
   reading: { cpu: number | null; mem: number | null } | null;
+  /** What holds perigee's Auto down (the line it is over), null when calm or unread. */
+  pressed: string | null;
   /** The machines that lend workers (Build 7 T4), one row each. */
   machines: import('../machine-types.js').WorkerMachine[];
 }

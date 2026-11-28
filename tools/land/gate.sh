@@ -201,9 +201,9 @@ land_verdict() {
 # GitHub can't take the ship's run (#2209): cancel it and start tests.yml on the desktop. Fails, with $why, when it can't.
 ci_to_desk() {
   read -r online registered <<<"$(ci_online)"
-  # Slow to start, no runner awake: GitHub's run beats waking a desktop that may be off.
-  if [ "$online" = 0 ] && [ "$ci_gh" = 1 ] && [ -n "$ci_id" ] && [ "$ci_status" != completed ]; then
-    say "$gh_why, and no $CI_LABEL runner is online, so this keeps waiting on GitHub's run ($ci_url)"
+  # Slow to start, no desktop runner registered: GitHub's run is the best bet.
+  if [ "$registered" = 0 ] && [ "$ci_gh" = 1 ] && [ -n "$ci_id" ] && [ "$ci_status" != completed ]; then
+    say "$gh_why, and no $CI_LABEL runner is registered, so this keeps waiting on GitHub's run ($ci_url)"
     ci_gh=done gh_why='' && return
   fi
   [ -z "$ci_id" ] || [ "$ci_status" = completed ] || hub gh api -X POST "repos/$ci_slug/actions/runs/$ci_id/cancel" >/dev/null 2>&1 || true

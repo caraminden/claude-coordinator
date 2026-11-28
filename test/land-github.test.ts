@@ -92,6 +92,20 @@ test("GitHub broken with the desktop's runners asleep: the run goes to the deskt
   assert.equal(c.localRuns(), 0);
 });
 
+// #2299 review: asleep is the desktop's idle state under Citadel's runner plan, so slow shards still go there.
+test("shards slow to start with the desktop's runners asleep: the run goes to the desktop, which the job wakes (#2299)", () => {
+  const r = setup();
+  const c = ci(r);
+  onGitHub(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = c.run({ FAKE_CI: 'queued', FAKE_GH_JOBS: '0 20 5', FAKE_CI_RERUN: 'green', LAND_CI_GH_START: '0', FAKE_RUNNERS_FILE: asleep(r.dir, 3) });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /GitHub started only 15 of 20 shards within 0s .*, so the run goes to Cara's desktop instead \(asleep: the job wakes one\)/);
+  assert.match(res.stderr, /CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/);
+  assert.match(c.calls(), /runs\/7\/cancel/);
+  assert.equal(c.localRuns(), 0);
+});
+
 test('shards slow to start with no desktop runner online: the ship keeps waiting on GitHub and lands on its run', () => {
   const r = setup();
   const c = ci(r);
@@ -99,7 +113,7 @@ test('shards slow to start with no desktop runner online: the ship keeps waiting
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = c.run({ FAKE_CI_SLOW: '1', FAKE_GH_JOBS: '0 20 5', FAKE_RUNNERS: '0', LAND_CI_GH_START: '0' });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /GitHub started only 15 of 20 shards within 0s .*, and no citadel-ci-linux runner is online, so this keeps waiting on GitHub's run \(https:\/\/ci\/7\).*CI passed on \w+ in \d+s \(https:\/\/ci\/7\)/s);
+  assert.match(res.stderr, /GitHub started only 15 of 20 shards within 0s .*, and no citadel-ci-linux runner is registered, so this keeps waiting on GitHub's run \(https:\/\/ci\/7\).*CI passed on \w+ in \d+s \(https:\/\/ci\/7\)/s);
   assert.doesNotMatch(c.calls(), /dispatches|cancel/);
   assert.equal(c.localRuns(), 0);
 });

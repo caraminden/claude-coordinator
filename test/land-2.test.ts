@@ -438,13 +438,39 @@ test("runners asleep under Citadel's runner plan are no reason to fall back: the
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
 });
 
+test('an asleep runner that wakes for the job within LAND_CI_WAKE takes it: no fallback, though none was online past LAND_CI_START (#2299)', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const runners = asleep(r.dir, 2);
+  const state = join(r.dir, 'ci-state');
+  writeFileSync(state, 'queued');
+  const shared = join(r.dir, 'shared');
+  let woke = false;
+  const res = await c.runAsync({ FAKE_CI_FILE: state, LAND_CI_START: '1', LAND_CI_WAKE: '60', LAND_CI_ONLINE_POLL: '0', FAKE_RUNNERS_FILE: runners, COORDINATOR_SHARED_DIR: shared }, (s) => {
+    if (woke || !/waiting for CI on/.test(s)) return;
+    woke = true;
+    setTimeout(() => {
+      asleep(r.dir, 2, 'online');
+      writeFileSync(state, 'running');
+      setTimeout(() => writeFileSync(state, 'green'), 500);
+    }, 3000);
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI passed/);
+  assert.doesNotMatch(res.stderr, /CI FALLBACK|no runner started/);
+  assert.equal(c.localRuns(), 0, 'no suite on perigee');
+  const queued = Number(landLog(shared).match(/· timing · ticket\/1-x · .* · ci-queue (\d+) · /)?.[1]);
+  assert.ok(queued >= 2, `it waited past the 1 s start bound for the wake (${queued} s)`);
+});
+
 test('asleep runners none of which wakes for the job: past LAND_CI_WAKE the suite runs here, saying so (#2299)', () => {
   const r = setup();
   const c = ci(r);
   r.commit(r.wt, 'b.txt', 'mine\n');
   const res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_WAKE: '2', LAND_CI_ONLINE_POLL: '0', FAKE_RUNNERS_FILE: asleep(r.dir, 2) });
   assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /CI FALLBACK: no runner started the job within 2s: none of the 2 asleep woke \(their PC or runner agent is off\)/);
+  assert.match(res.stderr, /CI FALLBACK: no runner started the job within 2s: none of the 2 asleep woke \(PC off, or no room in Citadel's plan\)/);
   assert.doesNotMatch(res.stderr, /logged on/);
   assert.equal(c.localRuns(), 1);
 });

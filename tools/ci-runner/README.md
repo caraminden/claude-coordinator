@@ -696,7 +696,7 @@ field (10000 when nothing is wrong), and a timesyncd in another distro shows as 
 that opens for a tenth of a second every 32 s, with the wall clock stepping as it closes. The clock now follows
 the Windows clock, so it is as right as that is (a steady 0.4 s behind NTP once it had settled, 2026-11-11).
 
-When the runner can't answer (Cara is logged off, GitHub is down, no runner takes the job within 90 s, the run
+When the runner can't answer (no runner is registered, or none of those asleep wakes for the job, GitHub is down, no runner takes the job within 90 s, the run
 takes more than `LAND_CI_TIMEOUT`, 9 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs the suite on perigee as it used
 to, and adds a `ci fallback` line to the day's retro log (`retro-log/<date>/land.md`), so they can be counted. A red
 run refuses the landing; it never falls back. Two exceptions (ADR 0006): a red in which every failed file passed when

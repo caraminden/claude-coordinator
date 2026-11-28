@@ -115,11 +115,16 @@ const under = (root: string | null, path: string) => root !== null && (path === 
 // into the host's own config dir, put there by the server, not by a container, so listFiles may follow them (#2252).
 const hostAccounts = new Set<string>();
 
-/** The server login's account `n` folder under the app's data dir; a link from it into the host's own config dir is followed. */
-export function hostAccountDir(dataDir: string, uid: number, n: number): string {
+/** Where the server login's extra account folders live under the app's data dir, now known to listFiles. */
+export function trustHostAccounts(dataDir: string): string {
   const top = join(dataDir, 'claude-accounts');
   hostAccounts.add(top);
-  return join(top, String(uid), String(n));
+  return top;
+}
+
+/** The server login's account `n` folder under the app's data dir; a link from it into the host's own config dir is followed. */
+export function hostAccountDir(dataDir: string, uid: number, n: number): string {
+  return join(trustHostAccounts(dataDir), String(uid), String(n));
 }
 
 /** Whether `real` is in the host's own config dir, reached from one of the server login's own account folders. */

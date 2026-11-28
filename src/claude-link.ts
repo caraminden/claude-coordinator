@@ -16,7 +16,7 @@ import { Containers, specHash, type CmdResult, type ContainerSpec, type Mount } 
 import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
 import { accountReady, accountUsageKey, pickAccount, WARM_MS, type Meter, type Pick } from './account-pick.ts';
-import { claudeConfigDir, hostAccountDir, projectSlug } from './sessions.ts';
+import { claudeConfigDir, hostAccountDir, projectSlug, trustHostAccounts } from './sessions.ts';
 import { ensureGradleInit } from './build-cache.ts';
 import { thrown } from './thrown.ts';
 import { TASKMASTER_SLICE } from './turn-launch.ts';
@@ -253,6 +253,8 @@ export class ClaudeLink {
     this.store = store;
     this.credentials = credentials;
     this.dataDir = dataDir;
+    // Known before any account is looked up, so a session save after a restart follows its account folder's links (#2252).
+    trustHostAccounts(dataDir);
     this.claudeBin = claudeBin;
     this.containers = containers;
     this.prefix = prefix;

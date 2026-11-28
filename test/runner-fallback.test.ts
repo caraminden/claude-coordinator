@@ -315,7 +315,7 @@ test('the minutes count fails closed: a read GitHub refuses, or a repo no login 
   const down = minutesGh({ 'caraminden/peek-auras': { private: true, billable: [{ WINDOWS: 1 }], down: '/timing' } });
   const m = await actionsMinutes(down.of, ['caraminden/peek-auras'], '2026-11-01');
   assert.ok('error' in m && /502/.test(m.error), JSON.stringify(m));
-  assert.equal(routeOf({ os: 'windows', session: false, threads: 4 }, false, m).route, 'wait');
+  assert.equal(routeOf({ os: 'windows', session: false, size: 4 }, false, m).route, 'wait');
   const none = await actionsMinutes(() => null, ['caraminden/peek-auras'], '2026-11-01');
   assert.ok('error' in none);
 });

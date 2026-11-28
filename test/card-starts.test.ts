@@ -146,6 +146,11 @@ test('an all-started pick dismisses its owner when nothing is left for people, a
 
     const first = await card('a');
     const second = await card('b');
+    // Its own turn ran on /bin/false and failed, so it waits for its one retry (#2258), and an owed turn rightly keeps
+    // a minion open: stop that, as a person would, so only the cards decide here.
+    const errors = async () => ((await s.call(`/api/tickets/${owner.id}/events?after=0`)).data as Ev[]).filter((e) => e.kind === 'error').map((e) => String(JSON.parse(e.data).text));
+    await until('the failed turn waits for its retry', async () => (await errors()).some((t) => t.includes('retries it by itself once')));
+    assert.equal((await s.call(`/api/tickets/${owner.id}/stop`, {})).status, 200);
     assert.equal((await s.call(`/api/tickets/${owner.id}`, { state: 'ready', note: 'pick one' }, 'PATCH')).status, 200);
     // Another card still waits: kept open, with today's held mail.
     assert.equal((await pick(first, 'Start a')).status, 202);

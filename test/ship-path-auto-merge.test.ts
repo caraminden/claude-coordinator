@@ -14,8 +14,8 @@ const data = join(tmp.dir, 'data');
 mkdirSync(data, { recursive: true });
 const bin = join(tmp.dir, 'bin');
 mkdirSync(bin, { recursive: true });
-// A fake gh: prints $FAKE_AUTO_MERGE for `gh api repos/<slug> --jq .allow_auto_merge`, logs its args.
-writeFileSync(join(bin, 'gh'), `#!/bin/sh\necho "$@" >> "${join(tmp.dir, 'gh.log')}"\n[ "$FAKE_GH_FAIL" = 1 ] && { echo "HTTP 404: Not Found" >&2; exit 1; }\necho "$FAKE_AUTO_MERGE"\n`, { mode: 0o755 });
+// A fake gh: answers $FAKE_AUTO_MERGE only to `gh api repos/$FAKE_SLUG --jq .allow_auto_merge`, so a wrong repo or field goes red.
+writeFileSync(join(bin, 'gh'), `#!/bin/sh\n[ "$FAKE_GH_FAIL" = 1 ] && { echo "HTTP 404: Not Found" >&2; exit 1; }\n[ "$*" = "api repos/$FAKE_SLUG --jq .allow_auto_merge" ] || { echo "unexpected gh $*" >&2; exit 1; }\necho "$FAKE_AUTO_MERGE"\n`, { mode: 0o755 });
 
 const store = new Store(join(data, 'coordinator.db'));
 const Scheme = store.createProject('Game', 'https://github.com/someone/game');
@@ -33,8 +33,8 @@ after(async () => {
   await tmp.teardown();
 });
 
-async function setShip(ticket: { id: number; project_id: number }, ship_path: string, env: Record<string, string>) {
-  const r = await mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), { id: ticket.id, project_id: ticket.project_id }, 'coordinator', { PATH: `${bin}:${process.env.PATH}`, ...env }), 'tools/call', { name: 'set_project_settings', arguments: { ship_path } });
+async function setShip(ticket: { id: number; project_id: number }, ship_path: string, env: Record<string, string>, extra: object = {}) {
+  const r = await mcpOnce(agentEnv(srv.base, tokens.agentToken(ticket.id), { id: ticket.id, project_id: ticket.project_id }, 'coordinator', { PATH: `${bin}:${process.env.PATH}`, FAKE_SLUG: 'someone/game', ...env }), 'tools/call', { name: 'set_project_settings', arguments: { ship_path, ...extra } });
   return { isError: r.isError, text: r.content[0].text as string };
 }
 
@@ -49,8 +49,17 @@ test('pr-auto is refused, naming pr-minion, when the repo reports allow_auto_mer
 test('pr-auto is refused when GitHub cannot be asked', async () => {
   const r = await setShip(TM, 'pr-auto', { FAKE_GH_FAIL: '1' });
   assert.equal(r.isError, true, r.text);
+  assert.match(r.text, /couldn't ask GitHub/);
   assert.match(r.text, /pr-minion/);
   assert.equal(store.getProject(Scheme.id)!.ship_path, 'citadel');
+});
+
+test('pr-auto sent with a repo_url is checked against that repo, not the stored one', async () => {
+  const r = await setShip(BareTM, 'pr-auto', { FAKE_AUTO_MERGE: 'false', FAKE_SLUG: 'someone/fresh' }, { repo_url: ' https://github.com/someone/fresh ' });
+  assert.equal(r.isError, true, r.text);
+  assert.match(r.text, /someone\/fresh/);
+  assert.equal(store.getProject(Bare.id)!.ship_path, 'citadel');
+  assert.equal(store.getProject(Bare.id)!.repo_url, null);
 });
 
 test('pr-auto is refused for a scheme with no GitHub repo', async () => {

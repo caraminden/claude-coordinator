@@ -122,7 +122,7 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    display scaling with square window corners, so a desktop test passing there proves little;
    only a run on real hardware proves it.* A scheme whose proof runs on the shared Windows test
    box (`citadel:run-on-windows`) also gets its fallback for when no Windows tools are in the
-   turn: *If the Windows box isn't in your turn, don't wait for it: run the nearest check this
+   turn: *If the Windows box isn't in your turn and nobody asked for its proof before shipping, don't wait for it: run the nearest check this
    box can (<the stack's headless or software-render run, if it has one>), add what stays
    unchecked to `docs/unproven.md`, and say so in the ready note.* Otherwise, when the repo has none yet, leave the
    section out.

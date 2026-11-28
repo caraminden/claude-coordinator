@@ -635,16 +635,20 @@ const runGh = promisify(execFile);
 
 /** pr-auto only where GitHub can auto-merge (#2301): a private repo on a free plan can't, and its PRs sit green. Throws naming pr-minion unless the repo answers allow_auto_merge true. */
 async function refuseWithoutAutoMerge(repoUrl: unknown): Promise<void> {
-  const url = typeof repoUrl === 'string' ? repoUrl : (await call<{ project: ProjectView }>('GET', `/api/projects/${C().PROJECT}?tickets=none`)).project.repo_url;
+  const url = typeof repoUrl === 'string' ? repoUrl.trim() : (await call<{ project: ProjectView }>('GET', `/api/projects/${C().PROJECT}?tickets=none`)).project.repo_url;
   const slug = repoSlug(url ?? null);
   if (!slug) throw new Error("pr-auto needs the scheme's repo on GitHub, and this scheme has none: pick citadel or pr-person");
+  const fallback = 'Use ship_path pr-minion (the minion merges once CI is green)';
   let answer: string;
   try {
     answer = (await runGh('gh', ['api', `repos/${slug}`, '--jq', '.allow_auto_merge'], { timeout: 20_000 })).stdout.trim();
   } catch (err) {
-    answer = `no answer (${(thrown(err).stderr || thrown(err).message || '').toString().trim().slice(0, 200)})`;
+    const why = (thrown(err).stderr || thrown(err).message || '').toString().trim().slice(0, 200);
+    throw new Error(`Not saved: couldn't ask GitHub whether ${slug} can auto-merge (${why}), and pr-auto only works where it can. ${fallback}, or set pr-auto from a turn whose gh login can push to the repo.`);
   }
   if (answer !== 'true') {
-    throw new Error(`Not saved: ${slug} can't auto-merge (GitHub's allow_auto_merge: ${answer || 'empty'}; a private repo on a free plan can't), so pr-auto PRs would sit green. Use ship_path pr-minion (the minion merges once CI is green), or turn on "Allow auto-merge" in the repo's settings and set pr-auto again.`);
+    throw new Error(
+      `Not saved: ${slug} can't auto-merge (GitHub's allow_auto_merge: ${answer || 'empty'}; a private repo on a free plan can't, and GitHub shows the field only to people with push access), so pr-auto PRs would sit green. ${fallback}, or turn on "Allow auto-merge" in the repo's settings and set pr-auto again.`,
+    );
   }
 }

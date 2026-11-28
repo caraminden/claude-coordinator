@@ -13,7 +13,7 @@ import { Store } from '../src/db.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TASKMASTER_SLICE, TURN_SLICE } from '../src/turn-launch.ts';
-import { jsonLines, lines, tempRoot, testPins, followed, runnerInsides } from './helpers.ts';
+import { jsonLines, lines, settled, tempRoot, testPins, followed, runnerInsides } from './helpers.ts';
 import { holds } from './holds.ts';
 import { until } from './wait.ts';
 testPins();
@@ -344,6 +344,7 @@ test('a container turn frozen past its heartbeat keeps running and keeps its pin
   }
   writeFileSync(release, '');
   await until('the turn ends', () => status(id) !== 'running');
+  await settled(); // the folder's delete runs off the server's thread (#1459): wait for it, not for luck (#2319)
   assert.ok(!existsSync(dir), 'its folder goes once it has ended');
 });
 
@@ -903,7 +904,7 @@ test("Godot's export templates are mounted only where the host has them, and the
   }
 });
 
-test("a restart sweeps container turns' dead folders in each person's folder, and keeps live ones", () => {
+test("a restart sweeps container turns' dead folders in each person's folder, and keeps live ones", async () => {
   const person = join(root, 'run', 'turns', 'person-9');
   const turn = (name: string, beatAgo: number) => {
     mkdirSync(join(person, name), { recursive: true });
@@ -926,6 +927,9 @@ test("a restart sweeps container turns' dead folders in each person's folder, an
     frozen.kill('SIGKILL');
     older.kill('SIGKILL');
   }
+  // recover() only starts the deletes: each is a rename and a delete off the server's thread (#1459). Checked at once,
+  // this raced the rename and lost under load (#2319), so wait for the deletes themselves.
+  await settled();
   assert.ok(!existsSync(join(person, '8-1')), 'a dead turn goes');
   assert.ok(existsSync(join(person, '8-2')), 'a running one stays');
   assert.ok(existsSync(join(person, '8-3')), 'a stalled one stays');
@@ -968,6 +972,8 @@ test('Stop ends a container turn whose claude has not started, and never will (C
     // The give-up ends a turn as an error saying podman did not return; a stop ends it idle and says nothing.
     assert.equal(status(id), 'idle');
     assert.deepEqual(errors(id), []);
+    await settled(); // the stop's delete of the turn's folder is done (#2319), before the exec ends
+    assert.ok(!existsSync(turnDir));
     // The exec ends later (killed here, as its give-up would), its turn's folder long gone: nothing is written, said or thrown.
     const pid = Number(readFileSync(hungPid, 'utf8'));
     assert.ok(pid > 0);

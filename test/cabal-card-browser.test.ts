@@ -22,6 +22,7 @@ const STUB = pageStub(
   const member = (label, state, word) => ({ id: null, number: null, label, title: label + ' work', state, word });
   const cabals = [{ lead: 101, number: 7, title: lead.title, overseer: "Build 10's Overseer", name: 'Build 10', build: 10, members: [member('H1', 'merged', 'merged'), member('H2', 'running', 'building')], finished: 1, done: 'merged', next: 0, spend: 12 }];
   cabals[0].members.forEach((m, i) => { m.id = 200 + i; m.number = 20 + i; });
+  if (location.search === '?bare') cabals[0].members.shift(); // no dismissed member: open shows nothing more than shut
   if (location.search === '?waits') cabals[0].members.push({ id: null, number: null, label: 'H3', title: 'Not yet', state: 'roster', word: 'next up' });
   window.stubCabals = cabals;
   // ?waits: a member with a question card waiting on people (#2277).
@@ -81,7 +82,7 @@ for (const [what, dot] of [
 }
 
 test('opening a card that has no member rows to show moves nothing', { skip }, async () => {
-  const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
+  const page = await browser.page(`${base}?bare#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .cabal-lead')`);
   const measure = `(() => { const c = document.querySelector('.cabal-card'); return { open: c.hasAttribute('data-open'), rows: c.querySelectorAll('.thread-row').length, preview: !!c.querySelector('.cabal-build a'), height: c.getBoundingClientRect().height }; })()`;
   const shut = await page.eval<Card>(measure);
@@ -176,4 +177,23 @@ test('a redraw under a resting pointer leaves the card as it was: no outline fad
       `${step}: every frame after the redraw shows the hovered card as before it`,
     );
   }
+});
+
+// Cara, 2026-11-27: "when you expand a Plot, below the not started minions, you also see the dismissed minions from that build".
+test('an open card lists its dismissed members under the not-started lines, each a link to its chat; a shut one lists none', { skip }, async () => {
+  const page = await browser.page(`${base}?waits#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card .thread-row')`);
+  const lines = `[...document.querySelectorAll('.cabal-members > *')].map((e) => e.classList[0] + (e.matches('.cabal-gone') ? ' ' + e.getAttribute('href') + ' ' + e.textContent : ''))`;
+  assert.deepEqual(await page.eval(lines), ['thread-row'], 'shut: the started member only');
+  await page.eval(`document.querySelector('.cabal-toggle').click()`);
+  // H1 merged and has no open row: dismissed. H2 (#21) is open, so it keeps its row and gets no second line.
+  assert.deepEqual(await page.eval(lines), ['thread-row', 'cabal-planned', 'cabal-gone #/p/1/t/20 #20 H1 H1 workmerged']);
+});
+
+// Cara, 2026-11-27, picked "Always purple": the outline is the Plot's colour at rest, hovered or not, open or shut.
+test("the card's outline is the Plot's colour with no pointer on it", { skip }, async () => {
+  const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the card to draw', `document.querySelector('.cabal-card')`);
+  const [hover, border, heading] = await page.eval<[boolean, string, string]>(`(() => { const c = document.querySelector('.cabal-card'); return [c.matches(':hover'), getComputedStyle(c).borderTopColor, getComputedStyle(document.querySelector('.g-cabal > h3')).color]; })()`);
+  assert.deepEqual([hover, border], [false, heading]);
 });

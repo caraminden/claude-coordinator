@@ -59,8 +59,7 @@
 .g-cabal { --gc: hsl(265 45% 52%); }
 .g-cabal > h3 { color: var(--gc); }
 /* A cabal's card (#2092, public/cabal-card.js): a summary whose name opens the Overseer's chat and whose arrow opens the box, its members' rows under it. */
-.cabal-card { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: var(--space-1) 0; } /* no transition: every redraw makes a new card, and one under the pointer would fade its outline in again (#2280) */
-.cabal-card:hover, .cabal-card[data-open] { border-color: var(--gc); }
+.cabal-card { border: 1px solid var(--gc); border-radius: var(--radius-sm); margin: var(--space-1) 0; } /* always in the Plot's colour (Cara, 2026-11-27: "Always purple"): the card isn't a click target, and nothing on it may change or fade on hover, since every redraw makes a new card (#2280) */
 .sidebar .cabal-sum { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-2); }
 .cabal-top { display: flex; align-items: flex-start; gap: var(--space-2); }
 .sidebar .cabal-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); color: inherit; text-decoration: none; }
@@ -96,7 +95,13 @@
 .cabal-planned { margin: var(--space-1) 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; border: 1px dashed color-mix(in srgb, var(--held) 45%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--held) 10%, var(--panel)); }
 .cabal-planned .muted { color: var(--held); font-weight: 600; white-space: nowrap; }
 @keyframes cabal-open { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .cabal-card { transition: none; } .cabal-planned.opening { animation: none; } }
+/* A dismissed member of the Plot, under the not-started lines of an open card (Cara, 2026-11-27): a quiet link to its chat. */
+.sidebar .cabal-gone { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h); padding: var(--space-1) var(--space-2); box-sizing: border-box; font-size: 0.8rem; color: var(--muted); text-decoration: none; overflow-wrap: anywhere; }
+.sidebar .cabal-gone:hover > span:first-child { text-decoration: underline; }
+.cabal-gone > span:first-child { flex: 1; min-width: 0; }
+.cabal-gone .muted { flex: none; font-weight: 600; white-space: nowrap; }
+.cabal-gone.opening { animation: cabal-open 0.15s ease-out; }
+@media (prefers-reduced-motion: reduce) { :is(.cabal-planned, .cabal-gone).opening { animation: none; } }
 .g-build > h3 { color: var(--gc); }
 .g-build > h3 .muted, .g-cabal > h3 .muted { text-transform: none; font-weight: normal; }
 .g-feature { --gc: hsl(265 55% 55%); }

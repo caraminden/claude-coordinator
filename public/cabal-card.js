@@ -58,6 +58,10 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
   const sealed = (/** @type {Row} */ t) => c.members.some((m) => m.id === t.id && m.state === 'sealed');
   const members = rows.filter((t) => t.id !== c.lead && (open || !sealed(t)));
   const unstarted = c.members.filter((m) => m.id == null || m.scheme); // another scheme's members aren't in this list: named here
+  // Open also lists the members dismissed since, under the not-started ones (Cara, 2026-11-27: "below the not started minions,
+  // you also see the dismissed minions from that build"): finished or closed, with no open row left in the list.
+  const gone = c.members.filter((m) => m.id != null && !m.scheme && m.id !== c.lead && ['merged', 'shipped', 'closed'].includes(m.state) && !mine.some((t) => t.id === m.id));
+  const project = leadTicket?.project_id;
   const started = c.members.some((m) => m.state !== 'roster');
   const toggle = () => {
     if (!openCabals.delete(c.lead)) openCabals.add((opening = c.lead));
@@ -111,12 +115,18 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
       ),
     ),
     build ? h('p', { class: 'cabal-build' }, `${build.behind} behind main`, preview ? [' · ', h('a', { href: `../preview/build/${build.build}/`, target: '_blank', rel: 'noopener', title: `build/${build.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
-    members.length || (open && unstarted.length)
+    members.length || (open && (unstarted.length || gone.length))
       ? h(
           'div',
           { class: 'cabal-members' },
           members.map(row),
           (open ? unstarted : []).map((m) => h('p', { class: `cabal-planned${fresh ? ' opening' : ''}`, title: 'Planned: not started yet' }, [m.label, m.title].filter(Boolean).join(' '), h('span', { class: 'muted' }, m.scheme ? ` ${m.scheme}${m.number ? ` #${m.number}` : ''} · ${m.word}` : ' not started'))),
+          (open ? gone : []).map((m) => {
+            const name = h('span', {}, [m.number != null ? `#${m.number}` : '', m.label, m.title].filter(Boolean).join(' '));
+            const word = h('span', { class: 'muted' }, m.state === 'closed' ? 'dismissed' : m.word);
+            const cls = `cabal-gone${fresh ? ' opening' : ''}`;
+            return project != null ? h('a', { class: cls, href: threadHref({ id: /** @type {number} */ (m.id), project_id: project, number: m.number, kind: 'ticket' }), title: 'Dismissed: open its chat' }, name, word) : h('p', { class: cls }, name, word);
+          }),
         )
       : '',
   );

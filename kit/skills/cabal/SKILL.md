@@ -134,7 +134,7 @@ A Plot gets **one retro**, yours; no separate build retro, and the server starts
   retro-log lines and the diff only where the timeline raises a question. A Plot's also says whether the claims
   helped (refusals, moved claims, conflicts they missed). Write `cabal-<slug>.md` in the retro folder CLAUDE.md's
   Project facts name (the retro skill's default otherwise), linking the board by the address on the timeline's first
-  line, and ship it by the scheme's usual route for a doc change with `stay_open` (a Plot with a branch: its lead ships straight to main now). Then
+  line, and ship it by the scheme's usual route for a doc change (a Plot with a branch: its lead ships straight to main now, with `stay_open`). Then
   log `Retro: <its path>` on the board: a Plot whose lead is dismissed without that line gets the server's effort
   retro instead.
 - **Stay till the last member:** a member can still be running or unstarted after your retro ships (a straight-to-main

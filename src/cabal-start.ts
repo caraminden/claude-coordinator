@@ -347,8 +347,8 @@ export function retroCheck(app: App, leadId: number): void {
   if (!lead || lead.status === 'closed') return;
   const written = store.cabalLog(lead.id, 1000).some((l) => l.text.startsWith('Retro:'));
   if (lead.build != null && !written) return;
-  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null || !isFixer(r));
-  if (!rows.every((r) => r.ticket_id != null && (store.getTicket(r.ticket_id)?.status ?? 'closed') === 'closed')) return;
+  if (store.cabalOpenWork(lead.id).length) return;
+  const rows = store.cabalRows(lead.id).filter((r) => r.ticket_id != null);
   const asked = store.getSetting<number[]>(retroKey(lead.id)) ?? [];
   if (rows.every((r) => asked.includes(r.ticket_id!))) return;
   store.setSetting(

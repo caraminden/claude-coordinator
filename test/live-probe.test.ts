@@ -112,6 +112,7 @@ function probes(outcome: Outcome['result'] | (() => Outcome), opts: { live?: boo
       getSetting: <T>(k: string) => (settings.get(k) as T) ?? null,
       setSetting: (k, v) => void settings.set(k, v),
       deleteSetting: (k) => void settings.delete(k),
+      cabalOpenWork: () => [],
       settingKeys: (prefix) => [...settings.keys()].filter((k) => k.startsWith(prefix)),
       getTicket: () => ticket,
       updateTicket: (_id, f) => Object.assign(ticket, f),

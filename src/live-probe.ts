@@ -232,6 +232,7 @@ export interface ProbeDeps {
     deleteSetting(key: string): void;
     settingKeys(prefix: string): string[];
     getTicket(id: number): { state: string | null; note: string | null; status: string; number?: number; project_id: number } | null | undefined;
+    cabalOpenWork(id: number): string[];
     updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown;
   };
   runner: {
@@ -324,7 +325,7 @@ export class LiveProbes {
       this.d.store.deleteSetting(probeKey(id));
       const t = this.d.store.getTicket(id);
       // Only a dismissal a hold kept: a person who wrote, a turn or another state since then keeps it open.
-      if (result !== 'fail' && t && t.status !== 'closed' && t.state === 'outside' && t.note === HOLD_NOTE && !this.d.runner.isRunning(id) && !this.d.runner.queued(id)) {
+      if (result !== 'fail' && t && t.status !== 'closed' && t.state === 'outside' && t.note === HOLD_NOTE && !this.d.runner.isRunning(id) && !this.d.runner.queued(id) && !this.d.store.cabalOpenWork(id).length) {
         this.d.store.updateTicket(id, { state: null, note: null });
         await this.d.runner.close(id, `The deploy is live and its live probe ${result === 'pass' ? 'passed' : "couldn't run"}, so it dismissed this minion.`);
       }

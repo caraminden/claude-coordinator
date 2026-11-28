@@ -336,7 +336,7 @@ export class Closing {
     }
     // A Plot's lead stays open until its last member is dismissed (#2325): its Plot card, and the starts it still owns, live on it.
     const work = this.d.store.cabalOpenWork(ticketId);
-    if (work.length) return `its Plot still has open work (${work.join('; ')}): it seals and waits, and closes once every member is dismissed`;
+    if (work.length) return `its Plot still has open work (${work.join('; ')}): seal it until every member is dismissed (Citadel wakes it), start or remove its unstarted rows, then close`;
     const state = this.d.store.getTicket(ticketId)?.state;
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
     // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
@@ -390,7 +390,7 @@ export class Closing {
    */
   closeIfSeen(ticketId: number, name: string): boolean {
     const t = this.d.store.getTicket(ticketId);
-    if (!t || t.state !== 'complete' || t.status === 'closed' || t.status === 'running' || this.d.isRunning(ticketId)) return false;
+    if (!t || t.state !== 'complete' || t.status === 'closed' || t.status === 'running' || this.d.isRunning(ticketId) || this.d.store.cabalOpenWork(ticketId).length) return false;
     if (this.d.queue.size(ticketId) || this.d.turnLine.has(ticketId) || this.d.store.openCardAt(ticketId) !== null || this.d.approvals.waiting(ticketId)) return false;
     if (this.d.store.seenAt(name, ticketId) < t.updated_at) return false;
     void this.close(ticketId, `Closed: ${name} saw its result`);

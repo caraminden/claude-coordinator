@@ -263,6 +263,11 @@ test("a Plot lead with an open member can't close itself; a build Plot's lead is
   await s.call(`/api/tickets/${m.id}/status`, { status: 'idle' });
   assert.equal(await woke(), 0, 'no retro logged yet: its own ship wakes a build lead');
   assert.equal((await board(chief.id, { action: 'log', text: 'Retro: docs/retros/cabal-keep.md' })).status, 200);
+  await idle(chief.id);
+  assert.equal((await s.call(`/api/tickets/${chief.id}`, { state: 'sealed' }, 'PATCH')).status, 200);
+  assert.equal((await s.call(`/api/tickets/${chief.id}/status`, { status: 'closed' })).status, 200, 'a person can still dismiss it by hand');
+  await s.call(`/api/tickets/${chief.id}/status`, { status: 'idle' });
+  assert.equal((await s.call(`/api/tickets/${chief.id}`, { state: 'sealed' }, 'PATCH')).status, 200);
   await dismiss(m.id);
   await until('the lead is woken to close', async () => (await woke()) === 1);
 });

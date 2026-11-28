@@ -52,7 +52,11 @@ behind_landed() {
 behind_red() {
   local at base top rest f files='' hit=''
   [ -s "$state/quick-behind" ] && [ $# -gt 0 ] || return 0
-  for f in "$@"; do files+="${files:+,}$f"; done
+  # A known flake blames nobody here either (behind_verify screens its own the same way).
+  for f in "$@"; do
+    if known_flakes "$f" >/dev/null 2>&1; then say "quick train: $f is a known flake ($known_why): no culprit"; else files+="${files:+,}$f"; fi
+  done
+  [ -n "$files" ] || return 0
   while read -r at base top rest; do
     [ -n "$top" ] || continue
     if [ "$top" = "$old" ] && [[ " $rest" != *' red='* ]]; then rest+=" red=$files" hit=1; fi
@@ -74,6 +78,17 @@ behind_red() {
 #   LAND_VERIFY_IDS: those files (one a line, LAND_VERIFY_MAX at most) each run alone here, niced (tools/test-alone.sh). Red
 #     only when it fails twice: one red run alone is no culprit (Peek Auras' wrong blames). A run that gives no answer
 #     names "the check", which src/fast-mode.ts runs again once.
+# <file>: run alone here once, its output kept for the tail; prints test-alone's exit, or "timeout" for a test that hit its
+# time limit, which is no answer (#1430: a loaded box's timeouts blame nobody, as train_main_red's).
+behind_alone() {
+  local r=0 one=${TMPDIR:-/tmp}/land-verify-one.$$
+  "$tools/test-alone.sh" run "$here" "$1" >"$one" 2>&1 9>&- 7>&- 6>&- </dev/null || r=$?
+  cat "$one" >>"${TMPDIR:-/tmp}/land-verify-alone.$$"
+  [ "$r" != 1 ] || ! grep -q 'test timed out after' "$one" || r=timeout
+  rm -f "$one"
+  echo "$r"
+}
+
 behind_verify() {
   local want=${LAND_VERIFY_IDS:-} f r r2 ids=() none='' n=0 real flakes
   here=$(git rev-parse --show-toplevel) && cd "$here" || { echo "verify: no verdict"; exit 75; }
@@ -89,11 +104,9 @@ behind_verify() {
     while read -r f; do
       [ -n "$f" ] || continue
       if [ $((n++)) -ge "${LAND_VERIFY_MAX:-6}" ]; then none=1; continue; fi # shortcut: as train_main_red's 6, minutes not an hour
-      r=0
-      "$tools/test-alone.sh" run "$here" "$f" >>"${TMPDIR:-/tmp}/land-verify-alone.$$" 2>&1 9>&- 7>&- 6>&- </dev/null || r=$?
+      r=$(behind_alone "$f")
       if [ "$r" = 1 ]; then
-        r2=0
-        "$tools/test-alone.sh" run "$here" "$f" >>"${TMPDIR:-/tmp}/land-verify-alone.$$" 2>&1 9>&- 7>&- 6>&- </dev/null || r2=$?
+        r2=$(behind_alone "$f")
         if [ "$r2" = 1 ]; then ids+=("$f") && say "verify: $f fails alone on $short, twice";
         elif [ "$r2" = 0 ]; then say "verify: $f failed alone on $short once and then passed: no culprit";
         else none=1; fi
@@ -124,7 +137,12 @@ behind_verify() {
           [ -n "$f" ] || continue
           if known_flakes "$f" >/dev/null 2>&1; then say "verify: $f is a known flake ($known_why): no culprit"; else ids+=("$f"); fi
         done <<<"$real"
-        # Red with no file to name (the log unlabelled, the leak guard, a skipped test): "CI", which names nobody.
+        # The leak guard and a skipped test are reds of their own, never flakes (train_main_red's rule): "CI", naming nobody.
+        if grep -qE 'The tests left [0-9]+ process\(es\) running' <<<"$failed"; then
+          say "verify: the run left processes running (the leak guard)" && ids+=('CI')
+        fi
+        if f=$(skipped_tests); then say "verify: $(skipped_said "$f")" && ids+=('CI'); fi
+        # Red with no file to name (the log unlabelled): "CI" too.
         [ ${#ids[@]} -gt 0 ] || [ -n "$flakes" ] || [ -n "$real" ] || ids+=('CI')
         ;;
       *)

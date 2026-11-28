@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -129,8 +129,23 @@ test('a real culprit: the file runs alone on the base and each ship oldest first
   await w.tick();
   assert.equal(w.tm.length, 1);
   assert.match(w.tm[0], /red behind a quick train.*30 minutes unfixed.*#12/s);
-  await w.fm.landed(CITADEL, 1012, w.commit('#12 the fix'));
-  assert.deepEqual(w.fm.view(CITADEL).reds, [], 'its next ship counts as the fix');
+  // Its next ship is rechecked: the file runs alone on it, and only a pass there clears it.
+  const unrelated = w.commit('#12 something else');
+  await w.fm.landed(CITADEL, 1012, unrelated);
+  assert.equal(w.runs.at(-1)!.sha, unrelated);
+  assert.equal(w.runs.at(-1)!.env.LAND_VERIFY_IDS, 'test/a.test.ts');
+  assert.equal(w.runs.at(-1)!.env.WHO, '1012');
+  await w.finish(red('test/a.test.ts'));
+  assert.equal(w.fm.view(CITADEL).reds.length, 1, 'still red after a ship that did not fix it');
+  await w.fm.landed(CITADEL, 1011, w.commit('#11 not the culprit'));
+  assert.equal(w.runs.length, 5, "another minion's ship is no recheck");
+  const fix = w.commit('#12 the fix');
+  await w.fm.landed(CITADEL, 1012, fix);
+  assert.equal(w.runs.at(-1)!.sha, fix);
+  await w.finish(GREEN);
+  assert.deepEqual(w.fm.view(CITADEL).reds, [], 'passed alone on its fix');
+  await w.tick();
+  assert.equal(w.runs.length, 6, 'nothing more to run');
 });
 
 test('a flake: passing alone on the base and every ship, the top too, blames nobody', async () => {
@@ -209,6 +224,24 @@ test("the next full train's run counts: no run while ships wait in line (30 minu
     v.told.map((t) => t.ticket),
     [1011],
   );
+});
+
+test('no verdict (CI down): that quick top runs again 30 minutes later, and a red found by the next full train meanwhile is still pinned', async () => {
+  const w = world();
+  const { tops } = w.quickTrain();
+  await w.tick();
+  await w.finish('verify: no verdict\n', 75);
+  await w.tick();
+  assert.equal(w.runs.length, 1, 'not straight away');
+  w.wait(QUICK_WAIT_MS);
+  await w.tick();
+  assert.equal(w.runs.length, 2);
+  assert.equal(w.runs[1].sha, tops[2]);
+  await w.finish('verify: no verdict\n', 75);
+  writeFileSync(join(w.state, 'quick-behind'), `${readFileSync(join(w.state, 'quick-behind'), 'utf8').trim()} red=test/a.test.ts\n`);
+  await w.tick();
+  assert.equal(w.runs.length, 3);
+  assert.equal(w.runs[2].env.LAND_VERIFY_IDS, 'test/a.test.ts', 'pinned at once');
 });
 
 test('a quick top no longer on main (rolled back) gets no run', async () => {

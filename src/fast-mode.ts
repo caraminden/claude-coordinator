@@ -62,8 +62,10 @@ export interface FastState {
   verified?: string;
   /** The commit the suite last gave no verdict on (CI never answered, land.sh crashed): not retried until main moves. */
   stuck?: string;
+  /** The quick scheme's: when `stuck` gave no verdict; that quick top is run again QUICK_WAIT_MS later. */
+  stuckAt?: number;
   /** What runs now. */
-  running?: { sha: string; at: number; stale?: boolean; quick?: QuickRun };
+  running?: { sha: string; at: number; stale?: boolean; quick?: QuickRun; recheck?: number };
   pin?: Pinning;
   reds: KnownRed[];
   /** A landing's commit on main, to the minion that landed it (newest 200). */
@@ -181,10 +183,9 @@ export class FastMode {
   landed(projectId: number, ticketId: number, commit: string): Promise<void> {
     const s = this.state(projectId);
     if (this.quickDir(projectId) !== undefined) {
-      // The quick scheme: a culprit's next ship went through the full gate or a quick check, so its red counts as fixed; a
-      // quick train's tops are in land.sh's line, so no landing is kept.
-      const left = s.reds.filter((e) => e.ticket !== ticketId);
-      if (left.length !== s.reds.length) this.d.set(key(projectId), { ...s, reds: left });
+      // The quick scheme: a culprit's ship is kept for a recheck, its red's files run alone on it (quickNext), as a ship
+      // through main's red may not have fixed them. Nobody else's landing is kept: a quick train's tops are in land.sh's line.
+      if (s.reds.some((e) => e.ticket === ticketId)) this.d.set(key(projectId), { ...s, landed: { ...s.landed, [commit]: ticketId } });
       return this.tick();
     }
     s.landed[commit] = ticketId;
@@ -247,10 +248,11 @@ export class FastMode {
         this.escalate(projectId, s);
         return save();
       }
-      const { sha, stale, quick: q } = s.running;
+      const { sha, stale, quick: q, recheck } = s.running;
       delete s.running;
       if (!stale && job) this.d.flakes?.(projectId, sha, job.output);
-      if (!stale) await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '', q);
+      if (!stale && recheck !== undefined) this.readRecheck(projectId, s, recheck, job ? verifyResult(job.output) : { verdict: 'none' });
+      else if (!stale) await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '', q);
     }
     this.escalate(projectId, s);
     // Saved before more git: a throw from here on mustn't leave the finished run in `running`, read (and told) again (2R3).
@@ -264,7 +266,7 @@ export class FastMode {
     save();
   }
 
-  private async start(projectId: number, repo: string, s: FastState, sha: string, quick?: QuickRun) {
+  private async start(projectId: number, repo: string, s: FastState, sha: string, quick?: QuickRun, recheck?: { ticket: number; ids: string[] }) {
     const wt = join(this.d.dir(projectId), 'wt');
     await mkdir(this.d.dir(projectId), { recursive: true, mode: 0o700 });
     const linked = () =>
@@ -294,9 +296,10 @@ export class FastMode {
     const q = quick ?? s.pin?.quick;
     const n = q?.owners[sha];
     const who = q ? (n ? this.d.ticketOf(projectId, n) : null) : this.owner(s, sha);
-    const env = { ...this.d.env(projectId, who), LAND_KNOWN_RED: '', LAND_FAST: '', LAND_VERIFY_IDS: s.pin ? s.pin.ids.join('\n') : '', ...(q ? { LAND_VERIFY_BASE: q.base } : {}) };
+    const ids = s.pin ? s.pin.ids : (recheck?.ids ?? []);
+    const env = { ...this.d.env(projectId, recheck ? recheck.ticket : who), LAND_KNOWN_RED: '', LAND_FAST: '', LAND_VERIFY_IDS: ids.join('\n'), ...(q ? { LAND_VERIFY_BASE: q.base } : {}) };
     this.d.jobs.start({ dir: join(this.d.dir(projectId), 'job'), cwd: wt, argv: ['bash', 'tools/land.sh', '--verify'], env, unit: `citadel-fast-verify-${projectId}-${Date.now()}`, description: `tools/land.sh --verify ${sha.slice(0, 9)} (fast mode)`, ticketId: 0 });
-    s.running = { sha, at: this.now(), ...(quick ? { quick } : {}) };
+    s.running = { sha, at: this.now(), ...(quick ? { quick } : {}), ...(recheck ? { recheck: recheck.ticket } : {}) };
   }
 
   /** land.sh's quick-behind lines: "<epoch> <base> <top> <ship top>:<#N, or -> ... [red=<file>,...]" (tools/land/behind.sh). */
@@ -319,9 +322,15 @@ export class FastMode {
   private async quickNext(projectId: number, repo: string, dir: string, s: FastState) {
     if (s.running) return;
     if (s.pin) return this.start(projectId, repo, s, s.pin.shas[s.pin.next]);
+    // A culprit shipped: its red's files run alone on that ship's commit, and only those that pass there leave the ledger.
+    for (const [commit, ticket] of Object.entries(s.landed)) {
+      const ids = s.reds.filter((e) => e.ticket === ticket).flatMap((e) => e.ids);
+      if (ids.length) return this.start(projectId, repo, s, commit, undefined, { ticket, ids });
+    }
     const main = await this.git(repo, 'rev-parse', `refs/heads/${BRANCH}`);
     for (const l of await this.owedLines(dir)) {
       if (s.done?.includes(l.top)) continue;
+      if (!l.red && s.stuck === l.top && this.now() - (s.stuckAt ?? 0) < QUICK_WAIT_MS) continue; // no verdict: again later
       const onMain = await this.git(repo, 'merge-base', '--is-ancestor', l.top, main).then(
         () => true,
         () => false,
@@ -432,12 +441,14 @@ export class FastMode {
   /** The quick scheme's full run on a quick top: the ledger as for a fast run; a new red pinned on the quick train's base
    * and each of its ships' tops. */
   private async readQuick(projectId: number, repo: string, s: FastState, sha: string, r: ReturnType<typeof verifyResult>, output: string, quick: QuickRun) {
-    this.markDone(s, sha);
     if (r.verdict === 'none') {
-      // shortcut: no verdict isn't retried; the next full train's CI run covers this top anyway. Retry once if CI often gives none.
-      console.log(`Quick train behind ${sha.slice(0, 12)} in scheme ${projectId}: its full run gave no verdict.`);
+      // Still owed: run again QUICK_WAIT_MS later, until it has a verdict or a full ship lands green over it (its line goes).
+      console.log(`Quick train behind ${sha.slice(0, 12)} in scheme ${projectId}: its full run gave no verdict; it runs again in ${QUICK_WAIT_MS / 60_000} minutes.`);
+      s.stuck = sha;
+      s.stuckAt = this.now();
       return;
     }
+    this.markDone(s, sha);
     const failing = r.verdict === 'red' ? r.ids : [];
     for (const e of s.reds) e.ids = e.ids.filter((id) => failing.includes(id));
     s.reds = s.reds.filter((e) => e.ids.length);
@@ -449,6 +460,19 @@ export class FastMode {
     if (!named.length) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, a quick train's top, with no test file to name`, undefined, quick);
     const tops = Object.keys(quick.owners);
     s.pin = { head: sha, shas: [quick.base, ...(tops.includes(sha) ? tops : [...tops, sha])], next: 0, ids: named, at: this.now(), output: tailOf(output), quick };
+  }
+
+  /** A culprit's recheck: its ids that passed alone on its ship's commit leave the ledger; no verdict keeps them all
+   * (shortcut: not run again; its next ship rechecks, and the Taskmaster has it after 30 minutes meanwhile). */
+  private readRecheck(projectId: number, s: FastState, ticket: number, r: ReturnType<typeof verifyResult>) {
+    // Off the store too: save() keeps the stored landings (land() may write one meanwhile), so this one must go there.
+    const drop = (m: Record<string, number>) => Object.fromEntries(Object.entries(m).filter(([, t]) => t !== ticket));
+    s.landed = drop(s.landed);
+    this.d.set(key(projectId), { ...this.state(projectId), landed: drop(this.state(projectId).landed) });
+    if (r.verdict === 'none' || (r.verdict === 'red' && r.ids.some((id) => UNNAMED.includes(id)))) return;
+    const failing = r.verdict === 'red' ? r.ids : [];
+    for (const e of s.reds) if (e.ticket === ticket) e.ids = e.ids.filter((id) => failing.includes(id));
+    s.reds = s.reds.filter((e) => e.ids.length);
   }
 
   /** A new red: its ledger entry, and its culprit's minion told (the Taskmaster when there is none, or it wasn't pinned). */
@@ -480,7 +504,7 @@ export class FastMode {
       this.d.tell(
         ticket,
         quick
-          ? `${what}\n\nIt's yours to fix: each file failed alone, twice, on your ship's top and passed on the ship before it. Your fix goes first: Citadel tags you urgent, which puts it at the front of the line. Meanwhile ships that fail only on it go through main's red. Fix it on your branch and hand it off with hand_off_land; it counts as fixed once your next ship lands. If you're sure it isn't yours, tell the Taskmaster why with message_coordinator. Unfixed in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`
+          ? `${what}\n\nIt's yours to fix: each file failed alone, twice, on your ship's top and passed on the ship before it. Your fix goes first: Citadel tags you urgent, which puts it at the front of the line. Meanwhile ships that fail only on it go through main's red. Fix it on your branch and hand it off with hand_off_land; once it ships, Citadel runs each file alone on it, and a pass there clears it. If you're sure it isn't yours, tell the Taskmaster why with message_coordinator. Unfixed in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`
           : `${what}\n\nIt's yours to fix: your change is the culprit. Each id is in the scheme's known-red ledger, so other ships that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`,
       );
       return;

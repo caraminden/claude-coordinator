@@ -29,6 +29,12 @@ test('--verify runs the full suite on CI on HEAD: real failures are named, files
   assert.match(res.stderr, /failed in the full run and passed alone: no culprit/);
   assert.match(c.calls(), new RegExp(`head_sha=${git(r.source, 'rev-parse', 'main')}`));
   assert.doesNotMatch(c.refs(), /behind/, 'land/behind and land-base/behind are gone');
+  // Passed-alone files with the leak guard's line, or a skipped test: red of their own, naming no file ("CI").
+  for (const extra of [{ FAKE_LEAK: '1' }, { FAKE_SKIP: '1' }]) {
+    const mixed = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', ...extra }, ['--verify'], wt);
+    assert.equal(mixed.status, 1, mixed.stderr);
+    assert.deepEqual(verdict(mixed.stdout), ['verify: failing CI', 'verify: red'], JSON.stringify(extra));
+  }
   const green = c.run({ FAKE_CI: 'green' }, ['--verify'], wt);
   assert.equal(green.status, 0, green.stderr);
   assert.deepEqual(verdict(green.stdout), ['verify: green']);
@@ -44,6 +50,8 @@ test('--verify with LAND_VERIFY_IDS runs each file alone here, and only one that
   const flip = join(r.dir, 'flip-count');
   writeFileSync(join(r.wt, 'test', 'bad.test.mjs'), "throw new Error('bad');\n");
   // Fails on its first run only: a flake run alone.
+  // Hits its time limit (node's words for it) each run: no answer, never a culprit (#1430).
+  writeFileSync(join(r.wt, 'test', 'slow.test.mjs'), "console.log('test timed out after 60000ms');\nprocess.exit(1);\n");
   writeFileSync(join(r.wt, 'test', 'flip.test.mjs'), `import { existsSync, writeFileSync } from 'node:fs';\nif (!existsSync(${JSON.stringify(flip)})) { writeFileSync(${JSON.stringify(flip)}, '1'); throw new Error('once'); }\n`);
   git(r.wt, 'add', '-A');
   git(r.wt, 'commit', '-qm', 'tests');
@@ -53,6 +61,9 @@ test('--verify with LAND_VERIFY_IDS runs each file alone here, and only one that
   assert.equal(res.status, 1, res.stderr);
   assert.deepEqual(verdict(res.stdout), ['verify: failing test/bad.test.mjs', 'verify: red']);
   assert.match(res.stderr, /test\/flip\.test\.mjs failed alone on \w+ once and then passed: no culprit/);
+  const slow = r.run({ LAND_VERIFY_IDS: 'test/slow.test.mjs' }, ['--verify'], wt);
+  assert.equal(slow.status, 1, slow.stderr);
+  assert.deepEqual(verdict(slow.stdout), ['verify: failing the check', 'verify: red'], 'no culprit: the check gave no answer');
   const ok = r.run({ LAND_VERIFY_IDS: 'test/ok.test.mjs' }, ['--verify'], wt);
   assert.equal(ok.status, 0, ok.stderr);
   assert.deepEqual(verdict(ok.stdout), ['verify: green']);
@@ -82,6 +93,15 @@ test("the line a quick train owes: its base, top and each ship's top with its #N
   const red = sh(r, state, 'old=$T branch=ticket/60-z; behind_red test/a.test.ts test/b.test.ts; behind_red test/c.test.ts', { T: top });
   assert.match(red.stderr, /test\/a\.test\.ts, test\/b\.test\.ts fails on \w+, the quick train's top/);
   assert.match(readFileSync(join(state, 'quick-behind'), 'utf8'), / red=test\/a\.test\.ts,test\/b\.test\.ts\n$/);
+  // A known flake is screened out: all of them flakes, nothing is marked.
+  r.commit(r.wt, 'q3.txt', '3\n');
+  const top2 = git(r.wt, 'rev-parse', 'HEAD');
+  sh(r, state, 'branch=ticket/53-x old=$B tip=$T own=$T; behind_mark', { B: top, T: top2 });
+  const flaky = sh(r, state, 'known_flakes() { [ "$1" = test/f.test.ts ] && known_why=seen; }; old=$T branch=ticket/60-z; behind_red test/f.test.ts', { T: top2 });
+  assert.match(flaky.stderr, /test\/f\.test\.ts is a known flake \(seen\): no culprit/);
+  assert.equal(readFileSync(join(state, 'quick-behind'), 'utf8').split('\n')[1].includes('red='), false);
+  sh(r, state, 'known_flakes() { [ "$1" = test/f.test.ts ] && known_why=seen; }; old=$T branch=ticket/60-z; behind_red test/f.test.ts test/g.test.ts', { T: top2 });
+  assert.match(readFileSync(join(state, 'quick-behind'), 'utf8').split('\n')[1], / red=test\/g\.test\.ts$/);
   // Shipped through main's red: the line stays for the server's pin.
   sh(r, state, 'tip=$T; through_by[$T]=test/a.test.ts; behind_landed', { T: top });
   assert.ok(existsSync(join(state, 'quick-behind')));

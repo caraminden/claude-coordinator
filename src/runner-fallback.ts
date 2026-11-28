@@ -20,6 +20,8 @@ export const FALLBACK = {
   afterMs: 10 * 60_000,
   /** Private repos' Windows jobs stop going to GitHub once this share of the included minutes is used (specs/ci-hosted-overflow.md's guard). */
   guard: 0.8,
+  /** The account's included Actions minutes a month: Pro's 3,000 (specs/ci-hosted-overflow.md). GitHub's API doesn't say it, so Citadel sets it. */
+  included: 3000,
   /** How long a repo's visibility and the account's minutes are taken as read. */
   readMs: 60 * 60_000,
   /** How long a restart waits for its new run to show before it leaves the old one be. */
@@ -104,6 +106,55 @@ export async function restartOnGithub(gh: Gh, repo: string, run: number, wait: (
     await wait(FALLBACK.confirmPollMs);
   }
   return { ok: false, why: `GitHub took the restart of ${file} but no new run showed up in ${FALLBACK.confirmMs / 1000} s, so the old run is left as it is` };
+}
+
+/** How many included minutes GitHub bills a minute of each kind of runner as. */
+const RATE = { UBUNTU: 1, WINDOWS: 2, MACOS: 10 } as const;
+const rateOf = (labels: unknown): number => {
+  const l = Array.isArray(labels) ? labels.join(' ').toLowerCase() : '';
+  return l.includes('windows') ? RATE.WINDOWS : l.includes('macos') ? RATE.MACOS : RATE.UBUNTU;
+};
+
+/**
+ * An account's Actions minutes used this month, by Citadel's own count with the repo scope its links have (the Overseer's
+ * pick on P5's ask 17, 2026-11-28: no new login scope, against 3,000 included). The higher of two reads over the owner's
+ * private repos Citadel knows (public repos' minutes are free): GitHub's billable time per workflow for the current billing
+ * cycle, and this month's workflow_dispatch runs' jobs on GitHub's runners (the fallback's own restarts), each rounded up
+ * to a whole minute as GitHub bills. Windows counts double. Any read that fails fails the count, so the guard holds.
+ * shortcut: misses minutes spent in repos no scheme has and reads only the newest 100 dispatches a repo; GitHub's own
+ * account figure needs the user scope, so read it here too once links ask for it.
+ */
+export async function actionsMinutes(ghOf: (repo: string) => Gh | null, repos: readonly string[], since: string): Promise<Minutes> {
+  let billed = 0;
+  let ours = 0;
+  for (const repo of repos) {
+    const gh = ghOf(repo);
+    if (!gh) return { error: `no scheme's GitHub login reads ${repo}` };
+    const got = async (path: string): Promise<Record<string, unknown>> => {
+      const r = await gh('GET', path);
+      if (r.status !== 200 || !r.body || typeof r.body !== 'object') throw new Error(`GitHub answered ${r.status} for ${path.replace(/\?.*/, '')}`);
+      return r.body as Record<string, unknown>;
+    };
+    try {
+      if ((await got(`repos/${repo}`)).private !== true) continue;
+      const flows = ((await got(`repos/${repo}/actions/workflows?per_page=100`)).workflows ?? []) as { id?: unknown }[];
+      for (const f of flows) {
+        const b = ((await got(`repos/${repo}/actions/workflows/${Number(f.id)}/timing`)).billable ?? {}) as Record<string, { total_ms?: unknown }>;
+        for (const [os, rate] of Object.entries(RATE)) billed += ((Number(b[os]?.total_ms) || 0) / 60_000) * rate;
+      }
+      const runs = ((await got(`repos/${repo}/actions/runs?event=workflow_dispatch&status=completed&created=>=${since}&per_page=100`)).workflow_runs ?? []) as { id?: unknown }[];
+      for (const run of runs) {
+        const jobs = ((await got(`repos/${repo}/actions/runs/${Number(run.id)}/jobs?per_page=100`)).jobs ?? []) as { runner_group_name?: unknown; labels?: unknown; started_at?: unknown; completed_at?: unknown }[];
+        for (const j of jobs) {
+          const ms = Date.parse(String(j.completed_at)) - Date.parse(String(j.started_at));
+          if (j.runner_group_name === 'GitHub Actions' && ms > 0) ours += Math.ceil(ms / 60_000) * rateOf(j.labels);
+        }
+      }
+    } catch (e) {
+      return { error: `couldn't count the Actions minutes ${repo} used: ${(e as Error).message}` };
+    }
+  }
+  return { used: Math.max(billed, ours), included: FALLBACK.included };
 }
 
 export interface FallbackDeps {

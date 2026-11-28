@@ -104,7 +104,7 @@ import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
 import { poolOn } from './src/runner-pool.ts';
 import { BUSY, OwnerBusy, offWords } from './src/owner-busy.ts';
-import { Fallbacks, type Gh, restartOnGithub } from './src/runner-fallback.ts';
+import { actionsMinutes, Fallbacks, type Gh, restartOnGithub } from './src/runner-fallback.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import { heavyNow } from './src/heavy-now.ts';
 import { appOwners } from './src/host-load.ts';
@@ -2344,9 +2344,20 @@ const poolFallback = new Fallbacks({
     const pr = r?.status === 200 ? (r.body as { private?: unknown } | null)?.private : undefined;
     return typeof pr === 'boolean' ? !pr : null;
   },
-  // shortcut: GitHub's billing API needs the `user` scope, which Citadel's links don't ask for (src/github-link.ts SCOPES), and
-  // reports no included allowance; until P5's ask 17 settles it, the guard fails closed and private Windows jobs wait.
-  minutes: async () => ({ error: "Citadel's GitHub links can't read the account's Actions minutes (they need the user scope)" }),
+  // The owner's minutes over every repo of theirs a scheme has, each read with its own scheme's login.
+  minutes: (repo) => {
+    const owner = repo.split('/')[0].toLowerCase();
+    const repos = [...new Set(store.listProjects().map((p) => repoSlug(p.repo_url)?.toLowerCase() ?? ''))].filter((r) => r.split('/')[0] === owner);
+    const since = `${new Date().toISOString().slice(0, 7)}-01`;
+    return actionsMinutes(
+      (r) => {
+        const as = asScheme(r);
+        return as === null ? null : poolGh(as);
+      },
+      repos,
+      since,
+    );
+  },
   github: async (repo, run) => {
     const as = asScheme(repo);
     return as === null ? { ok: false, why: 'no scheme reads its repo' } : restartOnGithub(poolGh(as), repo, run);

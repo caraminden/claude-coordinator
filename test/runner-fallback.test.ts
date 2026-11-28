@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PoolSight, SeenJob } from '../src/ci-ships.ts';
-import { FALLBACK, type FallbackDeps, type FallbackLook, Fallbacks, type Gh, machineReasons, perigeeNext, restartOnGithub, routeOf } from '../src/runner-fallback.ts';
+import { actionsMinutes, FALLBACK, type FallbackDeps, type FallbackLook, Fallbacks, type Gh, machineReasons, perigeeNext, restartOnGithub, routeOf } from '../src/runner-fallback.ts';
 import { place, type PoolJob, type PoolMachine, type PoolPc, RunnerPool } from '../src/runner-pool.ts';
 
 // Where a pool job goes when no machine can take it (Build 11 P5, specs/one-runner-pool.md section 5). Cara, 2026-11-27,
@@ -266,4 +266,56 @@ test("the pool hands the fallback its own waiting jobs, marked no machine or no 
     looks[0].map((l) => [l.job.id, l.none, l.reasons]),
     [[1, true, ['cara-desktop is offline']]],
   );
+});
+
+// A fake GitHub for the minutes count: each repo's visibility, workflows' billable time and dispatched runs' jobs.
+function minutesGh(repos: Record<string, { private: boolean; billable?: Record<string, number>[]; jobs?: { group: string; labels: string[]; mins: number }[]; down?: string }>) {
+  const asked: string[] = [];
+  const of =
+    (repo: string): Gh =>
+    async (_m, path) => {
+      asked.push(path);
+      const r = repos[repo];
+      if (r.down && path.includes(r.down)) return { status: 502, body: null };
+      if (path === `repos/${repo}`) return { status: 200, body: { private: r.private } };
+      if (path.startsWith(`repos/${repo}/actions/workflows?`)) return { status: 200, body: { workflows: (r.billable ?? []).map((_, i) => ({ id: i + 1 })) } };
+      const t = path.match(/workflows\/(\d+)\/timing$/);
+      if (t) return { status: 200, body: { billable: Object.fromEntries(Object.entries(r.billable?.[Number(t[1]) - 1] ?? {}).map(([os, mins]) => [os, { total_ms: mins * MIN }])) } };
+      if (path.includes('/actions/runs?event=workflow_dispatch')) return { status: 200, body: { workflow_runs: r.jobs?.length ? [{ id: 7 }] : [] } };
+      if (path.endsWith('/runs/7/jobs?per_page=100')) return { status: 200, body: { jobs: (r.jobs ?? []).map((j) => ({ runner_group_name: j.group, labels: j.labels, started_at: new Date(NOW).toISOString(), completed_at: new Date(NOW + j.mins * MIN).toISOString() })) } };
+      return { status: 404, body: null };
+    };
+  return { of, asked };
+}
+
+test("the minutes count: private repos only, Windows double, the higher of GitHub's billable time and the fallback's own runs", async () => {
+  const gh = minutesGh({
+    'caraminden/peek-auras': { private: true, billable: [{ WINDOWS: 100 }, { UBUNTU: 50 }], jobs: [{ group: 'GitHub Actions', labels: ['windows-latest'], mins: 9.5 }] },
+    'caraminden/claude-coordinator': { private: false, billable: [{ UBUNTU: 5000 }] },
+  });
+  const m = await actionsMinutes(gh.of, ['caraminden/peek-auras', 'caraminden/claude-coordinator'], '2026-11-01');
+  assert.deepEqual(m, { used: 250, included: FALLBACK.included });
+  assert.ok(!gh.asked.some((p) => p.startsWith('repos/caraminden/claude-coordinator/')), "a public repo's minutes are free: never read");
+
+  // GitHub's billable time reads nothing (a cycle's start, or the field gone quiet): the fallback's own runs still count, rounded up, Windows double.
+  const quiet = minutesGh({
+    'caraminden/peek-auras': {
+      private: true,
+      billable: [{}],
+      jobs: [
+        { group: 'GitHub Actions', labels: ['windows-latest'], mins: 9.5 },
+        { group: 'Default', labels: ['self-hosted'], mins: 60 },
+      ],
+    },
+  });
+  assert.deepEqual(await actionsMinutes(quiet.of, ['caraminden/peek-auras'], '2026-11-01'), { used: 20, included: FALLBACK.included });
+});
+
+test('the minutes count fails closed: a read GitHub refuses, or a repo no login reads, is an error, so private Windows jobs wait', async () => {
+  const down = minutesGh({ 'caraminden/peek-auras': { private: true, billable: [{ WINDOWS: 1 }], down: '/timing' } });
+  const m = await actionsMinutes(down.of, ['caraminden/peek-auras'], '2026-11-01');
+  assert.ok('error' in m && /502/.test(m.error), JSON.stringify(m));
+  assert.equal(routeOf({ os: 'windows', session: false, threads: 4 }, false, m).route, 'wait');
+  const none = await actionsMinutes(() => null, ['caraminden/peek-auras'], '2026-11-01');
+  assert.ok('error' in none);
 });

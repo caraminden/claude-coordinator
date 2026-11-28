@@ -83,7 +83,7 @@ back out (d83ec21e2, 15:17 Nov 26) to ship to main by itself.
 - **Two designs on heavy jobs at once** (#2029's M6c and #2060) didn't duplicate:
   - `src/heavy-place.ts` (#2120) places CI jobs.
   - `src/heavy-builds.ts` (#2107) places jobs whose files come back.
-  - Both rank by M6's `rank()`, and each file's header names the other.
+  - Both rank by M6's `rank()`, and `heavy-builds.ts`'s header points at `heavy-place.ts`.
 - **Held mail between neighbours.** #2177 told #2107 to keep ownerless and runner host branches out, and told #2153
   that cloud stays off the Machines page. #2193 sent #2187, #2189 and #2191 its setting's name. Five minions edited the
   cloud files, and no ship was refused for it.

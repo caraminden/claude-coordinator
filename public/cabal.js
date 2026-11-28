@@ -1,6 +1,6 @@
 // A cabal's board for people (#2090): the ledger panel over the composer in the lead's chat, and the board's own page at
 // #/p/N/cabal/M. Both draw the same ledger (Josh, 2026-11-25, picked "A · A ledger"): one row per member, open ones
-// first and a blocking ask pinned on top, a red-run bar when the lead set one, and "Roster of N, nobody started yet"
+// first and a blocking ask pinned on top, a red-run line when the lead set one (both collapsed lines since #2289), and "Roster of N, nobody started yet"
 // before anyone starts. It only reads: src/cabal-board.ts builds the board, and people answer by writing in the lead's chat.
 import { api, h, icon, threadHref, view } from './base.js';
 import { shortDuration } from './chattext.js';
@@ -65,10 +65,11 @@ const inline = (text) => text.split(/`([^`]+)`/).map((part, i) => (i % 2 ? h('co
 export function askParts(text) {
   /** @type {{ at: number, len: number }[]} */
   const marks = [];
-  for (const m of text.matchAll(/(^|\s)(\d)\)\s+/g)) if (Number(m[2]) === marks.length + 1) marks.push({ at: /** @type {number} */ (m.index) + m[1].length, len: m[0].length - m[1].length });
+  const plain = text.replace(/`[^`]*`/g, (c) => '_'.repeat(c.length)); // a `1) …` inside code is not a fork
+  for (const m of plain.matchAll(/(^|\s)(\d)\)\s+/g)) if (Number(m[2]) === marks.length + 1) marks.push({ at: /** @type {number} */ (m.index) + m[1].length, len: m[0].length - m[1].length });
   const forks = marks.length >= 2 ? marks.map((m, i) => text.slice(m.at + m.len, marks[i + 1]?.at ?? text.length).trim()) : [];
   const split = (/** @type {string} */ part) => {
-    const i = part.search(/\bRecommended:\s*/i);
+    const i = part.replace(/`[^`]*`/g, (c) => '_'.repeat(c.length)).search(/\bRecommended:\s*/i);
     return i < 0
       ? { text: part, rec: '' }
       : {
@@ -123,7 +124,7 @@ function askLine(b, a, s, reply) {
 }
 
 /**
- * The red-run line, then the asks as lines: open ones, blocking first (in a chat, the first three), then on the page
+ * The red-run line, then the asks as lines: open ones, blocking first (in a chat, only the first blocking one), then on the page
  * the newest answered ones. Nothing here asks a person: a member's ask is for the Overseer, which posts a card itself.
  * @param {Board} b @param {LedgerState} s @param {boolean} all @param {((a: BoardAsk) => void) | null} reply
  */
@@ -132,7 +133,7 @@ function pinned(b, s, all, reply) {
   if (b.red) out.push(line(s, 'red', [h('span', { class: 'name' }, h('b', { class: 'cabal-blocking' }, 'Red run')), h('span', {}, `${SEP}${clock(b.red.at)}`)], b.red.text, [h('div', {}, inline(b.red.text))], 'red'));
   const open = b.asks.filter((a) => a.answered_at == null);
   const asks = [...open.filter((a) => a.blocking), ...open.filter((a) => !a.blocking)];
-  const shown = all ? asks : asks.slice(0, 3);
+  const shown = all ? asks : asks.filter((a) => a.blocking).slice(0, 1); // the chat pins the first blocking ask (the picked ledger)
   for (const a of shown) out.push(askLine(b, a, s, reply));
   if (all) for (const a of b.asks.filter((x) => x.answered_at != null).sort((x, y) => (y.answered_at ?? 0) - (x.answered_at ?? 0))) out.push(askLine(b, a, s, null));
   const rest = asks.length - shown.length;

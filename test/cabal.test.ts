@@ -16,5 +16,6 @@ test("an ask's numbered forks come apart, each with its recommendation (Plot 11'
 test('an ask with no numbered forks stays whole, a lone recommendation still called out', () => {
   assert.deepEqual(askParts('Please move src/a.ts to me (1) a claim). Recommended: move it.'), { intro: { text: 'Please move src/a.ts to me (1) a claim).', rec: 'move it.' }, forks: [] });
   assert.deepEqual(askParts('P3 2) wants src/b.ts 1) now'), { intro: { text: 'P3 2) wants src/b.ts 1) now', rec: '' }, forks: [] }, 'one fork, or numbers out of order, is not a list');
+  assert.deepEqual(askParts('Does `1) read 2) write` match? `Recommended: x` is a flag'), { intro: { text: 'Does `1) read 2) write` match? `Recommended: x` is a flag', rec: '' }, forks: [] }, 'not inside code');
   assert.deepEqual(askParts('Which helper?'), { intro: { text: 'Which helper?', rec: '' }, forks: [] });
 });

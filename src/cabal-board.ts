@@ -136,6 +136,7 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
   const claims = ref && repoDir ? parseClaims((await gitOut(['show', `${ref}:build-claims.md`], repoDir)) ?? '') : new Map<number, string[]>();
   const rows = store.cabalRows(leadId);
   const asks = store.cabalAsks(leadId);
+  const answered = answeredAsks(store, leadId); // read with the open ones, before any await: an answer meanwhile can't show an ask twice
   const tickets = new Map(rows.filter((r) => r.ticket_id != null).map((r) => [r.ticket_id!, store.getTicket(r.ticket_id!)]));
   const fileLists = rows.map((r) => rowFiles(r.files));
   const doubled = doubledFiles(fileLists);
@@ -179,7 +180,7 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
     kind: ref ? 'build' : 'goal',
     build: ref ? lead.build : null,
     members,
-    asks: [...asks, ...answeredAsks(store, leadId)].map((a) => askOf(store, lead.project_id, a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
+    asks: [...asks, ...answered].map((a) => askOf(store, lead.project_id, a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
     log: store.cabalLog(leadId),
     red: cabal.red ? { text: cabal.red, at: cabal.red_at ?? cabal.created_at } : null,
     width: cabal.width,

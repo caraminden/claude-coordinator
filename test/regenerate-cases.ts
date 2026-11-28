@@ -17,12 +17,16 @@ export type Repo = { wt: string; main: string; run: () => SpawnSyncReturns<strin
 export type Side = {
   name: string;
   git: Git;
-  setup: () => Repo;
-  // The command failed, or wrote outside its files: each script's own refusal.
+  // local: the scheme's own land.local.sh, for a side whose declared case runs with one.
+  setup: (local?: string) => Repo;
+  // Making the files again; the command failed, or wrote outside its files: each script's own words.
+  making: RegExp;
   failed: RegExp;
   outside: RegExp;
   // Said besides on either refusal, where the script says more.
   refused?: RegExp;
+  // What a side's declared reformat checks besides, and the land.local.sh it ships with.
+  declared?: { local: string; more: (r: Repo, res: SpawnSyncReturns<string>) => void };
 };
 
 // The "formatter": every .txt file upper-cased in place.
@@ -40,9 +44,9 @@ export function write(git: Git, where: string, files: Record<string, string>, ms
 
 // main with two .txt files and a note; the branch formats the .txt files (declared or not), and main then changes
 // a.txt, which conflicts with the formatted copy.
-export function reformat<R extends Repo>(side: { git: Git; setup: () => R }, body?: string, extra: Record<string, string> = {}): R {
+export function reformat<R extends Repo>(side: { git: Git; setup: (local?: string) => R }, body?: string, extra: Record<string, string> = {}, local?: string): R {
   const { git } = side;
-  const r = side.setup();
+  const r = side.setup(local);
   write(git, r.main, { 'a.txt': 'one\n', 'b.txt': 'bee\n', 'notes.md': 'note\n' }, 'base files');
   git(r.wt, 'merge', '-q', '--ff-only', 'main');
   write(git, r.wt, { 'a.txt': 'ONE\n', 'b.txt': 'BEE\n', ...extra }, '#1: format the txt files', body);
@@ -60,6 +64,19 @@ export function regenerateCases(side: Side) {
     assert.equal(res.status, 1, res.stderr);
     assert.match(res.stderr, /conflicted files: a\.txt\..*declare it instead: a commit with the trailers Regenerate: <command> and Regenerate-files:/);
     assert.equal(show(r, 'a.txt'), 'one\ntwo');
+  });
+
+  test(`${side.name}: a declared reformat ships through main's change: the files take main's side and the command runs again after the rebase`, () => {
+    const r = reformat(side, declare(FMT, '*.txt'), {}, side.declared?.local);
+    assert.equal(r.check().status, 0, 'the hand-off check counts the declared conflict as clean');
+    const res = r.run();
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, side.making);
+    assert.equal(show(r, 'a.txt'), 'ONE\nTWO', "main's new line, formatted");
+    assert.equal(show(r, 'b.txt'), 'BEE');
+    assert.equal(git(r.main, 'log', '-1', '--format=%s', 'main'), `#1: regenerated at ship time: ${FMT}`);
+    assert.equal(git(r.wt, 'status', '--porcelain'), '');
+    side.declared?.more(r, res);
   });
 
   test(`${side.name}: a conflict outside the declared files still refuses, naming that file`, () => {

@@ -298,11 +298,13 @@ for (const [kind, cut, lost, fallback] of [
     const shared = join(r.dir, 'shared');
     const res = c.run({ FAKE_CUT: cut, FAKE_CUT_KIND: kind, COORDINATOR_SHARED_DIR: shared });
     assert.equal(res.status, 0, res.stderr);
-    assert.match(res.stderr, new RegExp(lostRun(lost)));
     assert.doesNotMatch(res.stderr, /tests failed|a test hung/);
-    if (fallback) assert.match(res.stderr, new RegExp(`CI FALLBACK: ${fallback}`));
-    else {
-      assert.match(res.stderr, /running CI once more\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
+    if (fallback) {
+      assert.match(res.stderr, new RegExp(lostRun(lost)));
+      assert.match(res.stderr, new RegExp(`CI FALLBACK: ${fallback}`));
+    } else {
+      // The lost run's line, then the fresh run's pass: one line can't stand in for the other.
+      assert.match(res.stderr, new RegExp(`${lostRun(lost)}\\n.*CI passed on \\w+ in \\d+s \\(https://ci/8\\)`, 's'));
       assert.doesNotMatch(res.stderr, /CI FALLBACK/);
     }
     assert.match(landLog(shared), new RegExp(`· cut-off rerun · ticket/1-x · https://ci/7 · ${fallback ? 'no answer' : 'green'}$`, 'm'));

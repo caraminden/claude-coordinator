@@ -6,7 +6,7 @@ import { copyFileSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { env, git, setup } from './land-fixture.ts';
 import { copyLand } from './land-files.ts';
-import { FMT, declare, reformat as reformatOn, regenerateCases, write as writeWith } from './regenerate-cases.ts';
+import { FMT, declare, regenerateCases, write as writeWith } from './regenerate-cases.ts';
 import { test } from 'node:test';
 
 const side = {
@@ -16,26 +16,14 @@ const side = {
     const r = setup();
     return { ...r, main: r.source, check: () => r.run({}, ['--check']) };
   },
+  making: /making \*\.txt again on main \([0-9a-f]+\): for f in/,
   failed: /the Regenerate command `.*exit 4` failed \(exit 4\) on main \([0-9a-f]+\), so nothing landed and what it wrote was put back\. Its output ended: formatter broke/,
   outside: /changed files outside Regenerate-files \(\*\.txt\): (made\.log notes\.md|notes\.md made\.log), so nothing landed/,
 };
 regenerateCases(side);
 
 const write = (where: string, files: Record<string, string>, msg: string, body?: string) => writeWith(git, where, files, msg, body);
-const reformat = (body?: string) => reformatOn(side, body);
 const show = (r: { source: string }, ref: string, f: string) => git(r.source, 'show', `${ref}:${f}`);
-
-test("a declared reformat ships through main's change: the files take main's side and the command runs again on main", () => {
-  const r = reformat(declare(FMT, '*.txt'));
-  assert.equal(r.check().status, 0, 'the hand-off check counts the declared conflict as clean');
-  const res = r.run();
-  assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /making \*\.txt again on main \([0-9a-f]+\): for f in/);
-  assert.equal(show(r, 'main', 'a.txt'), 'ONE\nTWO', "main's new line, formatted");
-  assert.equal(show(r, 'main', 'b.txt'), 'BEE');
-  assert.equal(git(r.source, 'log', '-1', '--format=%s', 'main'), `#1: regenerated at ship time: ${FMT}`);
-  assert.equal(git(r.wt, 'status', '--porcelain'), '');
-});
 
 // Citadel's only: the template has no hand-over to a newer land.sh a rebase brings (#500).
 test('a declared commit the rebase empties still ships its command when the rebase brought a newer land.sh, which runs over', () => {

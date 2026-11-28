@@ -65,7 +65,7 @@ function placement() {
 
 function remember() {
   if (!win || win.isDestroyed()) return;
-  try { writeFileSync(PLACE(), JSON.stringify({ ...win.getNormalBounds(), maximized: win.isMaximized() })); } catch {}
+  try { writeFileSync(PLACE(), JSON.stringify({ ...win.getNormalBounds(), maximized: win.isMaximized() || maximizeOnShow })); } catch {}
 }
 
 function open(url = START.href) {

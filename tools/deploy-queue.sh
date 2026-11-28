@@ -136,11 +136,13 @@ queue_done() {
 # those waits for every lower ticket, so nobody who arrived after it goes ahead of it: .order ranks the waiters between
 # two of them only among themselves (had a later one counted itself ahead, both would take the lock: The Trans Agenda #76).
 queue_order() {
-  local t i=0 l pins=''
+  local t i=0 l pins='' qt=''
   QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY="" QUEUE_HOLD=" " QUEUE_PIN=0
+  read -r _ _ qt _ 2>/dev/null <"$1/../quick-train" || qt='' # the quick front a plan names: its "quick" place lasts as long as the plan
   for t in "$1"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
-    [ "${l[5]:-}" != hold ] && [ "${l[5]:-}" != quick ] && [ "${l[8]:-}" != hold ] || QUEUE_HOLD+="${t##*/} " # the core's (kit template's) is its 9th line; quick: a quick train's front (tools/land/quick.sh)
+    # The core's (kit template's) hold is its 9th line; quick: the front of a planned quick train (tools/land/quick.sh).
+    [ "${l[5]:-}" != hold ] && { [ "${l[5]:-}" != quick ] || [ "${t##*/}" != "$qt" ]; } && [ "${l[8]:-}" != hold ] || QUEUE_HOLD+="${t##*/} "
     [ "${l[1]:-0}" != 0 ] || [ "${l[4]:-}" = order ] || [ "${l[7]:-}" = order ] || QUEUE_OLD+=("${t##*/}") # the core's "order" is line 8
   done
   [ -f "$1/.order" ] || return 0

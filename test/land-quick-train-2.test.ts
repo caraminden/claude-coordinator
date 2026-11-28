@@ -128,3 +128,15 @@ test('gap train: turned off while its front waits on a running check, the check 
   assert.equal(quickCalls(l.r.dir).length, 1);
   l.done();
 });
+
+test("gap train: the full train it was planned onto stopping takes its front's place in line with it, so the line keeps today's order", async () => {
+  const l = await line(mixed, (d) => ({ ...quick(d), FAKE_QUICK_SLEEP: '3' }), on);
+  const shipping = l.go();
+  await until('the gap train planned', () => existsSync(join(l.state, 'quick-train')));
+  l.stop(2);
+  const done = await shipping;
+  done.forEach((d, i) => i === 1 || assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  // As with it off: 3 and 4 were waiting ahead of 5, and nothing planned a quick train for 5 once 2's train went.
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f3.txt: 3', 'f4.txt: 4', 'f5.txt: 5', 'f6.txt: 6', 's7.txt: 7']);
+  l.done();
+});

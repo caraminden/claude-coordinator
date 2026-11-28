@@ -147,11 +147,13 @@ importers() {
 # concurrency stays within <cpus>. <file> <copies> <cpus> sets fit_k (copies at once, at least 1), fit_inner (the
 # BURN_IN_INNER to export, <cpus> / fit_k, for a file that reads it; else empty) and fit_c (the file's own concurrency:
 # its largest fixed number, or true). Returns 1 when that can't be capped: true, or a number over <cpus>.
+# Whether <file> reads BURN_IN_INNER in its code, not only in a string (test/burn-in.test.ts' fixtures name it in quotes).
+honours_inner() { grep -E 'process\.env\.BURN_IN_INNER' "$1" | grep -qvE "['\"\`](Number\()?process\.env\.BURN_IN_INNER"; }
 fit() {
   local file=$1 n=$2 cpus=$3
   fit_inner='' fit_c=1 fit_k=$((n < cpus ? n : cpus))
   [ "$fit_k" -ge 1 ] || fit_k=1
-  if grep -q "process\.env\.BURN_IN_INNER" "$file"; then
+  if honours_inner "$file"; then
     fit_inner=$((cpus / fit_k)) fit_c=$fit_inner
     return 0
   fi
@@ -168,7 +170,7 @@ weigh() {
   local file=$1 limit=$2 dir t0 t1 out rc
   weigh_note='' weight=${BURN_IN_WEIGHT:-}
   [ -z "$weight" ] || return 0
-  dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/burn-in-weigh.XXXXXX") || { weight=0; return 0; }
+  dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/burn-in-weigh.XXXXXX") || { weight=$cpus weigh_note="; it couldn't be weighed (no temp folder), so it counts as filling the runner"; return 0; }
   t0=$(date +%s%N)
   # times: this subshell's waited-for children, so the test run and everything under it.
   out=$({ TMPDIR=$dir timeout -k 10 "$limit" "${nice_cmd[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" --test-reporter=spec "$file" >"$dir/run.log" 2>&1; echo "rc $?"; times; })
@@ -276,7 +278,7 @@ for f in "${files[@]}"; do
     continue
   fi
   rc=0 t0=$SECONDS fit_inner=''
-  if grep -q "process\.env\.BURN_IN_INNER" "$f"; then
+  if honours_inner "$f"; then
     fit "$f" "$copies" "$cpus" # its in-file concurrency is capped to fit the CPUs (#2073)
   else
     weigh "$f" "$left"

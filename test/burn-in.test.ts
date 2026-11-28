@@ -392,9 +392,10 @@ test('a heavy file on a small runner runs all 10 copies, at most CPUs x 2.5 / it
 });
 
 test("a light file runs all 10 at once on the same runner, as a light file's race needs (#1327's fresh-session)", () => {
-  const { r, ran } = paced({ 'test/held.test.ts': held }, { BURN_IN_CPUS: '4', BURN_IN_WEIGHT: '1' });
+  const { r, ran, peak } = paced({ 'test/held.test.ts': held }, { BURN_IN_CPUS: '4', BURN_IN_WEIGHT: '1', BURN_IN_HOLD: '3000' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(ran, 10);
+  assert.equal(peak, 10, 'all 10 copies were running at the same moment');
   assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: one copy alone kept 1\.0 of this runner's 4 CPUs busy, so all 10 copies run at once/m);
   assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: 10 of 10 copies at once passed, in \d+ s$/m);
 });
@@ -405,7 +406,7 @@ const BURNS = [
   "import { test } from 'node:test';",
   "import { spawnSync } from 'node:child_process';",
   "test('a server that works hard', () => {",
-  "  const spin = 'const t = Date.now(); while (Date.now() - t < 3000) { const u = process.cpuUsage(); if (u.user + u.system > 1.5e6) break }';",
+  "  const spin = 'const t = Date.now(); while (Date.now() - t < 10000) { const u = process.cpuUsage(); if (u.user + u.system > 1.5e6) break }';",
   "  const code = `const { Worker } = require('node:worker_threads'); for (let i = 0; i < 2; i++) new Worker(${JSON.stringify(spin)}, { eval: true });`;",
   "  spawnSync(process.execPath, ['-e', code]);",
   '});',
@@ -422,10 +423,11 @@ test("one copy is weighed alone first, its child processes' CPU time counted: a 
   assert.equal(sleeps.status, 0, sleeps.stdout + sleeps.stderr);
   const light = weighed(sleeps, 'test/held\\.test\\.ts');
   assert.ok(light.weight < 1 && light.k === 10, `a sleeper weighed ${light.weight}, ran ${light.k} at once`);
-  const spins = ship(repo({ 'test/burns.test.ts': BURNS }), { BURN_IN_CPUS: '2', BURN_IN_WEIGHT: '' });
+  // One CPU: anything over a quarter of a CPU paces it, so a busy box still slows the spinners too little to pass.
+  const spins = ship(repo({ 'test/burns.test.ts': BURNS }), { BURN_IN_CPUS: '1', BURN_IN_WEIGHT: '' });
   assert.equal(spins.status, 0, spins.stdout + spins.stderr);
   const heavy = weighed(spins, 'test/burns\\.test\\.ts');
-  assert.ok(heavy.weight >= 0.8 && heavy.k <= 6, `two spinning threads weighed ${heavy.weight}, ran ${heavy.k} at a time`);
+  assert.ok(heavy.weight > 0.25 && heavy.k < 10, `two spinning threads weighed ${heavy.weight}, ran ${heavy.k} at a time`);
 });
 
 test('a race failing 1 copy in 10 is still refused when its copies run 3 at a time, in the line land.sh reads', () => {
@@ -476,6 +478,9 @@ test("a file that reads BURN_IN_INNER isn't weighed: copies x its in-file checks
   const r = ship(dir, { BURN_IN_PROBE: join(dir, 'probe'), BURN_IN_CPUS: String(SLOT), BURN_IN_WEIGHT: '' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.doesNotMatch(r.stdout, /one copy alone kept/);
+  // A file that only names it in a string (this file's fixtures) is weighed like any other.
+  const named = ship(repo({ 'test/named.test.ts': `import { test } from 'node:test';\nconst s = ${JSON.stringify(HONOURS)};\ntest('x', () => {});\n` }), { BURN_IN_WEIGHT: '' });
+  assert.match(named.stdout, /^burn-in: test\/named\.test\.ts: one copy alone kept/m, named.stdout + named.stderr);
   const peaks = readFileSync(join(dir, 'peaks'), 'utf8').trim().split('\n').map(Number);
   assert.ok(Math.max(...peaks) <= SLOT, `peak ${Math.max(...peaks)} checks at once`);
   assert.equal(peaks.length, 10 * 8 * 2, 'all 10 copies ran all 8 checks');

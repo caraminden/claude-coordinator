@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir, tmpdir } from 'node:os';
+import { availableParallelism, homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { promisify } from 'node:util';
@@ -96,9 +96,12 @@ test("a contraption whose service is down and whose keys don't open in the copy:
 
 // The smoke pass after the boot (#486): a database with a Taskmaster, a minion with a long chat and
 // scheme instructions; a copy of this checkout passes, and each copy with one of the historical breaks
-// put back fails, naming the call. Run together, each with its own server and Chromium; a burn-in off CI caps how many
-// at once with BURN_IN_INNER (#2073).
-describe('the smoke pass through the turn tools, the file viewer and the launch arguments', { concurrency: Number(process.env.BURN_IN_INNER) || true, skip: !hasChromium && 'no headless Chromium (the boot check needs one)' }, () => {
+// put back fails, naming the call. Each runs its own server and Chromium, and keeps about 3 cores busy, so they run one
+// per 4 cores the box has, not all 8 at once (#2298): on a 4-core GitHub runner, where the suite runs 2 files at once,
+// all 8 together kept it at load 9 for 50 s and starved the file beside them (land-train-suspects' 60 s timeouts,
+// land.test.ts's hang test, machine-turn, db-writer). A burn-in caps it with BURN_IN_INNER (#2073).
+const smokeAtOnce = Number(process.env.BURN_IN_INNER) || Math.max(1, Math.floor(availableParallelism() / 4));
+describe('the smoke pass through the turn tools, the file viewer and the launch arguments', { concurrency: smokeAtOnce, skip: !hasChromium && 'no headless Chromium (the boot check needs one)' }, () => {
   const dir = join(root, 'smoke');
   const db = join(dir, 'coordinator.db');
   mkdirSync(dir);

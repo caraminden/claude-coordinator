@@ -454,7 +454,7 @@ function poolBlock(s, pool) {
   if (!pool || !mine.length) return '';
   const would = mine.filter((j) => j.machine).length;
   const [row] = settingsRow(
-    { key: `ci-pool-${s.id}`, icon: 'rows', hue: 'waiting', title: "The runner pool's line", summary: [toneChip('warn', `${mine.length} in line`), `of ${pool.total} across every scheme`, would ? `${would} would start now` : ''] },
+    { key: `ci-pool-${s.id}`, icon: 'rows', hue: 'waiting', title: "The runner pool's line", summary: [toneChip('warn', `${mine.length} in line`), `of ${pool.total} across every scheme${would ? `, ${would} would start now` : ''}`] },
     h('p', { class: 'look-prose' }, "Watching only: the pool shows where it would start each job and why the rest wait. This scheme's runners still take them."),
     showFirst({ key: `ci-pool-${s.id}`, items: mine.map(poolItem), n: 6, noun: 'jobs', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows) }),
   );

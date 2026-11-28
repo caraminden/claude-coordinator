@@ -8,7 +8,19 @@ const DAY = Date.parse('2026-11-24T20:00:00Z'); // noon Pacific
 const NIGHT = Date.parse('2026-11-25T08:00:00Z'); // midnight Pacific
 const MIN = 60_000;
 
-type Run = { id: number; path: string; display_title: string; head_branch: string; status: string; conclusion: string | null; run_attempt: number; run_started_at: string; html_url: string /** Its suite runs on GitHub's runners (the shards), not the desktop's test job. */; gh?: boolean };
+type Run = {
+  id: number;
+  path: string;
+  display_title: string;
+  head_branch: string;
+  status: string;
+  conclusion: string | null;
+  run_attempt: number;
+  run_started_at: string;
+  html_url: string /** Its suite runs on GitHub's runners (the shards), not the desktop's test job. */;
+  gh?: boolean /** GitHub lists no jobs for it yet. */;
+  noJobs?: boolean;
+};
 
 function world(now = DAY, saved: unknown = null) {
   const w = {
@@ -16,6 +28,8 @@ function world(now = DAY, saved: unknown = null) {
     line: 0,
     /** The repo variable CI_RUNNER: most tests here are of ships on the desktop (its value `desktop`); null is unset, GitHub's (#2209). */
     ciRunner: 'desktop' as string | null,
+    /** GitHub fails the variable's read (and an unlisted run's jobs). */
+    varsDown: false,
     off: false,
     down: false,
     runs: [] as (Run & { repo: string })[],
@@ -77,8 +91,10 @@ function world(now = DAY, saved: unknown = null) {
       if (w.down) throw new Error('GitHub is down');
       const ref = /git\/ref\/heads\/(.+)$/.exec(path);
       if (ref) return { status: w.refs.has(ref[1]) ? 200 : 404, etag: null, body: {} };
+      if (path.endsWith('/actions/variables/CI_RUNNER') && w.varsDown) return { status: 502, etag: null, body: {} };
       if (path.endsWith('/actions/variables/CI_RUNNER')) return w.ciRunner === null ? { status: 404, etag: null, body: {} } : { status: 200, etag: null, body: { name: 'CI_RUNNER', value: w.ciRunner } };
       const jobs = /runs\/(\d+)\/jobs/.exec(path);
+      if (jobs && w.runs.find((x) => x.id === Number(jobs[1]))?.noJobs) return { status: w.varsDown ? 502 : 200, etag: null, body: { jobs: [] } };
       if (jobs && w.runs.find((x) => x.id === Number(jobs[1]))?.gh)
         return {
           status: 200,
@@ -1468,4 +1484,39 @@ test("the ship line still holds while CI_RUNNER sends ships' pushes to the deskt
     'desktop',
   );
   assert.equal(placeOf([]), null);
+});
+
+test("a run whose jobs GitHub hasn't listed or won't say is left alone; a ship's counts only while ships' pushes go to the desktop", async () => {
+  const w = world();
+  w.ciRunner = null;
+  w.land({ noJobs: true, status: 'queued' });
+  w.heavy();
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), null, "Peek's labels stay for a ship that is GitHub's by default");
+  assert.deepEqual(w.posts, []);
+  const d = world();
+  d.line = 0;
+  d.land({ noJobs: true, status: 'queued' });
+  d.heavy();
+  await d.tick();
+  assert.match(d.hold.shipNow(d.now) ?? '', /ship/, 'with CI_RUNNER=desktop it counts, as before');
+  // A desktop ship running and a branch run whose jobs read fails: it may be GitHub's, so it isn't stopped.
+  const g = world();
+  g.land();
+  g.add('tests', { file: 'tests.yml', noJobs: true });
+  await g.for(5 * MIN);
+  assert.deepEqual(g.posts, []);
+});
+
+test('a failed read of CI_RUNNER after it said desktop fails open: the line stops holding till a read says desktop again', async () => {
+  const w = world();
+  w.line = 1;
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), 'a ship is in line');
+  w.varsDown = true;
+  await w.tick(6 * MIN);
+  assert.equal(w.hold.shipNow(w.now), null);
+  w.varsDown = false;
+  await w.tick();
+  assert.equal(w.hold.shipNow(w.now), 'a ship is in line');
 });

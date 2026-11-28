@@ -388,7 +388,8 @@ export class CiHold {
     if (now - this.route.at < ROUTE_MS) return;
     const r = await (this.d.get ?? ghGet)(`repos/${own}/actions/variables/CI_RUNNER`, null, as).catch(() => null);
     if (r && rateLimited(r)) throw new RateLimited();
-    if (r?.status === 200 || r?.status === 404) this.route = { at: now, desktop: r.status === 200 && String((r.body as { value?: unknown } | null)?.value ?? '').toLowerCase() === 'desktop' };
+    // Unread, it fails open (ships taken to be on GitHub) and asks again at the next look.
+    this.route = r?.status === 200 || r?.status === 404 ? { at: now, desktop: r.status === 200 && String((r.body as { value?: unknown } | null)?.value ?? '').toLowerCase() === 'desktop' } : { at: this.route.at, desktop: false };
   }
 
   /** Where a tests.yml run's suite goes; null while its jobs don't say yet. */
@@ -554,10 +555,10 @@ export class CiHold {
             if (!kind || ((kind === 'ship' || kind === 'main') && old)) continue;
             if (kind === 'ship' || kind === 'suite' || kind === 'main') {
               listed.add(run.id);
-              // On GitHub's runners it shares nothing with the desktop. Not known yet: a ship's counts, as one running on a
-              // runner does (only the desktop's test job asks), and a queued run waits for the next look.
+              // On GitHub's runners it shares nothing with the desktop. Not known yet (no jobs listed, or GitHub didn't answer):
+              // a ship's counts only while ships' pushes go to the desktop, and anything else is left alone till a look says.
               const place = await this.placeOf(repo, run, as);
-              if (place === 'github' || (place === null && kind !== 'ship' && run.status !== 'in_progress')) continue;
+              if (place === 'github' || (place === null && !(kind === 'ship' && this.route.desktop))) continue;
             }
             if (repo === own && run.status === 'in_progress')
               running.push({ kind, what: kind === 'ship' ? "a ship's tests" : run.display_title || NAMES[kind], url: run.html_url ?? null, ticket: kind === 'proof' || kind === 'heavy' ? this.d.ticket(repo, run.head_branch ?? '', heavyId(kind, run.display_title ?? '')) : null });

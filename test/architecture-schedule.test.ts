@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ScheduledRuns, type ScheduledRunDeps } from '../src/schedules.ts';
-import { addArchitectureCheck, addArchitectureChecks } from '../src/standard-audits.ts';
+import { addArchitectureChecks } from '../src/standard-audits.ts';
 import type { Runner } from '../src/runner.ts';
 import { fake } from './typed.ts';
 
@@ -15,7 +15,7 @@ const root = mkdtempSync(join(tmpdir(), 'architecture-'));
 after(() => rmSync(root, { recursive: true, force: true })); // timing-ok: own temp dir
 const rows = (store: Store, id: number) => store.schedules.list(id).filter((s) => s.template === 'architecture');
 
-test("every scheme gets the check once, a deleted one stays deleted, and Citadel's hand-written row is adopted, not doubled", () => {
+test("every scheme gets the check, and Citadel's hand-written row is adopted, not doubled", () => {
   const store = new Store(join(root, 'db1.sqlite'));
   const citadel = store.createProject('Citadel', null);
   const other = store.createProject('Theory of Crafting', null);
@@ -31,10 +31,6 @@ test("every scheme gets the check once, a deleted one stays deleted, and Citadel
   assert.match(c.brief, /For Citadel:\n.*retro-log/);
   assert.equal(c.last_run_at, 1_000, 'its last run is kept');
   assert.equal(rows(store, other.id).length, 1);
-  assert.deepEqual(addArchitectureChecks(store, '/data'), [], 'the next boot adds nothing');
-  store.schedules.remove(rows(store, other.id)[0].id);
-  assert.equal(addArchitectureCheck(store, '/data', other.id), null);
-  assert.equal(rows(store, other.id).length, 0);
 });
 
 test('an inactive scheme skips at no cost; an active one runs', async () => {

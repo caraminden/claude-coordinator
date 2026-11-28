@@ -1,4 +1,4 @@
-// The monthly glossary drift check (#1774, kit/schedules/glossary-drift.md): every scheme gets one at boot, once, and a deleted one stays deleted.
+// The monthly glossary drift check (#1774, kit/schedules/glossary-drift.md): every scheme gets one at boot, once, (seeded-once rule: standard-audit-schedules.test.ts).
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { loadTemplates } from '../src/schedules.ts';
-import { addGlossaryDrift, addGlossaryDrifts } from '../src/standard-audits.ts';
+import { addGlossaryDrifts } from '../src/standard-audits.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'glossary-drift-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const rows = (store: Store, id: number) => store.schedules.list(id).filter((s) => s.template === 'glossary-drift');
 
-test('every scheme, not just Citadel, gets the check once; a deleted one stays deleted', () => {
+test('every scheme, not just Citadel, gets the check, its brief naming the scheme', () => {
   const store = new Store(join(root, 'db.sqlite'));
   const a = store.createProject('Theory of Crafting', null);
   const b = store.createProject('Plain', null);
@@ -22,10 +22,6 @@ test('every scheme, not just Citadel, gets the check once; a deleted one stays d
     assert.equal(rows(store, p.id).length, 1);
     assert.match(rows(store, p.id)[0].brief, new RegExp(`for ${p.name}|${p.name}`));
   }
-  assert.deepEqual(addGlossaryDrifts(store, '/data'), [], 'the next boot adds nothing');
-  store.schedules.remove(rows(store, a.id)[0].id);
-  assert.equal(addGlossaryDrift(store, '/data', a.id), null);
-  assert.equal(rows(store, a.id).length, 0);
 });
 
 test('the template is gated on activity, runs on Sonnet medium, reads only, and proposes on one card', () => {

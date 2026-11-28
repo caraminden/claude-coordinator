@@ -97,6 +97,7 @@ public static class CitadelCiJob {
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimit info, int size);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref CpuRate info, int size);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int infoClass, out Accounting info, int size, IntPtr returned);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int infoClass, out CpuRate info, int size, IntPtr returned);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint exitCode);
@@ -134,6 +135,13 @@ public static class CitadelCiJob {
     int err = Marshal.GetLastWin32Error();
     if (hundredths <= 0 && err == 87) return;
     throw new Win32Exception(err);
+  }
+
+  // The job's hard cap in hundredths of a percent, 0 for none.
+  public static uint RateOf(IntPtr job) {
+    CpuRate rate;
+    if (!QueryInformationJobObject(job, 15, out rate, Marshal.SizeOf(typeof(CpuRate)), IntPtr.Zero)) throw new Win32Exception();
+    return (rate.ControlFlags & RATE_ENABLE) != 0 ? rate.Rate : 0;
   }
 
   // 0 when the process is in the job now; -1 when it can't be opened (it ended, or is protected); -2 when its pid now
@@ -236,12 +244,20 @@ if ($Prove) {
   } finally {
     [CitadelCiJob]::Kill($job)  # a ping that got out isn't killed with it, and ends by itself within 30 seconds
   }
-  $held = $kids.ship.Count -gt 0 -and $kids.squeezed.Count -gt 0 -and $inJob -eq $all.Count -and $below -eq $all.Count -and $used.job -le $cap + 5 -and
+  # An older agent's 75% cap on a named job a restart opens again (#2262): opened with 0, it has none.
+  $name = 'Local\CitadelCiProve-' + $PID
+  $old = [CitadelCiJob]::Create($name, 75)
+  $before = [CitadelCiJob]::RateOf($old)
+  $again = [CitadelCiJob]::Create($name, 0)
+  $reopened = @($before, [CitadelCiJob]::RateOf($again))
+  [CitadelCiJob]::Close($again); [CitadelCiJob]::Close($old)
+  $held = $reopened[0] -eq 7500 -and $reopened[1] -eq 0 -and $kids.ship.Count -gt 0 -and $kids.squeezed.Count -gt 0 -and $inJob -eq $all.Count -and $below -eq $all.Count -and $used.job -le $cap + 5 -and
     $used.squeezed -le $squeezed + 3 -and $used.ship -ge $cap - $squeezed - 10 -and $lifted.squeezed -ge $squeezed + 10 -and $lifted.job -le $cap + 5 -and $bashHeld -ne $false
   Write-Host ("{0} of {1} burners started, {2} in the job and their slot, {3} at below-normal priority." -f $all.Count, (2 * $cores), $inJob, $below)
   Write-Host ("Squeezed: the job used {0:N1}% of the PC's {1} cores against a cap of {2}%; the ship's slot {3:N1}%, the squeezed one {4:N1}% against {5}%." -f $used.job, $cores, $cap, $used.ship, $used.squeezed, $squeezed)
   Write-Host ("Lifted: the job used {0:N1}%; the ship's slot {1:N1}%, the other {2:N1}% (it should get well over {3}% now)." -f $lifted.job, $lifted.ship, $lifted.squeezed, $squeezed)
   Write-Host $(if ($null -eq $bashHeld) { 'Git Bash: not installed here, not checked.' } elseif ($bashHeld) { 'Git Bash: the program it started stayed in its slot.' } elseif ($pings.Count) { 'Git Bash: the program it started is NOT in its slot (it broke away).' } else { "Git Bash: the ping it should have started never appeared (is $gitBash working?)." })
+  Write-Host ("Reopened: a named job capped at 75% had {0} hundredths, opened again with no cap {1} (should be 7500, then 0)." -f $reopened[0], $reopened[1])
   Write-Host $(if ($held) { 'Held: the cap, the priority and the squeeze reach processes started inside the slots, and the squeeze lifts.' } else { 'NOT held: the lines above say which part failed.' })
   exit $(if ($held) { 0 } else { 1 })
 }

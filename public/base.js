@@ -502,13 +502,27 @@ export function icon(name) {
  * contraption's top bar colours them (frames.js, with its computed background colour); null puts the plain colour back.
  * A canvas pixel turns any CSS colour into the hex a theme colour surely takes; a see-through one keeps the plain colour (#694).
  * `over`, a modal's backdrop (#772), is laid over the colour, so the controls dim with the page under it.
+ * Citadel's own modal dialogs do the same by themselves (syncModalTint, below).
  */
 /** @type {CanvasRenderingContext2D | null} */
 let pixel = null;
+/** What a contraption's top bar asked for (frames.js), kept so a modal opening or closing here recomputes the whole tint. @type {{ color: string | null | undefined, over: string | undefined }} */
+let asked = { color: null, over: undefined };
+/** The backdrops of Citadel's own open modal dialogs (#2287), laid over everything else. @type {string[]} */
+let modalOvers = [];
 /** @param {string | null | undefined} color @param {string} [over] */
 export function tintTitleBar(color, over) {
+  asked = { color, over };
+  paintTitleBar();
+}
+
+function paintTitleBar() {
+  const { color: bar, over } = asked;
+  const overs = [...(over ? [over] : []), ...modalOvers];
   for (const m of /** @type {NodeListOf<HTMLMetaElement>} */ (document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]'))) {
     m.dataset.base ??= m.content;
+    // Only a modal's backdrop over the plain colour: the base colour is what it dims.
+    const color = bar || (overs.length ? m.dataset.base : null);
     if (!color || !matchMedia(m.media).matches) {
       m.content = m.dataset.base;
       continue;
@@ -524,10 +538,38 @@ export function tintTitleBar(color, over) {
     pixel.clearRect(0, 0, 1, 1);
     fill(color);
     if (pixel.getImageData(0, 0, 1, 1).data[3] < 255) fill(/** @type {string} */ (m.dataset.base));
-    if (over) fill(over);
+    for (const o of overs) fill(o);
     const [r, g, b] = pixel.getImageData(0, 0, 1, 1).data;
     m.content = `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
   }
+}
+
+/**
+ * The one hook for Citadel's own modals (#2287, Cara 2026-11-28: the image viewer's backdrop dimmed the page but the window
+ * controls stayed bright): any open modal <dialog> (showModal) dims the controls by its ::backdrop, and closing it puts
+ * back what was there (a contraption's bar colour, the map's, the plain one). One that covers the title bar strip itself
+ * (the full-screen file viewer) paints its own colour there, so it isn't dimmed.
+ */
+export function syncModalTint() {
+  const next = [...document.querySelectorAll('dialog:modal')]
+    .filter((d) => d.getBoundingClientRect().top > 0)
+    .map((d) => getComputedStyle(d, '::backdrop').backgroundColor)
+    .filter((c) => c && c !== 'rgba(0, 0, 0, 0)');
+  if (next.join() === modalOvers.join()) return;
+  modalOvers = next;
+  paintTitleBar();
+}
+let syncQueued = false;
+if (typeof MutationObserver === 'function' && document.documentElement) {
+  // A dialog opening or closing (showModal and close set and clear its open attribute).
+  new MutationObserver(() => {
+    if (syncQueued) return;
+    syncQueued = true;
+    requestAnimationFrame(() => {
+      syncQueued = false;
+      syncModalTint();
+    });
+  }).observe(document.documentElement, { subtree: true, attributeFilter: ['open'] });
 }
 
 /** A cost at API prices, marked as an estimate: "≈ $0.42", "≈ $12". Not a bill on a subscription. @param {number} usd */

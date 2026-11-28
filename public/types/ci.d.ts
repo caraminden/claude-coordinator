@@ -474,6 +474,8 @@ export interface CiPoolMachine {
     pause: { until: number | null; by: string; at: number; words: string } | null;
     busy: { why: string; since: number; anyway: boolean } | null;
   } | null;
+  /** The schemes it lends CI still on their standing runners, which Pause doesn't hold. */
+  standing?: number[];
   running: CiPoolRunning[];
 }
 

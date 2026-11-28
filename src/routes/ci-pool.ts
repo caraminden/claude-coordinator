@@ -3,6 +3,7 @@
 import { HttpError, json, readJson, type Route } from '../http.ts';
 import { managesMachine } from '../access.ts';
 import { poolKey, poolOn } from '../runner-pool.ts';
+import { offWords } from '../owner-busy.ts';
 
 export const ciPoolRoutes: Route[] = [
   {
@@ -26,7 +27,12 @@ export const ciPoolRoutes: Route[] = [
             const row = app.store.getMachine(m.id);
             return !!row && managesMachine(session, row);
           })
-          .map((m) => ({ ...m, running: m.running.map((r) => (sees(r.scheme) ? r : { ...r, repo: '', scheme: 0, name: "another scheme's job" })) })),
+          .map((m) => {
+            // A Pause or "Run CI anyway" since the pool's last pass shows at once, not after the next one (P4).
+            const use = m.use && app.ownerBusy ? app.ownerBusy.use(m.id) : m.use;
+            const off = use && m.off !== 'is offline' ? offWords(use) : m.off;
+            return { ...m, use, off, running: m.running.map((r) => (sees(r.scheme) ? r : { ...r, repo: '', scheme: 0, name: "another scheme's job" })) };
+          }),
         pooled: app.store
           .listProjects()
           .filter((p) => sees(p.id) && poolOn(app.store, p.id))

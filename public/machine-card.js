@@ -364,7 +364,8 @@ const PAUSES = /** @type {const} */ ([
  * @param {CiPoolMachine} c @param {Redraw} redraw
  */
 function ciUsePart(c, redraw) {
-  const { pause, busy } = c.use ?? { pause: null, busy: null };
+  if (!c.use || c.off === 'is offline') return null;
+  const { pause, busy } = c.use;
   const btn = (/** @type {string} */ label, /** @type {(e: MouseEvent) => void} */ onclick, title = '') => h('button', { type: 'button', class: 'secondary small', title, onclick }, label);
   const resume = () => changeUse(c, redraw, 'ci-pause', { for: null }, (u) => ({ ...u, pause: null }), `resume CI on ${c.name}`);
   const pick = (/** @type {MouseEvent} */ e) => {
@@ -384,6 +385,9 @@ function ciUsePart(c, redraw) {
     );
   };
   const anyway = () => changeUse(c, redraw, 'ci-anyway', {}, (u) => ({ ...u, busy: u.busy && { ...u.busy, anyway: true } }), `run CI anyway on ${c.name}`);
+  const names = new Map((view?.projects ?? []).map((p) => [p.id, p.name]));
+  const standing = (c.standing ?? []).map((id) => names.get(id) ?? 'another scheme');
+  const held = standing.length ? h('div', { class: 'muted' }, `${[...new Set(standing)].join(', ')} still ${standing.length === 1 ? 'runs' : 'run'} on standing runners here, which Pause doesn't hold.`) : null;
   return h(
     'div',
     { class: 'mcard-ci-use' },
@@ -392,6 +396,7 @@ function ciUsePart(c, redraw) {
       : busy && !busy.anyway
         ? [h('span', {}, h('b', {}, `Stepping back: ${busy.why}.`), h('span', { class: 'muted' }, " No new CI job starts here until it's quiet again; running ones finish.")), h('span', { class: 'mcard-ci-acts' }, btn('Run CI anyway', anyway, 'Start CI jobs here again until this clears'), btn('Pause', pick))]
         : [busy ? h('span', { class: 'muted' }, `Running CI anyway while ${busy.why}.`) : null, h('span', { class: 'spacer' }), btn('Pause', pick, 'Start no new CI jobs here for a while')],
+    held,
   );
 }
 
@@ -411,7 +416,7 @@ function ciPart(c, redraw) {
     'div',
     { class: 'mcard-ci' },
     h('div', { class: 'mcard-ci-head' }, h('b', {}, 'CI jobs here'), c.off ? (ciChip(c) ?? toneChip('neutral', c.off)) : toneChip(c.running.length ? 'info' : 'ok', c.running.length ? `${c.running.length} running` : 'Idle'), meter(c.limit ? c.used / c.limit : 0, room)),
-    c.off === 'is offline' ? null : ciUsePart(c, redraw),
+    ciUsePart(c, redraw),
     ...c.running.map((r) => {
       const scheme = names.get(r.scheme);
       return hueRow(

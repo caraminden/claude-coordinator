@@ -2338,7 +2338,11 @@ const runnerPool = new RunnerPool({
       // Paused, or its owner busy (P4): the next job's memory need is that of the first waiting job of a scheme it lends to, at the last look.
       const lends = projects.filter((p) => lendsCi(store, m, p)).map((p) => p.id);
       const next = runnerPool.view().line.find((j) => !j.starting && lends.includes(j.scheme));
-      const use = ownerBusy.look(m.id, (next?.size ?? RUNNER_POOL.sizes.ci) * BUSY.memPerThreadGb);
+      // shortcut: a job new since the last pass is checked against a plain CI job's need for that one pass; a per-job memory fit in place() is the upgrade.
+      const look = ownerBusy.look(m.id, (next?.size ?? RUNNER_POOL.sizes.ci) * BUSY.memPerThreadGb);
+      // Pause and stepping back hold only the pool's starts: a scheme still on standing runners takes jobs here regardless.
+      const standing = lends.filter((id) => !poolOn(store, id));
+      const use = standing.length < lends.length ? look : null;
       return [
         {
           id: m.id,
@@ -2350,9 +2354,10 @@ const runnerPool = new RunnerPool({
           session: os.includes('windows') && machines.isOnline(m.id),
           schemes: lends,
           limit: Math.max(0, Math.min(ci.caps.threads ?? threads, threads - runner.turnLine.used(m.id) * COST.turn)),
-          off: os.length ? offWords(use) : 'is offline',
+          off: !os.length ? 'is offline' : use ? offWords(use) : null,
           hosts: os.map((o) => machines.runnerHost(m.id, o) ?? ''),
           use,
+          standing,
         },
       ];
     });

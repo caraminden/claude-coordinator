@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BUSY, BusyWatch, OwnerBusy, offWords, ownerCpu, pauseEnd, pauseWords, type BusyLook } from '../src/owner-busy.ts';
 import type { Sample } from '../src/ci-load.ts';
+import { place } from '../src/runner-pool.ts';
 
 const MIN = 60_000;
 const GB = 1024 ** 3;
@@ -86,6 +87,15 @@ test('a pause ends in an hour, at 8 AM Pacific the next morning (across a DST ch
   assert.equal(pauseWords({ until: null }, T0), 'until resumed');
 });
 
+test("a waiting job's reason names the machine and why it holds back, and nothing starts there", () => {
+  const off = offWords({ pause: null, busy: new BusyWatch().see(quiet(T0, { front: 'game' }), 'Cara') });
+  const job = { repo: 'r/5', id: 1, run: 1, name: 'tests', ship: false, first: false, since: T0, needs: { os: 'windows' as const, session: false, size: 4 } };
+  const pc = { id: 1, name: 'cara-desktop', priority: null, os: ['windows' as const], session: true, schemes: [5], limit: 16, free: 16, off };
+  const [p] = place({ jobs: [{ ...job, scheme: 5 }], machines: [pc], now: T0, lastStart: new Map(), warm: new Map() });
+  assert.equal(p.machine, null);
+  assert.equal(p.why, 'cara-desktop is stepping back: Cara is in a game');
+});
+
 /** An OwnerBusy on a fake clock and settings, with one machine's newest sample. */
 function world() {
   let now = T0;
@@ -136,6 +146,24 @@ test("a look reads the machine agent's front and the runner agent's sample, and 
   assert.equal(w.busy.anyway(7), true);
   assert.equal(offWords(w.busy.look(7, 4)), null);
   assert.equal(w.busy.anyway(8), false, 'a machine never seen is not busy');
+});
+
+test("/api/ci/pool shows a pause pressed since the pool's last pass, and leaves a machine lending no pool scheme alone", async () => {
+  const { ciPoolRoutes } = await import('../src/routes/ci-pool.ts');
+  const w = world();
+  const machine = (id: number, use: unknown) => ({ id, name: `pc${id}`, limit: 16, used: 0, free: 16, off: null, use, standing: [], running: [] });
+  const view = { at: T0, watching: false, line: [], machines: [machine(7, { pause: null, busy: null }), machine(8, null)] };
+  w.busy.pause(7, 'hour', 'Cara');
+  w.busy.pause(8, 'hour', 'Cara');
+  let body = '';
+  const res = { headersSent: false, setHeader() {}, writeHead: () => res, end: (b?: string) => (body = b ?? '') };
+  const store = { canSee: () => true, listProjects: () => [], getSetting: () => null, getMachine: (id: number) => ({ id, owner_id: 1 }) };
+  await ciPoolRoutes[0].handler({ res, app: { pool: { view: () => view }, ownerBusy: w.busy, store }, session: { name: 'Cara', uid: 1, admin: false } } as never);
+  const [seven, eight] = JSON.parse(body).machines;
+  assert.equal(seven.off, 'is paused until 1:00 PM PST');
+  assert.equal(seven.use.pause.by, 'Cara');
+  assert.equal(eight.use, null, 'its schemes run on standing runners, which a pause does not hold');
+  assert.equal(eight.off, null);
 });
 
 test("the machine agent reads Windows' notification state as what is in front, and keeps its watcher up", async () => {

@@ -282,6 +282,8 @@ export interface PoolPc extends Omit<PoolMachine, 'free'> {
   hosts: readonly string[];
   /** Its pause and its owner's busy spell (src/owner-busy.ts, P4), for its card; `off` already says what they mean for starts. */
   use?: OwnerUse | null;
+  /** The schemes it lends CI that are still on their standing runners, which Pause and stepping back don't hold. */
+  standing?: readonly number[];
 }
 
 /** One job in the line, as the CI page shows it. */
@@ -329,6 +331,8 @@ export interface PoolMachineView {
   off: string | null;
   /** Its pause and its owner's busy spell (P4), for Pause and "Run CI anyway" on its card. */
   use: OwnerUse | null;
+  /** The schemes it lends CI that are still on their standing runners (P4's card names them). */
+  standing: readonly number[];
   running: PoolRunning[];
 }
 
@@ -579,6 +583,7 @@ export class RunnerPool {
         free: Math.max(0, m.limit - (after.get(m.id) ?? 0)),
         off: m.off,
         use: m.use ?? null,
+        standing: m.standing ?? [],
         running: [
           ...[...open.values()].filter((o) => o.runner && o.ranOn === m.id).map((o) => ({ repo: o.repo, scheme: o.scheme, name: o.name, size: o.size, since: o.startedAt ?? now, pool: o.runner!.toLowerCase().startsWith('pool-'), starting: false })),
           ...[...this.started.values()].filter((r) => r.machine === m.id && !onJob.has(r.name)).map((r) => ({ repo: r.repo, scheme: r.scheme, name: r.jobName, size: r.size, since: r.at, pool: true, starting: true })),

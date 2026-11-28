@@ -22,7 +22,7 @@ export const SLACK = 50;
 // Add your reason at the end. One line per entry (the runner's is older), so the formatter must not break a long one.
 // biome-ignore format: one line per entry is what the merge rule reads
 export const ALLOWED: Record<string, [number, string]> = {
-  'public/runner-agent.mjs': [1537, 'the one program a PC runner agent downloads and swaps whole when it updates itself (#2310): a second module would be one more file every install and update must carry in step'],
+  'public/runner-agent.mjs': [1551, 'the one program a PC runner agent downloads and swaps whole when it updates itself (#2310): a second module would be one more file every install and update must carry in step'],
   'public/reviews.js': [1662, 'the Reviewers and critics page (+162: JSDoc types replacing implicit any, #2023)'],
   'public/settings.js': [1609, "a scheme's settings pages (+109: JSDoc types replacing implicit any, #2023)"],
   'public/core.js': [1523, '(+1: cabal cards arrive like build headers, #2092) over the line once the Biome reformat (#1792) broke its long lines; a split is queued (+5: types replacing any, #2022; +3 for the cabal page, #2090)'],

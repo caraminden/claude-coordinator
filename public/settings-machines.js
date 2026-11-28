@@ -559,7 +559,7 @@ const CI_AGENT_UPDATE = {
 function ciAgentVersion(r) {
   const os = r.os === 'linux' ? 'Linux' : 'Windows';
   const u = r.update;
-  if (!r.self_update) return h('div', { class: 'small' }, toneChip('warn', 'Can’t update itself'), ` ${os}: installed before it could. Run its install once more (below).`);
+  if (!r.self_update) return h('div', { class: 'small' }, toneChip('warn', 'Can’t update itself'), ` ${os}: installed before it could. Its install, run once more, fixes that.`);
   if (!u) return h('div', { class: 'small' }, toneChip('neutral', 'Checking'), ` ${os}: hasn't said its version yet.`);
   const chip = { current: toneChip('ok', 'Up to date'), waiting: toneChip('info', 'Update waiting'), updating: toneChip('info', 'Updating'), failed: toneChip('danger', 'Update failed') }[u.state];
   const behind = u.state !== 'current' && r.latest && r.latest !== u.version ? [', Citadel has ', h('code', {}, r.latest)] : [];

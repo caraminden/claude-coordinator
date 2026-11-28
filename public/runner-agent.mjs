@@ -3,7 +3,9 @@
 // the PC that hosts every scheme's self-hosted GitHub Actions runners (first Cara's desktop; any PC with the agent), and does exactly three
 // things when Citadel asks: add a scheme's runners, list the runner services, remove a scheme's runners. Each is a
 // PowerShell script installed next to this file (add-runner.ps1, list-runners.ps1, remove-runner.ps1); it runs only
-// those, with arguments it checks itself, one job at a time, and never downloads code. It also reports the PC's load
+// those, with arguments it checks itself, one job at a time. The only code it downloads is its own next version
+// (#2310, "It updates itself" below): this file and those scripts, from the Citadel address it was installed with,
+// each checked against the SHA-256 Citadel sent before any is swapped in. It also reports the PC's load
 // every 30 seconds (#534, the samples below): read-only, through sample-load.ps1 on Windows and /proc on Linux. The scripts fetch their own
 // GitHub tokens from Citadel and never keep them; this file never sees one. It serves no MCP server, no workspace,
 // no shell, and never restarts the PC. On Windows it also keeps keep-runners.ps1 running (#552, below), which holds every
@@ -492,7 +494,10 @@ export class SelfUpdate {
     if (!version || key === this.said) return;
     this.said = key;
     if (state !== 'current') this.log(`Update: ${state}${why ? `: ${why}` : ''}`);
-    void this.report({ os: this.jobs.os, version, state, why });
+    // One Citadel didn't take is said again at the next look.
+    void Promise.resolve(this.report({ os: this.jobs.os, version, state, why })).then((took) => {
+      if (took === false && this.said === key) this.said = '';
+    });
   }
 
   /** Connected (again): the new version is up, so the old files go, and Citadel, which forgot, hears the state again. */
@@ -573,7 +578,8 @@ export class SelfUpdate {
         const url = new URL(n === 'runner-agent.mjs' ? '/runner-agent.mjs' : `/ci-runner/${n}`, this.jobs.appUrl);
         let res;
         try {
-          res = await this.get(url, { signal: AbortSignal.timeout(60_000) });
+          // Only from the address it already trusts: a redirect elsewhere is refused, not followed.
+          res = await this.get(url, { signal: AbortSignal.timeout(60_000), redirect: 'error' });
         } catch (err) {
           throw new Error(`couldn't download ${n}: ${err.message}`);
         }
@@ -585,7 +591,8 @@ export class SelfUpdate {
       }
       const replaced = stale.filter((n) => have[n]);
       for (const n of replaced) copyFileSync(join(this.dir, n), join(this.dir, `${n}.old`));
-      writeFileSync(join(this.dir, UPDATE_FILE), JSON.stringify({ from: filesVersion(have), to: version, replaced, added: stale.filter((n) => !have[n]), at: this.now() }));
+      const update = { from: filesVersion(have), to: version, replaced, added: stale.filter((n) => !have[n]), at: this.now(), swapped: false };
+      writeFileSync(join(this.dir, UPDATE_FILE), JSON.stringify(update));
       const done = [];
       try {
         for (const n of stale) {
@@ -597,6 +604,8 @@ export class SelfUpdate {
         rmSync(join(this.dir, UPDATE_FILE), { force: true });
         throw new Error(`couldn't swap in the new files: ${err.message}`);
       }
+      // Every file is in: a supervisor that starts after this (a reboot) runs the new version, not a half-swapped one.
+      writeFileSync(join(this.dir, UPDATE_FILE), JSON.stringify({ ...update, swapped: true }));
     } finally {
       for (const n of stale) rmSync(part(n), { force: true });
     }
@@ -604,15 +613,15 @@ export class SelfUpdate {
 }
 
 /**
- * The update in UPDATE_FILE undone: each replaced file back from its .old, each added one gone, and that version marked
- * so it isn't taken again. False when no update was under way.
+ * The update in UPDATE_FILE undone: each replaced file back from its .old, each added one gone, and (with mark) that
+ * version marked so it isn't taken again. False when no update was under way.
  */
-export function rollBack(dir, code) {
+export function rollBack(dir, code, mark = true) {
   const u = readJsonFile(join(dir, UPDATE_FILE));
   if (!u) return false;
   for (const n of u.replaced ?? []) if (UPDATE_NAME.test(n) && existsSync(join(dir, `${n}.old`))) renameSync(join(dir, `${n}.old`), join(dir, n));
   for (const n of u.added ?? []) if (UPDATE_NAME.test(n)) rmSync(join(dir, n), { force: true });
-  writeFileSync(join(dir, FAILED_FILE), JSON.stringify({ version: u.to, from: u.from, code }));
+  if (mark) writeFileSync(join(dir, FAILED_FILE), JSON.stringify({ version: u.to, from: u.from, code }));
   rmSync(join(dir, UPDATE_FILE), { force: true });
   return true;
 }
@@ -633,6 +642,9 @@ export async function supervise(args, { dir, log, start = (a) => spawn(process.e
       child?.kill(sig);
       setTimeout(() => process.exit(0), 35_000).unref();
     });
+  // A swap cut off part way (the PC went down mid-rename) goes back to the old files, and is tried again once connected.
+  const left = readJsonFile(join(dir, UPDATE_FILE));
+  if (left && !left.swapped && rollBack(dir, null, false)) log(`An update to ${left.to} was cut off part way: back to the files it had, to try again.`);
   for (;;) {
     child = start([join(dir, 'runner-agent.mjs'), ...args, '--supervised']);
     const code = await new Promise((resolve) => {
@@ -1397,8 +1409,10 @@ async function main() {
       try {
         const res = await fetch(new URL('/api/machines/runner-update', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!res.ok) log(`Citadel didn't take the update's state: ${res.status}`);
+        return res.ok;
       } catch (err) {
         log(`Couldn't send the update's state: ${err.message}`);
+        return false;
       }
     },
   });

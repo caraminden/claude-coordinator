@@ -382,8 +382,9 @@ there and tell the minion**: the PC is never restarted for this.
    ([Add your PC](#add-your-pc)). What a job needs beyond Node and git is a setup step in its workflow, so any lent PC
    runs it.
 
-To update the Linux agent and its scripts later, run step 3's line again (the token is the host's; make a new one on
-the Machines page if it's lost). To stop everything: `Disable-ScheduledTask -TaskName 'Citadel WSL runners'`, then
+The Linux agent and its scripts update themselves after a deploy ([It updates itself](#it-updates-itself-2310)); run
+step 3's line again only for an agent installed before #2310, or to reset a stuck update (the token is the host's; make
+a new one on the Machines page if it's lost). To stop everything: `Disable-ScheduledTask -TaskName 'Citadel WSL runners'`, then
 `wsl --terminate citadel-ci`.
 
 **What has been tested** (#510): the scripts ran end to end on perigee against a fake Citadel, a fake runner
@@ -407,7 +408,8 @@ names them and stops).
 Everything in the table and the paragraphs under "Linux runners in WSL" holds here (folders, labels, users, services),
 except what is about the distro itself. The runners start with the PC, with nobody logged on. All of them share
 `citadel-runners.slice`, held to 75% of the PC's cores ([Your own caps](#your-own-caps)). A runner the PC had before
-this takes the slice at its next start. To update, run the line again.
+this takes the slice at its next start. The agent updates itself after that; run the line again only for one installed
+before #2310.
 
 **What has been tested** (#1933, Nov 25 2026): the install, on a fresh Debian 12 VM (x64, software-emulated, 2 cores)
 against a stand-in Citadel. It installed with no WSL step and no `/etc/wsl.conf`, connected, and answered a list job; a

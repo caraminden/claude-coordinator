@@ -28,8 +28,10 @@ function setup() {
   const served: Record<string, string> = { '/runner-agent.mjs': 'new agent', '/ci-runner/add-runner.ps1': 'old add', '/ci-runner/runner-slot.ps1': 'new slot' };
   const want = manifest({ 'runner-agent.mjs': sha256('new agent'), 'add-runner.ps1': sha256('old add'), 'runner-slot.ps1': sha256('new slot') });
   const fetched: string[] = [];
-  const get = async (url: URL) => {
+  const inits: (RequestInit | undefined)[] = [];
+  const get = async (url: URL, init?: RequestInit) => {
     fetched.push(url.pathname);
+    inits.push(init);
     const body = served[url.pathname];
     return body === undefined ? new Response('no', { status: 404 }) : new Response(body);
   };
@@ -39,7 +41,7 @@ function setup() {
   const exits: number[] = [];
   let clock = 1_000_000;
   const updater = new SelfUpdate({ jobs, slots, supervised: true, report: async (b: { state: string; version: string; why: string }) => void reports.push(b), exit: (c: number) => void exits.push(c), get, now: () => clock });
-  return { dir, served, want, fetched, jobs, slots, reports, exits, updater, tick: (ms: number) => (clock += ms), done: () => rmSync(dir, { recursive: true, force: true }) }; // timing-ok: own temp dir
+  return { dir, served, want, fetched, inits, jobs, slots, reports, exits, updater, tick: (ms: number) => (clock += ms), done: () => rmSync(dir, { recursive: true, force: true }) }; // timing-ok: own temp dir
 }
 
 test("Citadel's list and the agent's: both installers' download lists, one version for the same files, and every file served", () => {
@@ -87,6 +89,11 @@ test('a new version: every changed file fetched and checked, swapped in with the
     assert.ok(!readdirSync(s.dir).some((f) => f.endsWith('.new')));
     assert.equal(s.reports.at(-1)?.state, 'updating');
     assert.equal(s.jobs.busy, null, 'the job lock is let go');
+    assert.ok(
+      s.inits.every((i) => i?.redirect === 'error'),
+      'a redirect away from Citadel is refused, not followed',
+    );
+    assert.equal(JSON.parse(readFileSync(join(s.dir, 'update.json'), 'utf8')).swapped, true, 'marked whole once every file is in');
     // Started again and connected: the old files go, and Citadel hears it is current.
     const again = new SelfUpdate({ jobs: s.jobs, slots: s.slots, supervised: true, report: async (b: { state: string }) => void s.reports.push(b as never), exit: () => assert.fail('no update left') });
     again.connected();
@@ -148,6 +155,50 @@ test('it never swaps under a job or a one-job runner, and after a while holds ne
     await s.updater.check();
     assert.deepEqual(s.exits, [UPDATED]);
     assert.equal(s.jobs.draining, null);
+  } finally {
+    s.done();
+  }
+});
+
+test('a state Citadel did not take is sent again at the next look', async () => {
+  const s = setup();
+  try {
+    const sent: string[] = [];
+    let up = false;
+    const u = new SelfUpdate({ jobs: s.jobs, slots: s.slots, supervised: true, report: async (b) => (sent.push(b.state), up), exit: () => {} });
+    s.jobs.busy = 'add for scheme 3';
+    await u.want(s.want);
+    await new Promise((r) => setImmediate(r)); // the refused report settles: every microtask runs first
+    await u.check();
+    assert.deepEqual(sent, ['waiting', 'waiting'], 'said again, Citadel never took it');
+    up = true;
+    await u.check();
+    await u.check();
+    assert.equal(sent.length, 3, 'once taken, not again');
+  } finally {
+    s.done();
+  }
+});
+
+test('a supervisor that starts on a swap cut off part way puts the old files back, without marking the version failed', async () => {
+  const s = setup();
+  try {
+    writeFileSync(join(s.dir, 'runner-agent.mjs.old'), 'old agent');
+    writeFileSync(join(s.dir, 'runner-agent.mjs'), 'new agent');
+    writeFileSync(join(s.dir, 'runner-slot.ps1'), 'new slot');
+    writeFileSync(join(s.dir, 'update.json'), JSON.stringify({ from: 'aaaaaaaaaaaa', to: s.want.version, replaced: ['runner-agent.mjs'], added: ['runner-slot.ps1'], swapped: false }));
+    const ran: string[] = [];
+    const start = () => {
+      ran.push(readFileSync(join(s.dir, 'runner-agent.mjs'), 'utf8'));
+      const child = new EventEmitter() as ChildProcess;
+      setImmediate(() => child.emit('exit', 0));
+      return child;
+    };
+    const lines: string[] = [];
+    assert.equal(await supervise([], { dir: s.dir, log: (l: string) => lines.push(l), start }), 0);
+    assert.deepEqual(ran, ['old agent']);
+    assert.ok(!existsSync(join(s.dir, 'runner-slot.ps1')) && !existsSync(join(s.dir, 'update.json')) && !existsSync(join(s.dir, 'update-failed.json')));
+    assert.match(lines.join('\n'), /cut off part way/);
   } finally {
     s.done();
   }

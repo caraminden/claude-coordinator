@@ -15,7 +15,7 @@ import { progressWhy } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { loadingLine } from './ui/state.js';
-/** @import { Release, ReleaseChange, ReleaseNext, ReleaseProgress, SchemeReleases, TargetView, TestCopy, LineEntry, Placed, EarlyTest, Pin, LastTry } from './types/releases.js' */
+/** @import { Release, ReleaseChange, ReleaseNext, ReleaseProgress, SchemeReleases, TargetView, TestCopy, LineEntry, Placed, EarlyTest, Pin, LastTry, QuickInfo } from './types/releases.js' */
 /** @import { Ticket, View } from './types.js' */
 /** @typedef {{ scope: string | number, hl: number | null, target: string | null, shown?: boolean }} PageWant */
 /** @typedef {{ c?: ReleaseChange, e?: LineEntry, i: number, key: number, wait?: LineEntry | null, why?: string | null, placed?: Placed | null }} ChangeRow */
@@ -294,8 +294,9 @@ function trainNow(next, c, waits) {
   const t = c.train;
   if (!t) return waits ? [waits] : changeNow(next, c);
   const members = `Releasing now: ${t.members?.join(', ')}`;
-  if (t.role === 'rider') return [h('b', { class: 'work' }, 'Riding'), ' ', h('span', { class: 'muted', title: members }, `in ${t.front}'s train`)];
-  if (t.role === 'front') return [h('span', { title: members }, changeNow(next, c))];
+  if (t.quick && t.role === 'waiting') return [h('b', { class: 'waits' }, 'waiting'), ' ', quickTag()];
+  if (t.role === 'rider') return [h('b', { class: 'work' }, 'Riding'), ' ', h('span', { class: 'muted', title: members }, `in ${t.front}'s ${t.quick ? 'quick ' : ''}train`), ...(t.quick ? [' ', quickTag()] : [])];
+  if (t.role === 'front') return [h('span', { title: members }, changeNow(next, c)), ...(t.quick ? [' ', quickTag()] : [])];
   return [h('b', { class: 'waits' }, t.label)];
 }
 
@@ -430,9 +431,63 @@ function targetCard(projectId, tv, alone) {
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : (n?.name ?? 'Next release')),
     n ? [stageTrack(n.stages, n, { labels: true }), h('p', { class: 'rel-now' }, h('b', {}, n.label ?? stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))), newsList(n)] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     changeList(projectId, tv),
+    // Under the line, so a verdict coming or going moves none of the controls above (design rule 13).
+    quickBlock(projectId, tv),
     previousList(projectId, tv),
     tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '',
   );
+}
+
+/**
+ * Quick trains (#2245, take A "In the line", Cara picked 2026-11-27; ADR 0035): off says so and why; a quick train shipped
+ * says it is live with the full tests running behind until they pass; a red names its files, the ship it was pinned on
+ * and that ship's minion. The quick train waiting sits in the line below (changeList).
+ */
+const QUICK_TIP = 'A quick train ships low-risk changes that touch nothing sensitive on a quick check (the always tests and their own affected tests), right after the full train ahead. The full tests then run on main behind it.';
+const QUICK_OFF_TIP = "Off until a person turns quick trains on after the one-week recount of ships, on or after Dec 4, with #1896's failing test looked up (ADR 0035 says how). Until then every ship takes the full train.";
+/** @type {ReturnType<typeof mountTips> | null} */
+let quickTips = null;
+/** @param {string} tip @param {...(string | Node)} kids */
+const quickTip = (tip, ...kids) => {
+  quickTips ??= mountTips(document.body, { selector: '.rel-qtip[data-tip]', tapOpens: true });
+  return h('span', { class: 'rel-qtip', tabindex: 0, 'data-tip': tip }, ...kids);
+};
+/** The "⚡ quick" tag on a quick train's rows. */
+const quickTag = () => quickTip(QUICK_TIP, h('span', { class: 'rel-qtag' }, '⚡ quick'));
+/** @param {number} projectId @param {number[]} ns */
+const shipLinks = (projectId, ns) => ns.flatMap((n, i) => [i ? ', ' : '', h('a', { href: `#/p/${projectId}/t/${n}` }, `#${n}`)]);
+/** @param {number} projectId @param {TargetView} tv */
+function quickBlock(projectId, tv) {
+  const q = /** @type {QuickInfo | undefined} */ (tv.quick);
+  if (!q) return '';
+  const boxes = [
+    ...q.reds.map((r) =>
+      h(
+        'div',
+        { class: 'rel-quick red' },
+        h('b', {}, '⚡ Quick train · full tests red'),
+        h('div', {}, ...r.ids.flatMap((id, i) => [i ? ', ' : '', h('code', {}, id)]), r.n != null ? [' fail', r.ids.length === 1 ? 's' : '', ' on ', ...shipLinks(projectId, [r.n]), "'s ship alone."] : " failed on main and couldn't be put on one ship."),
+        h('div', { class: 'muted' }, r.n == null ? 'The Taskmaster has it.' : r.escalated ? `#${r.n} was told and goes first; the Taskmaster has it too.` : `#${r.n} was told at ${pacificClock(r.at)} and goes first; the Taskmaster hears at ${pacificClock(r.escalateAt)} if it isn't fixed.`),
+      ),
+    ),
+    q.pinning && h('div', { class: 'rel-quick red' }, h('b', {}, '⚡ Quick train · full tests red: finding whose ship'), h('div', {}, ...q.pinning.ids.flatMap((id, i) => [i ? ', ' : '', h('code', {}, id)]), ' run alone on ', ...shipLinks(projectId, q.pinning.ships), ', oldest first.')),
+    ...q.behind.map((b) =>
+      h(
+        'div',
+        { class: 'rel-quick' },
+        quickTip(QUICK_TIP, h('b', {}, `⚡ Quick train · ${Math.max(b.ships.length, 1)} ship${b.ships.length > 1 ? 's' : ''} · live`)),
+        ' · full tests running behind',
+        h('div', { class: 'muted' }, ...shipLinks(projectId, b.ships), b.ships.length ? ' · ' : '', `live ${ago(b.at)} · `, b.running ? 'the full run is going now' : "waiting for the next full train's run, which counts"),
+      ),
+    ),
+  ].filter(Boolean);
+  const inLine = tv.next?.changes.some((c) => c.train?.quick);
+  const pill = !q.on
+    ? h('p', { class: 'rel-qline' }, quickTip(QUICK_OFF_TIP, h('span', { class: 'rel-qtag off' }, '⚡ Quick trains: off')), h('span', { class: 'muted' }, "waiting on the one-week recount, on or after Dec 4, and #1896's failing test"))
+    : !inLine && !boxes.length
+      ? h('p', { class: 'rel-qline' }, quickTip(QUICK_TIP, h('span', { class: 'rel-qtag' }, '⚡ Quick trains: on')), h('span', { class: 'muted' }, 'none in line'))
+      : '';
+  return [...boxes, pill];
 }
 
 /** What happened so far in the ship under way (#1368): its land.sh lines, oldest first, each #N a link to its minion. */
@@ -735,8 +790,11 @@ function changeRows(tv) {
   const at = (id) => tv.line.findIndex((e) => e.ticketId === id);
   // A rider goes right behind its front, whatever waiters sit between them in the line (the server's order for the release).
   const frontAt = at(changes.find((c) => c.train?.role === 'front')?.ticketId);
+  // And the quick train waiting (#2245): its riders right behind its front, which holds the line's quick place.
+  const qFront = changes.find((c) => c.train?.quick && c.train.role === 'waiting' && c.train.front === `#${c.number ?? c.ticketId}`);
+  const qAt = at(qFront?.ticketId);
   /** @param {ReleaseChange} c @param {number} k */
-  const place = (c, k) => (c.train?.role === 'rider' && frontAt >= 0 ? frontAt + (k + 1) / (changes.length + 1) : at(c.ticketId));
+  const place = (c, k) => (c.train?.role === 'rider' && frontAt >= 0 ? frontAt + (k + 1) / (changes.length + 1) : c !== qFront && c.train?.quick && c.train.role === 'waiting' && qAt >= 0 ? qAt + (k + 1) / (changes.length + 1) : at(c.ticketId));
   return [...changes.map((c, k) => ({ c, i: at(c.ticketId), key: place(c, k) })), ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i, key: i }]))].sort((a, b) => a.key - b.key); // stable: the changes past the line (-1) keep their furthest-along-first order
 }
 
@@ -776,12 +834,24 @@ function changeList(projectId, tv) {
   const inLine = ['line', 'land'].includes(/** @type {string} */ (rows[firstLater]?.c?.stage)) && !rows[firstLater]?.c?.train ? ': in line' : '';
   const next = rows[firstLater]?.c?.train;
   const after = firstLater > 0 ? `${next ? 'Releasing next, after' : 'After'} ${/** @type {ReleaseNext} */ (n).number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
-  const now = rows[0]?.c?.train?.role === 'front' ? `Releasing now: train of ${rows[0].c.train.size}` : '';
+  const t0 = rows[0]?.c?.train;
+  const now = t0?.role === 'front' ? (t0.quick ? `Releasing now: ⚡ quick train${(t0.size ?? 1) > 1 ? ` of ${t0.size}` : ''}` : `Releasing now: train of ${t0.size}`) : '';
+  // The quick train waiting (#2245) heads its own rows, right after the train ahead.
+  const firstQuick = rows.findIndex((r) => r.c?.train?.quick && r.c.train.role === 'waiting');
+  const qSize = rows[firstQuick]?.c?.train?.size ?? 1;
+  const quickHead = firstQuick > 0 ? h('li', { class: 'rel-after rel-qhead' }, quickTip(QUICK_TIP, `⚡ Quick train next · ${qSize} ship${qSize === 1 ? '' : 's'}`), h('span', { class: 'muted' }, ' · right after the train ahead, on a quick check')) : null;
+  const afterQuick = firstQuick > 0 ? rows.findIndex((r, i) => i > firstQuick && !(r.c?.train?.quick && r.c.train.role === 'waiting')) : -1;
   const waiters = rows.filter((r) => r.wait);
   const list = h(
     'ol',
     { class: 'rel-changes' },
-    rows.flatMap((r, i) => [...(i === 0 && now ? [h('li', { class: 'rel-after muted' }, now)] : []), ...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row(r, i)]),
+    rows.flatMap((r, i) => [
+      ...(i === 0 && now ? [h('li', { class: 'rel-after muted' }, now)] : []),
+      ...(i === firstLater && after && i !== firstQuick ? [h('li', { class: 'rel-after muted' }, after)] : []),
+      ...(i === firstQuick && quickHead ? [quickHead] : []),
+      ...(i === afterQuick ? [h('li', { class: 'rel-after muted' }, 'After them: the next full train')] : []),
+      row(r, i),
+    ]),
   );
   // The landings waiting in line move (#1002): dragged, or sent to the front of the waiters with Land next. The holder
   // and the changes past the line stay put.
@@ -805,7 +875,7 @@ function changeList(projectId, tv) {
    * @param {number} i
    */
   function row({ c, e, wait, why, placed }, i) {
-    const cls = `rel-change${i === 0 ? ' front' : ''}${c && c.ticketId === hl ? ' hl' : ''}${wait && waiters.length > 1 ? ' movable' : ''}`;
+    const cls = `rel-change${i === 0 ? ' front' : ''}${c?.train?.quick ? ' quick' : ''}${c && c.ticketId === hl ? ' hl' : ''}${wait && waiters.length > 1 ? ' movable' : ''}`;
     const pos = h('span', { class: 'rel-pos' }, String(i + 1));
     const seq = wait ? { 'data-seq': wait.seq } : {};
     if (c) {
@@ -822,7 +892,7 @@ function changeList(projectId, tv) {
             'span',
             { class: 'where' },
             ...(i === 0 && (!c.train || c.train.role === 'front')
-              ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage))]
+              ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage)), ...(c.train?.quick ? [' ', quickTag()] : [])]
               : [stageTrack(/** @type {ReleaseNext} */ (n).stages, c, { mini: true }), ...trainNow(/** @type {ReleaseNext} */ (n), c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)]),
           ),
           ...(i > 0 && c.train?.role === 'waiting' && c.early ? [h('span', { class: 'early-line' }, ...earlyNote(c).slice(1))] : []),
@@ -1201,7 +1271,7 @@ export function releaseChip(t) {
           opening();
         },
       },
-      h('span', { class: 'muted' }, `merged into Build ${t.build}`),
+      h('span', { class: 'muted' }, `merged into Plot ${t.build}`),
       h('span', { 'aria-hidden': 'true' }, '›'),
     );
   }

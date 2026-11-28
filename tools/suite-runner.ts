@@ -86,9 +86,8 @@ export function mergeTimes(old: Map<string, number>, ran: Map<string, number>, c
 }
 
 // One shard's files (#2209): longest first (last time; a file with none counts as the median), each onto the shard with
-// the least so far, ties to the lowest. Every shard works out the same split from the same files and times. `head`: seconds
-// shard 0 has before its files (the burn-in runs there).
-export function shard(files: string[], times: Map<string, number>, index: number, total: number, head = 0, cwd = process.cwd()): string[] {
+// the least so far, ties to the lowest. Every shard works out the same split from the same files and times.
+export function shard(files: string[], times: Map<string, number>, index: number, total: number, cwd = process.cwd()): string[] {
   const known = files
     .map((f) => times.get(relative(cwd, f)))
     .filter((n) => n !== undefined)
@@ -96,7 +95,6 @@ export function shard(files: string[], times: Map<string, number>, index: number
   const guess = known.length ? known[Math.floor(known.length / 2)] : 1;
   const t = (f: string) => times.get(relative(cwd, f)) ?? guess;
   const load = Array<number>(total).fill(0);
-  load[0] = head;
   const mine: string[] = [];
   for (const f of [...files].sort((a, b) => t(b) - t(a) || (a < b ? -1 : a > b ? 1 : 0))) {
     let k = 0;
@@ -142,7 +140,7 @@ async function main() {
   let files = expand(o.targets.length ? o.targets : ['test/']);
   if (split) {
     const [index, total] = [Number(split[1]), Number(split[2])];
-    files = shard(files, old, index, total, Number(process.env.CITADEL_TEST_SHARD_HEAD) || 0);
+    files = shard(files, old, index, total);
     process.stdout.write(`suite-runner: shard ${index} of ${total}: ${files.length} test file(s)\n`);
     if (!files.length) return;
   }
@@ -152,7 +150,6 @@ async function main() {
   // tests must inherit it.)
   delete process.env.CITADEL_TEST_TIMES;
   delete process.env.CITADEL_TEST_SHARD;
-  delete process.env.CITADEL_TEST_SHARD_HEAD;
   const stream = run({
     files,
     concurrency: o.concurrency,

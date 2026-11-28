@@ -62,7 +62,7 @@ test("a new minion rides its parent's build unless the create sets one", async (
   const as = async (who: number, method: string, path: string, body?: object) => {
     const token = who === DelveTM.id && existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8') : tokens.agentToken(who);
     const res = await fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
-    return { status: res.status, body: await json<{ id: number; properties: unknown; error: string; tickets: { number: number; parent: number | null }[] }>(res) };
+    return { status: res.status, body: await json<{ id: number; properties: unknown; error: string; tickets: { number: number; parent: number | null }[]; notes: string[] }>(res) };
   };
   const create = (extra: object) => as(DelveTM.id, 'POST', `/api/projects/${Delve.id}/tickets`, { message: 'do it', properties: { type: 'chore' }, model: 'claude-sonnet-5-5', effort: 'medium', ...extra });
   const made = async (extra: object) => {
@@ -163,10 +163,25 @@ test("a new minion rides its parent's build unless the create sets one", async (
   assert.equal(store.getCabal(t.id), undefined, 'a feeder leads nothing');
   t = await made({ lead: true, parent: null, properties: { type: 'chore', effortName: 'docs sweep' } });
   assert.ok(store.getCabal(t.id), 'lead makes a goal cabal');
+  // Branch by default (#2272): a lead without build_owner in a scheme with Builds on is warned; a build's owner, and a scheme with Builds off, are not.
+  const unbranched = /Plots get a branch by default/;
+  const goal = await create({ lead: true, parent: null, properties: { type: 'chore', effortName: 'second sweep' } });
+  assert.equal(goal.status, 201);
+  assert.ok(
+    goal.body.notes.some((n) => unbranched.test(n)),
+    `warned: ${goal.body.notes}`,
+  );
+  const branched = await create({ build: 13, build_owner: true, parent: null });
+  assert.ok(!branched.body.notes.some((n) => unbranched.test(n)), 'a branched Plot is not warned');
+  store.setProjectSettings(Delve.id, { builds: 'off' });
+  const off = await create({ lead: true, parent: null, properties: { type: 'chore', effortName: 'third sweep' } });
+  assert.ok(!off.body.notes.some((n) => unbranched.test(n)), 'Builds off: no warning');
+  store.setProjectSettings(Delve.id, { builds: 'suggest' });
+  const count2 = store.listTickets(Delve.id).length;
   const both = await create({ lead: true, cabal: t.number, parent: null });
   assert.equal(both.status, 400);
   assert.match(both.body.error, /Overseer can't be on another cabal/);
-  assert.equal(store.listTickets(Delve.id).length, count + 1, 'nothing made for a lead on a cabal');
+  assert.equal(store.listTickets(Delve.id).length, count2, 'nothing made for a lead on a cabal');
 
   // A minion created in a build whose branch exists starts from it; another build, from main.
   const g = (args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();

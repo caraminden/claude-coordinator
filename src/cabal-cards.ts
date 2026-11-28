@@ -2,7 +2,7 @@
 // Read per scheme, cached, polled with the build headers and again on every board write, and broadcast when it
 // changes, so opening a card asks the server nothing. A cabal is open while its lead is.
 import { setTimeout as sleep } from 'node:timers/promises';
-import { type BoardDeps, type BoardMember, overseerOf, readBoard } from './cabal-board.ts';
+import { type BoardDeps, type BoardMember, openAsks, overseerOf, readBoard } from './cabal-board.ts';
 import type { Store } from './db.ts';
 
 export interface CabalCardMember {
@@ -73,7 +73,7 @@ export async function cabalCards(store: Store, projectId: number, deps: BoardDep
       members: board.members.map((m) => ({ id: ids.get(m.row) ?? null, number: m.number, label: m.label, title: m.title, state: m.state, word: m.word, scheme: m.scheme })),
       finished: board.counts.merged,
       next: nextUp(board.members),
-      asks: board.asks.length,
+      asks: openAsks(board).length,
       spend: board.counts.spend,
     });
   }

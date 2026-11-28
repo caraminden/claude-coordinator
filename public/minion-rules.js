@@ -453,15 +453,15 @@ export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) 
     );
   const builds = () =>
     choice(
-      { icon: 'spark', hue: 'running', title: 'Major builds' },
-      settingsHelp('Whether the Taskmaster may suggest a numbered build for a big multi-minion feature.', 'Off leaves the builds line out of its prompt. Builds already running carry on.'),
+      { icon: 'spark', hue: 'running', title: 'Plots' },
+      settingsHelp('Whether the Taskmaster may suggest a Plot with its own branch for a big multi-minion feature.', 'Off leaves the Plots line out of its prompt. Plots already running carry on.'),
       'builds',
       [
         ['suggest', 'Suggest'],
         ['off', 'Off'],
       ],
       'suggest',
-      'Major builds',
+      'Plots',
     );
   const grill = () =>
     choice(

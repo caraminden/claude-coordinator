@@ -46,9 +46,9 @@ export function cabalLead(store: Store, projectId: number, cabal: unknown, self:
   const lead = Number.isInteger(n) && n > 0 ? store.getTicketByNumber(home, n) : undefined;
   if (!lead || lead.kind === 'coordinator') throw new HttpError(400, `cabal must be the #N of a minion that leads it, in this scheme or as "<scheme>#N": no minion #${String(cabal).slice(0, 20)}${scheme ? ` in ${scheme.name}` : ''}`);
   if (home !== projectId) crossRow(store, lead, projectId, title);
-  if (lead.id === self) throw new HttpError(400, "A minion can't be on its own cabal: it leads it");
-  if (store.cabalRowOf(lead.id)) throw new HttpError(400, `#${n} is on another cabal's board, so it can't lead one`);
-  if (self != null && store.getCabal(self)) throw new HttpError(400, "This minion leads a cabal, so it can't join another");
+  if (lead.id === self) throw new HttpError(400, "A minion can't be on its own Plot: it leads it");
+  if (store.cabalRowOf(lead.id)) throw new HttpError(400, `#${n} is on another Plot's board, so it can't lead one`);
+  if (self != null && store.getCabal(self)) throw new HttpError(400, "This minion leads a Plot, so it can't join another");
   return lead;
 }
 
@@ -74,7 +74,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
   if (cabal === null) {
     store.leaveCabal(t.id);
     if (was != null) {
-      runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s cabal board.` });
+      runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s Plot board.` });
       cabalChanged(app, was);
       retroCheck(app, was);
     }
@@ -84,7 +84,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
   if (was === lead.id) return;
   const there = lead.project_id !== t.project_id ? store.getProject(lead.project_id)?.name : undefined;
   const row = store.joinCabal(t.id, lead.id, lead.project_id, t.title, Date.now(), there ? crossRow(store, lead, t.project_id, t.title).id : rowId, t.project_id);
-  runner.emit(t.id, 'note', { text: `${by} put this minion on ${there ? `${there} ` : ''}#${lead.number}'s cabal board.` });
+  runner.emit(t.id, 'note', { text: `${by} put this minion on ${there ? `${there} ` : ''}#${lead.number}'s Plot board.` });
   if (there) memberJoined(app, lead, t.id, row, by);
   for (const l of new Set([was, lead.id])) if (l != null) cabalChanged(app, l);
 }
@@ -120,7 +120,7 @@ export const cabalRoutes: Route[] = [
     async handler({ res, app, project, params, session }) {
       const lead = app.store.getTicketByNumber(project.id, Number(params.number));
       const whole = lead && app.store.getCabal(lead.id) ? await boardFor(app, lead.id) : null;
-      if (!whole) throw new HttpError(404, `#${String(params.number).slice(0, 20)} leads no cabal in this scheme`);
+      if (!whole) throw new HttpError(404, `#${String(params.number).slice(0, 20)} leads no Plot in this scheme`);
       const board = cabalBoardFor(whole, (p) => app.store.canSee(session, p));
       return json(res, 200, { lead: lead!.id, board });
     },
@@ -130,7 +130,7 @@ export const cabalRoutes: Route[] = [
     method: 'POST',
     path: '/api/tickets/:ticket/cabal',
     who: ['minion'],
-    refuse: 'Only a cabal member or its lead writes on its board',
+    refuse: 'Only a Plot member or its lead writes on its board',
     async handler({ req, res, app, ticket }) {
       const { store, runner } = app;
       const body = await readJson(req);
@@ -141,14 +141,14 @@ export const cabalRoutes: Route[] = [
       const author = `${lead0 && lead0.project_id !== ticket.project_id ? `${store.getProject(ticket.project_id)?.name} ` : ''}#${ticket.number} ${ticket.title}`;
       // A minion on no board makes its own with its first lead write: that's how a lead lays out its roster.
       const leadOnly = () => {
-        if (own && !leads) throw new HttpError(403, `Only the cabal's lead does ${action}: ask it instead (action ask)`);
+        if (own && !leads) throw new HttpError(403, `Only the Plot's lead does ${action}: ask it instead (action ask)`);
         if (!leads && ['answer', 'row', 'log', 'red'].includes(action)) store.ensureCabal(ticket.id, ticket.project_id);
         if (action === 'form' && !leads) throw new HttpError(409, 'Lay out your roster first (action row), then post it with form');
       };
       if (action === 'note' || action === 'ask') {
-        if (!own) throw new HttpError(409, leads ? `You lead this cabal: ${action === 'ask' ? 'answer asks, and log decisions with action log' : 'set notes on rows with action row'}` : 'You are not on a cabal board');
+        if (!own) throw new HttpError(409, leads ? `You lead this Plot: ${action === 'ask' ? 'answer asks, and log decisions with action log' : 'set notes on rows with action row'}` : 'You are not on a Plot board');
         const lead = store.getTicket(own.lead_id);
-        if (!lead) throw new HttpError(404, "This cabal's lead is gone");
+        if (!lead) throw new HttpError(404, "This Plot's lead is gone");
         if (action === 'note') {
           if (body.note === undefined && body.files === undefined) throw new HttpError(400, 'note needs note, files or both');
           store.updateCabalRow(own.id, { ...(body.note !== undefined ? { note: body.note === null ? '' : line(body.note, 'note', 200), note_at: Date.now() } : {}), ...(body.files !== undefined ? { files: files(body.files) } : {}) });
@@ -159,7 +159,7 @@ export const cabalRoutes: Route[] = [
         const blocking = body.blocking === true;
         const id = store.addCabalAsk(lead.id, ticket.id, text, blocking);
         // A blocking ask wakes the lead; any other is held mail it reads at its next wake with the rest (spec, "Claims").
-        const held = runner.relayMinion(ticket.id, lead.id, author, `Cabal ask ${id}${blocking ? ', blocking' : ''}: ${text}\n(Answer with cabal_board, action answer, ask ${id}.)`, blocking, blocking);
+        const held = runner.relayMinion(ticket.id, lead.id, author, `Plot ask ${id}${blocking ? ', blocking' : ''}: ${text}\n(Answer with cabal_board, action answer, ask ${id}.)`, blocking, blocking);
         changed(app, ticket, lead.id);
         return json(res, 200, { ask: id, held, lead: lead.number });
       }
@@ -172,7 +172,7 @@ export const cabalRoutes: Route[] = [
         store.answerCabalAsk(ask.id, text, author);
         const to = store.getTicket(ask.ticket_id);
         // The asker hears back the way it asked: woken if it was blocked, else held mail.
-        const held = to && to.status !== 'closed' ? runner.relayMinion(ticket.id, to.id, author, `Answer to your cabal ask ${ask.id} ("${ask.text.slice(0, 120)}"): ${text}`, !!ask.blocking, !!ask.blocking) : null;
+        const held = to && to.status !== 'closed' ? runner.relayMinion(ticket.id, to.id, author, `Answer to your Plot ask ${ask.id} ("${ask.text.slice(0, 120)}"): ${text}`, !!ask.blocking, !!ask.blocking) : null;
         changed(app, ticket, ticket.id);
         return json(res, 200, { ok: true, held, to: to?.number ?? null });
       }
@@ -212,7 +212,7 @@ export const cabalRoutes: Route[] = [
           const t = body.minion === null ? null : store.getTicketByNumber(ticket.project_id, Number(body.minion));
           if (body.minion !== null && (!t || t.kind === 'coordinator')) throw new HttpError(404, `No minion #${String(body.minion).slice(0, 20)} in this scheme`);
           if (t?.id === ticket.id) throw new HttpError(400, 'That is you: the lead has no row of its own');
-          if (t && store.getCabal(t.id)) throw new HttpError(400, `#${t.number} leads a cabal, so it can't be on another's board`);
+          if (t && store.getCabal(t.id)) throw new HttpError(400, `#${t.number} leads a Plot, so it can't be on another's board`);
           const other = t ? store.cabalRowOf(t.id) : undefined;
           if (other && other.id !== Number(body.row)) throw new HttpError(409, `#${t!.number} already has a row${other.lead_id === ticket.id ? ` (row ${other.id})` : ' on another board'}`);
           fields.ticket_id = t?.id ?? null;
@@ -266,7 +266,7 @@ export const cabalRoutes: Route[] = [
     method: 'POST',
     path: '/api/tickets/:ticket/cabal/start',
     who: ['minion'],
-    refuse: "Only a cabal's lead starts its members",
+    refuse: "Only a Plot's lead starts its members",
     async handler({ req, res, app, ticket }) {
       const body = await readJson(req);
       return json(res, 200, await cabalStart(app, app.store.getTicket(ticket.id)!, body.row, body.text));
@@ -277,7 +277,7 @@ export const cabalRoutes: Route[] = [
     method: 'POST',
     path: '/api/tickets/:ticket/cabal/taskmaster',
     who: ['minion'],
-    refuse: "Only a cabal's lead asks another scheme's Taskmaster about its members",
+    refuse: "Only a Plot's lead asks another scheme's Taskmaster about its members",
     async handler({ req, res, app, ticket }) {
       const body = await readJson(req);
       return json(res, 200, await cabalTaskmaster(app, app.store.getTicket(ticket.id)!, body));
@@ -288,7 +288,7 @@ export const cabalRoutes: Route[] = [
     method: 'POST',
     path: '/api/tickets/:ticket/cabal/member',
     who: ['minion'],
-    refuse: "Only a cabal's lead acts on its members",
+    refuse: "Only a Plot's lead acts on its members",
     async handler({ req, res, app, ticket }) {
       const body = await readJson(req);
       return json(res, 200, { text: await memberAction(app, app.store.getTicket(ticket.id)!, body.action, body.minion) });

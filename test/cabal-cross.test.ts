@@ -114,11 +114,11 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
   );
 
   // Sam (Atlas only) says go on the lead's card: the home row, not Delve's.
-  await answer(sam, lead.id, mine, 'Start the cabal');
+  await answer(sam, lead.id, mine, 'Start the Plot');
   assert.ok(rowOf('H').approved_at);
   assert.equal(rowOf('D').approved_at, null, "Atlas's people don't approve a Delve row");
   // Josh (Delve only) says go on Delve's card: the lead reads it.
-  await answer(josh, tmB, theirs, 'Start the cabal');
+  await answer(josh, tmB, theirs, 'Start the Plot');
   assert.equal(rowOf('D').approved_by, 'Josh');
   await until('the lead got the answer', async () => (await events(lead.id)).some((e) => e.kind === 'user_message' && /in Delve's Taskmaster chat/.test(String(JSON.parse(e.data).text))));
 
@@ -133,7 +133,7 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
   assert.equal(rowOf('D').next_at, null, 'not next up behind itself at width 1');
   await until("Delve's Taskmaster heard the ask", async () => /cabal "Atlas#\d+"/.test(await heard(tmB)));
   const said = await heard(tmB);
-  assert.match(said, /never merged into Build 7/);
+  assert.match(said, /never merged into Plot 7/);
   const copied = /handoff at (\S+inbox\S+there\.md)/.exec(said)?.[1];
   assert.ok(copied && existsSync(copied), `the handoff is in Delve's shared inbox: ${copied}`);
 
@@ -176,14 +176,14 @@ test("a row in another scheme: its people's go, the Taskmaster's start, the boar
   const seal = await ask({ row: 'D', action: 'seal' });
   assert.equal(seal.status, 200, JSON.stringify(seal.data));
   assert.match(String(seal.data.text), /ask again with action unseal/);
-  await until("Delve's Taskmaster heard the seal", async () => /seal your #\d+ "Delve piece"[^\n]*Build 7/.test(await heard(tmB)));
+  await until("Delve's Taskmaster heard the seal", async () => /seal your #\d+ "Delve piece"[^\n]*Plot 7/.test(await heard(tmB)));
   assert.notEqual((await as(lead.id, `/api/tickets/${lead.id}/cabal/member`, { action: 'stop', minion: member.number })).status, 200, "cabal_member reaches only the lead's own scheme: #N there is another minion or none");
 
   // A home row can't chain on the Delve member: start_after would look for its #N in Atlas.
   const h2 = await board({ action: 'row', label: 'H2', title: 'After Delve', after: 'D', handoff: 'handoffs/here.md', model: 'claude-sonnet-5-5', effort: 'medium' });
   assert.equal(h2.status, 200, JSON.stringify(h2.data));
   assert.equal((await board({ action: 'form' })).status, 200);
-  await answer(sam, lead.id, (await events(lead.id)).filter((e) => e.kind === 'question').at(-1)!, 'Start the cabal');
+  await answer(sam, lead.id, (await events(lead.id)).filter((e) => e.kind === 'question').at(-1)!, 'Start the Plot');
   assert.ok(rowOf('H2').approved_at);
   const chained = await as(lead.id, `/api/tickets/${lead.id}/cabal/start`, { row: 'H2' });
   assert.equal(chained.status, 400);
@@ -195,5 +195,5 @@ test("message_taskmaster is a lead's only: a minion leading no cabal is refused"
   const plain = (await s.call(`/api/projects/${a.id}/tickets`, { title: 'Plain', message: 'Do a thing.' })).data as { id: number };
   const r = await as(plain.id, `/api/tickets/${plain.id}/cabal/taskmaster`, { row: 1, action: 'start' });
   assert.equal(r.status, 403);
-  assert.match(String(r.data.error), /you lead no cabal/);
+  assert.match(String(r.data.error), /you lead no Plot/);
 });

@@ -522,7 +522,7 @@ test("a cabal lead's turn past 150k starts its shift change: its board comes wit
     runner.send(id, 'Cara', 'next');
     const next = await lastCall(++count);
     assert.match(promptText(next.prompt), /Card 3 waits on Cara\./);
-    assert.match(promptText(next.prompt), /Your cabal's board now \(cabal_board\):[\s\S]*Picked the narrow path/);
+    assert.match(promptText(next.prompt), /Your Plot's board now \(cabal_board\):[\s\S]*Picked the narrow path/);
     assert.ok(!next.args.includes('--resume'));
     await started(id);
     await endTurn(id, 'ok');

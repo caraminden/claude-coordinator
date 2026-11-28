@@ -75,6 +75,9 @@ test('gap train: with nothing in line that needs the full suite it ships at once
   assert.doesNotMatch(l.c.calls(), new RegExp(`head_sha=${git(l.r.source, 'rev-parse', 'ticket/3-x')}`), 'CI was never asked about the quick top');
   const top = git(l.r.source, 'rev-parse', 'main');
   assert.equal(readFileSync(join(l.state, 'quick-untested'), 'utf8').trim(), top);
+  // The full run it owes (#2244): its base, its top, and each ship's top with its #N, for src/fast-mode.ts.
+  const at = (b: string) => git(l.r.source, 'rev-parse', b);
+  assert.match(readFileSync(join(l.state, 'quick-behind'), 'utf8'), new RegExp(`^\\d+ ${at('main~2')} ${top} ${at('ticket/2-x')}:2 ${at('ticket/3-x')}:3\n$`));
   // The next qualifying ship, alone in line: a quick top is on main with no full run over it, so this one goes full.
   const wt = join(l.r.dir, 'wt4');
   git(l.r.source, 'worktree', 'add', '-q', '-b', 'ticket/4-x', wt, 'main');
@@ -85,6 +88,7 @@ test('gap train: with nothing in line that needs the full suite it ships at once
   assert.match(l.c.calls(), new RegExp(`head_sha=${git(l.r.source, 'rev-parse', 'main')}`), '4 ran on CI');
   assert.equal(quickCalls(l.r.dir).length, 1);
   assert.ok(!existsSync(join(l.state, 'quick-untested')), "the full ship's CI run cleared the quick top's mark");
+  assert.ok(!existsSync(join(l.state, 'quick-behind')), "and its green run counted as the quick train's run behind");
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4']);
   l.done();
 });

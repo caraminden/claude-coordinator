@@ -184,7 +184,7 @@ import { type BuildSummary, Builds } from './src/builds.ts';
 import { type CabalCard, CabalCards } from './src/cabal-cards.ts';
 import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
-import { CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
+import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
 import { earlyCi, earlyDroppedWhy, landNews, readTailA, tailNow } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
@@ -192,7 +192,8 @@ import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
 import { rollbackStarters } from './src/rollback-starters.ts';
 import { HostJobs, jobLost } from './src/host-job.ts';
-import { FastMode, type FastState } from './src/fast-mode.ts';
+import { FastMode, type FastState, fastStateKey } from './src/fast-mode.ts';
+import { type QuickInfo, readQuick } from './src/quick-view.ts';
 import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
@@ -1562,6 +1563,7 @@ const urgentFixes = new UrgentFixes({
       store,
       (p, mark) => ciHealth.fixTicket(p, mark),
       (id) => fastMode.view(id).reds,
+      (id) => fastMode.quick(id),
     ),
 });
 services.onDeploy = (view) => {
@@ -1721,18 +1723,28 @@ const rollback = new Rollback({
     failed: (projectId, target, sha, why) => rollback.failed(projectId, target, sha, why),
   }),
 });
+/** Citadel's quick trains as the last ship-line read found them (#2245), for its server card. */
+let quickNow: { scheme: number; info: QuickInfo } | null = null;
 const releases = new Releases({
   store,
   readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader],
   broadcast,
   deploy: (tv) => autoDeploy.info(tv),
   rollback: (tv, views) => rollback.info(tv, views),
+  // Quick trains on Citadel's own server card (#2245): off until a person turns them on after the recount (ADR 0035).
+  quick: (tv) => (quickNow && tv.target.id === CITADEL_TARGET && tv.target.projectId === quickNow.scheme ? quickNow.info : null),
   // A keyless Capacitor app's card offers Make release key (#837): the app's own card, as it has no Android one until its first APK.
   releaseKey: (tv) => {
     const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null;
     return name && apkBuilds.keyless(name) ? name : null;
   },
-  lines: () => landsInFlight.refresh(),
+  lines: async () => {
+    await landsInFlight.refresh();
+    const own = deployState ? ownScheme()?.id : undefined;
+    const repo = own != null ? store.getProject(own)?.repo_dir : undefined;
+    const onMain = (top: string) => new Promise<boolean>((done) => (repo ? execFile('git', ['-C', repo, 'merge-base', '--is-ancestor', top, 'refs/heads/main'], { timeout: 10_000 }, (err) => done(!err)) : done(true)));
+    quickNow = deployState && own != null ? { scheme: own, info: await readQuick(deployState, store.getSetting<FastState>(fastStateKey(own)) ?? undefined, onMain) } : null;
+  },
   inFlight: (views, fresh) => {
     landsInFlight.attach(views, fresh);
     prsInFlight.attach(views);
@@ -2003,11 +2015,14 @@ const recordFlakes = (projectId: number, ticketId: number | null, commit: string
 };
 const fastMode = new FastMode({
   flakes: (id, sha, output) => recordFlakes(id, null, sha, output),
-  schemes: () =>
-    store
+  // And Citadel's own scheme, whose quick trains (tools/land/quick.sh) owe the full suite a run behind them (#2244): its land state is this checkout's.
+  schemes: () => {
+    const own = deployState ? ownScheme()?.id : undefined;
+    return store
       .listProjects()
-      .filter((p) => p.land_mode === 'fast' && p.repo_dir)
-      .map((p) => ({ id: p.id, repo: p.repo_dir! })),
+      .filter((p) => (p.land_mode === 'fast' || p.id === own) && p.repo_dir)
+      .map((p) => ({ id: p.id, repo: p.repo_dir!, ...(p.land_mode !== 'fast' && deployState ? { quick: deployState } : {}) }));
+  },
   get: (k) => store.getSetting<FastState>(k) ?? undefined,
   set: (k, v) => store.setSetting(k, v),
   jobs: new HostJobs(() => runner.units),
@@ -2141,7 +2156,7 @@ const landHandoffs = new LandHandoffs({
       .then(async (other) => (other && (await shipApps.apps(id)).length ? null : passLiveClaims()))
       .catch((err) => console.error('Passing on the claims of a ship failed:', err));
     const t = store.getTicket(id);
-    if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
+    if (t && (store.getProject(t.project_id)?.land_mode === 'fast' || fastMode.quick(t.project_id))) void fastMode.landed(t.project_id, id, commit);
   },
   learned: (id, h) => {
     const t = store.getTicket(id);

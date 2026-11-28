@@ -17,4 +17,14 @@ function route(href, start, aliases = []) {
   return { kind: 'browser', url: url.href };
 }
 
-module.exports = { route };
+/**
+ * #1148's launcher for the build at `exe` (versions\<n>\Citadel.exe, so two folders up), or null: a copy unzipped by hand
+ * has none, and makes no shortcuts to itself (#2274: a test copy in Downloads took the Start menu's Citadel and never updated).
+ */
+function launcherOf(exe, exists) {
+  const { win32 } = require('node:path');
+  const launcher = win32.join(win32.dirname(exe), '..', '..', 'citadel.exe');
+  return exists(launcher) ? launcher : null;
+}
+
+module.exports = { route, launcherOf };

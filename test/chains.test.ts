@@ -98,7 +98,7 @@ test('build feeders fan into the build minion, or into the build itself when non
     ),
   );
   assert.equal(chains.length, 2, 'build 6 has no build branch, so it is no chain');
-  const b4 = chains.find((c) => c.title === 'Build 4')!;
+  const b4 = chains.find((c) => c.title === 'Plot 4')!;
   assert.deepEqual(
     b4.nodes.map((n) => [n.number, n.col]),
     [
@@ -107,7 +107,7 @@ test('build feeders fan into the build minion, or into the build itself when non
       [857, 1],
     ],
   );
-  const b5 = chains.find((c) => c.title === 'Build 5')!;
+  const b5 = chains.find((c) => c.title === 'Plot 5')!;
   assert.deepEqual(
     b5.nodes.map((n) => [n.key, n.col]),
     [

@@ -425,9 +425,15 @@ Josh, 2026-11-11: "ok, CI is using my whole desktop, can we limit it a bit?", an
 at below-normal priority so the PC stays responsive, and all CI together is held to about 75% of the CPU. Runner
 counts stay; jobs just run slower when it's busy. The PC has 16 cores, 32 threads.
 
+**Windows has no cap since #2262** (Cara, 2026-11-27, "Drop the cap, keep low priority"). On Nov 27 Peek's runners in
+the job kept failing on an idle PC (about 4% CPU) after the ship squeeze had lifted: their HTTPS calls to GitHub timed
+out and their Workers missed the listener's 30-second handshake, while runners outside the job worked. Why the 75% cap
+does that wasn't proven; on the test box it slows nothing. Below-normal priority is what keeps the PC responsive, so
+the job keeps that alone, and the agent's first run lifts the cap off the job an older one left.
+
 | Part | What holds it | Its share |
 |---|---|---|
-| Windows runners, every one on the PC (Delve's, Peek's, Mandate's, ToC's, the session runners) | `keep-runners.ps1`, which the Windows agent keeps running: one job object, `Global\CitadelCiRunners` | below-normal priority, all together at most 75% (`CI_CPU_PERCENT` in `public/runner-agent.mjs`) |
+| Windows runners, every one on the PC (Delve's, Peek's, Mandate's, ToC's, the session runners) | `keep-runners.ps1`, which the Windows agent keeps running: one job object, `Global\CitadelCiRunners` | below-normal priority, no CPU cap (#2262) |
 | The WSL VM (Citadel's and ToC's Linux runners, and the Android emulator, #533) | `processors=24` (16 until Cara raised it on 2026-11-22, #1606) in Cara's `%UserProfile%\.wslconfig`; inside it, the runners niced (`citadel-runner-.service.d/yield.conf`, written by `install-runner-agent.sh`) | at most 24 of the 32 threads; the emulator's 4 cores come first |
 | The test box VM (Peek's desktop tests) | `Set-VMProcessor -Count 6 -Maximum 75 -RelativeWeight 50`, set by `tools/win-test-box/new-test-box.ps1` | about 4.5 of 32 threads, already; left as it is |
 
@@ -442,16 +448,16 @@ without the file (no PC had one before #1933) today's 75 and 30 hold.
 
 | Setting | What it caps | Default |
 |---|---|---|
-| `cpu_percent` | all CI on the PC together | 75 |
-| `squeeze_percent` | the other runners, together, while a scheme's ship runs on the PC ("Ships go first"); never above `cpu_percent` | 30 |
+| `cpu_percent` | all CI on the PC together; Linux only since #2262 (Windows runners get no cap) | 75 |
+| `squeeze_percent` | the other runners, together, while a scheme's ship runs on the PC ("Ships go first", off since #2262: read and unused); never above `cpu_percent` | 30 |
 
 Both are whole percents of the PC, 1 to 100. A value that isn't is logged and its default used. On Windows, the 10%
 the others get while Citadel's own ship runs comes down with `squeeze_percent` below 10.
 
-- **Windows:** `C:\ProgramData\citadel-runner-agent\caps.json`, written as administrator. Then restart the task
+- **Windows:** nothing to set since #2262 (no cap, no squeeze). The file is `C:\ProgramData\citadel-runner-agent\caps.json`, written as administrator. Then restart the task
   **Citadel runner agent** (end it and run it, in Task Scheduler).
 - **Linux:** `/opt/citadel-runner-agent/caps.json`, written as root. Then `systemctl restart citadel-runner-agent`.
-- **WSL:** the same file, for `squeeze_percent` only: `.wslconfig`'s `processors` is what holds the VM down (below).
+- **WSL:** nothing to set since #2262 (`squeeze_percent` is read and unused): `.wslconfig`'s `processors` is what holds the VM down (below).
 
 A restart of the agent leaves the runners and their jobs going. Installing again keeps the file.
 
@@ -501,6 +507,15 @@ every script passes the `.ps1` lint, and the agent's start of `keep-runners.ps1`
 with a fake PowerShell. The job itself has only run where `-Prove` runs: on the desktop, at the agent's next install.
 
 ## Ships go first (#1268)
+
+**Off since #2262** (Cara, 2026-11-27: "if a machine doesnt have room, we can wait and load balance, not run the job
+starved"). On Nov 27 a Citadel ship in WSL held every Windows runner on Cara's desktop to 10% of the PC together, as
+little as 2.5% each; a Worker started that slowly missed its listener's 30-second handshake, and Peek's jobs ran no
+steps. The agent now sends
+every squeeze an empty list, which lifts one an older agent left, and a ship goes first only through the plan's sleep
+("Runners awake"): runners without room sleep before GitHub offers them a job. A runner whose listener has taken a job,
+Worker started or not, counts as busy and is never put to sleep. The rest of this section is how the squeeze worked,
+kept for that lift and for #2264, which redesigns runners as one pool.
 
 Cara, 2026-11-20, "Plan approved: build it this way. ("Ships go first on the CI desktop: while any scheme's ship run
 is going, every other runner there drops to about a third of the PC")". On Nov 19, 23:13-23:35 PST, Peek's Windows

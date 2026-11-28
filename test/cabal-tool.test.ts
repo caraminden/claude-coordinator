@@ -53,7 +53,7 @@ test('only a turn flagged as in a cabal is offered cabal_board', async () => {
   const list = await mcpOnce(env, 'tools/list', {}, tmp.track);
   assert.ok(!list.tools.some((t: { name: string }) => t.name === 'cabal_board'));
   const r = await tool(OUTSIDER.id, {});
-  assert.match(r.text, /not on a cabal board/);
+  assert.match(r.text, /not on a Plot board/);
 });
 
 test("only a lead's turn is offered cabal_start, cabal_member (#2091) and message_taskmaster (#2094)", async () => {
@@ -84,7 +84,7 @@ test("the lead edits rows, logs and sets the red line; a member can't", async ()
   assert.match((await tool(LEAD.id, { action: 'red', text: 'Full run red on test/x.test.ts' })).text, /Saved/);
   const denied = await tool(M1.id, { action: 'log', text: 'mine' });
   assert.ok(denied.error);
-  assert.match(denied.text, /Only the cabal's lead/);
+  assert.match(denied.text, /Only the Plot's lead/);
   const read = (await tool(LEAD.id, {})).text;
   assert.match(read, /^RED \(.*\): Full run red/m);
   assert.match(read, /Fix roster Fixer \[fixer\] \| not started/);
@@ -125,7 +125,7 @@ test('create_ticket and update_ticket put a minion on a board; a refused field l
   store.ensureCabal(other.id, A.id);
   const r = await tool(LEAD.id, { action: 'row', title: 'Pulled', minion: other.number });
   assert.ok(r.error);
-  assert.match(r.text, /leads a cabal/);
+  assert.match(r.text, /leads a Plot/);
 });
 
 test("the lead's answer comes back the way it was asked: held mail for a plain ask, a wake for a blocking one", async () => {

@@ -268,6 +268,48 @@ static class TrialTests
             Is(back.Previous.Id, 6, "previous survives a save");
         });
 
+        // In the tray (#2279): a running copy restarts into a waiting build only while it's hidden and the PC is idle.
+        var idle = Tray.Idle + TimeSpan.FromSeconds(1);
+        Test("tray: a waiting build, the window hidden and the PC idle: restart now", () =>
+        {
+            Is(Tray.Hold(Waiting(), false, false, idle), Held.No, "hold");
+        });
+        Test("tray: a window open is never restarted", () =>
+        {
+            Is(Tray.Hold(Waiting(), false, true, idle), Held.WindowOpen, "hold");
+            Is(Tray.Hold(Waiting(), true, true, TimeSpan.FromHours(3)), Held.WindowOpen, "a new launcher waiting, hours idle");
+        });
+        Test("tray: someone used the PC within the idle time: wait", () =>
+        {
+            Is(Tray.Hold(Waiting(), false, false, Tray.Idle - TimeSpan.FromSeconds(1)), Held.InUse, "hold");
+            Is(Tray.Hold(Waiting(), false, false, TimeSpan.FromSeconds(11), TimeSpan.FromSeconds(10)), Held.No, "a test's short idle time");
+        });
+        Test("tray: nothing waiting: no restart", () =>
+        {
+            Is(Tray.Hold(new State { Current = B(6), Previous = B(5) }, false, false, idle), Held.NothingNew, "hold");
+        });
+        Test("tray: a new launcher waiting is reason enough", () =>
+        {
+            Is(Tray.Hold(new State { Current = B(6) }, true, false, idle), Held.No, "hold");
+        });
+        Test("tray: a build's second try waits for a start by the person", () =>
+        {
+            var s = Waiting();
+            s.Struck = new List<int> { 7 };
+            Is(Tray.Hold(s, false, false, idle), Held.SecondTry, "hold");
+            Is(Tray.Hold(s, true, false, idle), Held.No, "a new launcher still restarts");
+            Is(Tray.SecondTry(s), true, "the restart for the launcher doesn't try it");
+            Is(Tray.SecondTry(Waiting()), false, "a first try");
+            Is(Tray.SecondTry(new State { Current = B(6), Struck = new List<int> { 6 } }), false, "nothing waiting");
+        });
+        Test("tray: the check comes every 30 min, up to 10 min later at random", () =>
+        {
+            Is(Tray.NextCheck(Tray.Every, 0), TimeSpan.FromMinutes(30), "earliest");
+            Is(Tray.NextCheck(Tray.Every, 0.999999) < TimeSpan.FromMinutes(40), true, "latest under 40 min");
+            Is(Tray.NextCheck(Tray.Every, 0.5), TimeSpan.FromMinutes(35), "middle");
+            Is(Tray.NextCheck(TimeSpan.FromSeconds(30), 1), TimeSpan.FromSeconds(40), "a test's short interval jitters by a third too");
+        });
+
         Console.WriteLine(failed == 0 ? "all passed" : failed + " failed");
         return failed;
     }

@@ -106,10 +106,14 @@ test("a ship's run burns in its new and changed tests before the full suite, in 
   const burn = Number(land.match(/CI_BURN=\$\{LAND_CI_BURN:-(\d+)\}/)?.[1]);
   const base = land.match(/CI_BASE_REF=([^ \n]+)\/\$branch/)?.[1];
   assert.ok(step && burn && base, "land.sh's burn-in step, extension and base ref");
-  const at = yml.indexOf(`- name: ${step}`);
-  assert.ok(at > 0 && at < yml.indexOf('- name: the full suite'), 'the burn-in comes before the full suite');
-  const body = yml.slice(at, yml.indexOf('- name:', at + 1));
-  assert.match(body, /if: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\) \}\}/, "lands, ships' own checks and early runs only");
+  // #2281: its own job beside the shards, so no shard's suite waits on it; the step keeps the name land.sh reads.
+  const job = yml.slice(yml.indexOf('\n  burn-in:\n'));
+  const at = job.indexOf(`- name: ${step}`);
+  assert.ok(at > 0, 'the burn-in step is in the burn-in job');
+  assert.ok(!yml.slice(yml.indexOf('\n  shard:\n'), yml.indexOf('\n  burn-in:\n')).includes(`- name: ${step}`), 'and in no shard');
+  assert.ok(!job.includes('- name: the full suite'), 'which runs no suite');
+  assert.match(job, /if: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/pre\/'\) \}\}/, "lands, ships' own checks, early runs and pre-ship pushes only");
+  const body = job.slice(at, job.indexOf('- *still-running', at));
   // land/<branch> compares with land-base/<branch>, check/<branch> with check-base/<branch> (tools/own-check.sh).
   assert.equal(base, 'land-base');
   assert.ok(body.includes('base=origin/${GITHUB_REF_NAME%%/*}-base/${GITHUB_REF_NAME#*/}'), 'it compares with the base land.sh pushes');
@@ -183,13 +187,13 @@ test('a flake proof does not make the desktop busy for an own check or the early
 });
 
 // #2209 (Cara, 2026-11-27: "github should actually be the main CI? with my desktop as the fallback", "if they give us
-// 20, take 20"): a ship's push runs 20 shards on GitHub's runners and the desktop job not at all; a check, an early run,
+// 20, take 20"): a ship's push runs 19 shards and a burn-in job on GitHub's runners and the desktop job not at all; a check, an early run,
 // the nightly and land.sh's fallback (where=desktop) run on the desktop as before, and CI_RUNNER=desktop sends ships back.
-test("a ship's push runs 20 shards on GitHub's runners, and everything else the desktop job", () => {
+test("a ship's push runs 19 shards and a burn-in job on GitHub's runners, and everything else the desktop job", () => {
   const yml = read('.github/workflows/tests.yml');
   const onGh = "inputs.where == 'github' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/land/') && vars.CI_RUNNER != 'desktop') || startsWith(github.ref, 'refs/heads/pre/')";
   const times = yml.slice(yml.indexOf('\n  times:\n'), yml.indexOf('\n  shard:\n'));
-  const shard = yml.slice(yml.indexOf('\n  shard:\n'));
+  const shard = yml.slice(yml.indexOf('\n  shard:\n'), yml.indexOf('\n  burn-in:\n'));
   assert.ok(times.includes(`    if: \${{ ${onGh} }}\n    runs-on: ubuntu-latest\n`), "only a ship's push, or a run asked for there");
   assert.ok(yml.slice(0, yml.indexOf('\n  times:\n')).includes(`    if: \${{ !(${onGh}) }}`), 'the desktop job is the rest');
   // Every shard the same split: one times file and one main, from the times job, not each shard's own look.
@@ -205,7 +209,7 @@ test("a ship's push runs 20 shards on GitHub's runners, and everything else the 
       .match(/shard: \[([\d, ]+)\]/)?.[1]
       ?.split(', ')
       .join(),
-    Array.from({ length: 20 }, (_, i) => i).join(),
+    Array.from({ length: 19 }, (_, i) => i).join(),
   );
   assert.match(shard, /CITADEL_TEST_SHARD: \$\{\{ strategy\.job-index \}\}\/\$\{\{ strategy\.job-total \}\}/);
   for (const step of ['- name: the full suite', '- *rerun', '- *systemd', '- *devdeps']) assert.ok(shard.includes(step), step);
@@ -214,13 +218,14 @@ test("a ship's push runs 20 shards on GitHub's runners, and everything else the 
 });
 
 // #2210 (Cara, 2026-11-27: "Run any minion that is waiting for a "Ship it" through the full suite on github"): a pre-ship
-// push (src/pre-ship.ts) runs the same 20 shards with the burn-in, whatever CI_RUNNER says, in a group per branch where a
+// push (src/pre-ship.ts) runs the same 19 shards and burn-in job, whatever CI_RUNNER says, in a group per branch where a
 // newer push cancels the older run.
-test('a pre-ship push runs the 20 shards on GitHub with the burn-in, the newest only', () => {
+test('a pre-ship push runs the 19 shards and the burn-in job on GitHub, the newest only', () => {
   const yml = read('.github/workflows/tests.yml');
   assert.match(yml, /group: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/pre\/'\) && format\('citadel-pre-\{0\}', github\.ref_name\) \|\|/, 'before the per-run GitHub group');
   assert.match(yml, /cancel-in-progress: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/pre\/'\) \}\}/);
-  const shard = yml.slice(yml.indexOf('\n  shard:\n'));
-  assert.match(shard, /name: burn in new and changed tests\n +if: \$\{\{ strategy\.job-index == 0 && \(.*startsWith\(github\.ref, 'refs\/heads\/pre\/'\)\) \}\}/);
-  assert.match(shard, /CITADEL_TEST_SHARD_HEAD: .*'refs\/heads\/pre\/'\)\) && '60'/);
+  const shard = yml.slice(yml.indexOf('\n  shard:\n'), yml.indexOf('\n  burn-in:\n'));
+  assert.match(yml.slice(yml.indexOf('\n  burn-in:\n')), /startsWith\(github\.ref, 'refs\/heads\/pre\/'\)/, 'the burn-in job runs on pre/');
+  assert.doesNotMatch(shard, /burn in new and changed tests|CITADEL_TEST_SHARD_HEAD/, 'no shard burns in or gets a head start');
+  assert.match(shard, /shard: \[0(, \d+){18}\]/, '19 shards, the burn-in the 20th job');
 });

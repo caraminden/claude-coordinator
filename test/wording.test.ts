@@ -24,7 +24,7 @@ test("flags fold in every sense, the old gos included: Peek Auras #34's handoff,
   assert.deepEqual(flagged(brief), ['fold']);
   assert.equal(misusedWords(brief)[0].sentence, "Follow that pattern, or fold this check into the same hook if that's cleaner.");
   assert.deepEqual(flagged('It folds the old notes in. Then we folded them again.'), ['folds', 'folded']);
-  for (const old of ['fold it', 'Looks good, fold it and deploy.', 'fold #196 into build 8', 'Fold 196.', 'It was folded into main yesterday.', 'Fold the PR when CI is green.']) {
+  for (const old of ['fold it', 'Looks good, fold it and deploy.', 'fold #196 into Plot 8', 'Fold 196.', 'It was folded into main yesterday.', 'Fold the PR when CI is green.']) {
     assert.equal(flagged(old).length, 1, old);
   }
 });
@@ -55,9 +55,9 @@ test('flags merge said of main: gos, "to main", "ready to merge", merged PRs and
 
 test("leaves merge alone for a build, git, and every shape that can't be told from git's", () => {
   for (const ok of [
-    'Merge it into Build 3.',
+    'Merge it into Plot 3.',
     'PR #12 merged into the build.',
-    'Merged into Build 3, not live until the build ships',
+    'Merged into Plot 3, not live until the build ships',
     'Merge it, the feeder is green.',
     'Merge them with git.',
     'There was a merge conflict.',
@@ -212,4 +212,23 @@ test('the hook sends a reply with a stand-in back once', () => {
   assert.match(JSON.stringify(checkCall(input, cfg)), /the address/);
   assert.equal(checkCall(input, cfg), null);
   rmSync(dir, { recursive: true });
+});
+
+test('flags cabal and Build <n> said of a group, and "major build" (#2270: a group of minions is a Plot)', () => {
+  assert.deepEqual(flagged("Build 7's Overseer started a cabal."), ['cabal', 'Build 7']);
+  assert.deepEqual(flagged('The goal cabal shipped.'), ['goal cabal']);
+  assert.deepEqual(flagged('A major build needs a go.'), ['major build']);
+  assert.deepEqual(flagged('Merged into build 11.'), ['build 11']);
+  assert.match(explain(misusedWords('The cabal is done.')), /Plot/);
+});
+
+test('leaves a compiled desktop, APK or release build alone (#2285)', () => {
+  for (const ok of ['- **Desktop app:** build 12 is published from CI.', 'Desktop build 13 is published from CI and replaces build 12.', '- **Desktop app:** desktop build 14 is published from CI.', 'APK build 5 is out.', 'release build 3 is out.']) assert.deepEqual(flagged(ok), [], ok);
+  assert.deepEqual(flagged("Build 11's Overseer"), ['Build 11']);
+  assert.deepEqual(flagged('merged into Build 11'), ['Build 11']);
+  assert.deepEqual(flagged('a major build'), ['major build']);
+});
+
+test('leaves Plot, compiling builds and quoted cabal alone', () => {
+  for (const ok of ['Plot 11 shipped.', 'Merged into Plot 11.', 'The APK build is done.', 'Build the feature.', 'Use the `cabal` tool.', 'The branch build/11 is ready.', '"Cabal" is retired.']) assert.deepEqual(flagged(ok), [], ok);
 });

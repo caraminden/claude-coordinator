@@ -9,7 +9,7 @@ import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
 import { cabalSplit, threadMatches, threadSections } from './threadgroups.js';
-import { cabalCard, openCabals } from './cabal-card.js';
+import { cabalCard, openCabals, plainTitle } from './cabal-card.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { othersIn, presenceChip } from './presence.js';
@@ -196,7 +196,7 @@ function groupHeading(group) {
 function buildHeading(s) {
   const b = openView().builds?.find((x) => x.build === s.build);
   return [
-    'Build ',
+    'Plot ',
     s.build,
     s.current ? h('span', { class: 'muted' }, ' current') : '',
     b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`, openView().buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
@@ -213,7 +213,8 @@ function cabalSection({ cabal, rows, mine }, current) {
   return h(
     'section',
     { class: 'thread-group g-cabal' },
-    h('h3', {}, cabal.name, current ? h('span', { class: 'muted' }, ' current') : ''),
+    // "Plot 11: One runner pool" (Cara, 2026-11-28); a Plot with no number is its title. The title shortens, "current" never does.
+    h('h3', {}, h('span', { class: 'cabal-h', title: cabal.title }, cabal.build != null ? `${cabal.name}: ${plainTitle(cabal.title)}` : plainTitle(cabal.title)), current ? h('span', { class: 'muted' }, ' current') : ''),
     cabalCard(cabal, {
       rows: rows.sort((a, b) => Number(b.id === cabal.lead) - Number(a.id === cabal.lead) || byUrgency(a, b, usage)),
       mine,
@@ -221,6 +222,7 @@ function cabalSection({ cabal, rows, mine }, current) {
       build: view.builds?.find((b) => b.build === cabal.build),
       preview: !!view.buildPreviews,
       row: (t) => threadRow(t),
+      badge: (cards, theirs) => cardBadge(cards, null, theirs),
       redraw: renderSidebar,
     }),
   );

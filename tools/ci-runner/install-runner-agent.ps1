@@ -23,7 +23,7 @@
     7. proves the CPU cap on this PC with keep-runners.ps1 -Prove (#552): a throwaway job of CPU-burning processes,
        about 20 seconds, touching no runner.
   It registers, removes and restarts no runner; once it runs, the agent keeps every runner at below-normal priority
-  and all of CI under a CPU cap (keep-runners.ps1), and starts runner services that should be running. It never
+  (keep-runners.ps1; no CPU cap since #2262), and starts runner services that should be running. It never
   restarts or reboots the PC.
 
 .PARAMETER CitadelUrl
@@ -86,7 +86,7 @@ $files = [ordered]@{
   'remove-runner.ps1' = "$url/ci-runner/remove-runner.ps1"
   # The agent's load samples (#534): read-only.
   'sample-load.ps1'   = "$url/ci-runner/sample-load.ps1"
-  # Cap and yield (#552): the agent keeps it running, holding every runner at below-normal priority under a CPU cap.
+  # Cap and yield (#552): the agent keeps it running, holding every runner at below-normal priority (no CPU cap since #2262).
   'keep-runners.ps1'  = "$url/ci-runner/keep-runners.ps1"
   # One-job runners (runner pool P2, #2269): the agent's start op runs runner-slot.ps1, which copies launch-slot.ps1
   # into the pool for the slot's NETWORK SERVICE task.

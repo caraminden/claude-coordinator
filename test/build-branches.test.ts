@@ -22,7 +22,7 @@ test('build lines are given only to a minion in a build with its branch made, an
   assert.ok(!owner('build/7').includes('git branch build/7 main'), 'made already');
   assert.ok(owner('build/7', 'https://x.example/p/').includes('https://x.example/p/'));
   assert.ok(!buildLines({ build: 7, branch: 'build/7', owner: false, preview: 'https://x.example/p/' }).join('\n').includes('https://x.example/p/'), 'feeders get no preview link');
-  assert.ok(!prompt(null).includes('Build 7'), 'no role, no lines');
+  assert.ok(!prompt(null).includes('Plot 7'), 'no role, no lines');
   assert.ok(prompt(null, true, 'coordinator').includes(BUILDS_LINE));
   assert.ok(!prompt(null, false, 'coordinator').includes(BUILDS_LINE));
 });
@@ -37,21 +37,21 @@ test("an Overseer gets the skill in place of the build steps, a member the board
   assert.match(owner, /You are Build 8's Overseer/);
   assert.match(owner, /citadel:cabal/);
   assert.match(owner, /which you make first/);
-  assert.match(owner, /to the member who made it while it is open, else to the cabal's fixer/, 'fixes are routed');
+  assert.match(owner, /to the member who made it while it is open, else to the Plot's fixer/, 'fixes are routed');
   assert.match(owner, /answer them together/, 'asks in batches');
   assert.match(owner, /A full run waits until no member is still merging/);
   assert.ok(owner.includes('https://x.example/p/'), 'the preview link stays');
   assert.ok(!owner.includes('You are the build minion'), 'the old build steps are gone');
   const old = turn({ build: 7, branch: 'build/7', owner: true }, null);
-  assert.ok(old.includes('You are the build minion of Build 7') && !old.includes('Overseer'), "Build 7's minion keeps today's steps");
+  assert.ok(old.includes('You are the build minion of Plot 7') && !old.includes('Overseer'), "Build 7's minion keeps today's steps");
   const feeder = turn({ build: 7, branch: 'build/7', owner: false }, null);
-  assert.ok(feeder.includes('You are a feeder in Build 7') && !feeder.includes('cabal_board'), "Build 7's feeders keep today's text");
+  assert.ok(feeder.includes('You are a feeder in Plot 7') && !feeder.includes('cabal_board'), "Build 7's feeders keep today's text");
   const inBuild = turn({ build: 8, branch: 'build/8', owner: false }, member);
-  assert.match(inBuild, /You are a member of Build 8, a cabal led by Build 8's Overseer \(#12\)/);
+  assert.match(inBuild, /You are a member of Build 8, a Plot led by Build 8's Overseer \(#12\)/);
   assert.match(inBuild, /ask it with a cabal_board ask to move the claim/);
   assert.ok(!/feeder/i.test(inBuild.replaceAll('a-feeder', '')), 'a member reads no "feeder" (the fixture\'s branch aside)');
   assert.ok(!inBuild.includes('ship to live yourself'), "a build member's work goes into the build");
-  assert.ok(inBuild.indexOf('You are a member') < inBuild.indexOf('In Build 8, a build cabal'), 'who it is comes before the branch steps');
+  assert.ok(inBuild.indexOf('You are a member') < inBuild.indexOf('In Build 8: your base'), 'who it is comes before the branch steps');
   const goalRole: CabalRole = { lead: false, name: 'Worker machines', overseer: "Worker machines' Overseer", ref: 'Delve #4', build: null };
   const goal = cabalLines(goalRole).join('\n');
   assert.match(goal, /led by Worker machines' Overseer \(Delve #4\)/);
@@ -67,7 +67,7 @@ test("an Overseer gets the skill in place of the build steps, a member the board
   // A goal cabal's member with a build label of its own: still a goal member, and that build's feeder, not its Overseer's.
   const labelled = turn({ build: 7, branch: 'build/7', owner: false }, goalRole);
   assert.match(labelled, /ship to live yourself/);
-  assert.ok(labelled.includes('You are a feeder in Build 7') && !labelled.includes("through Worker machines' Overseer"), labelled);
+  assert.ok(labelled.includes('You are a feeder in Plot 7') && !labelled.includes("through Worker machines' Overseer"), labelled);
   assert.ok(prompt(null, false, 'coordinator').includes(CABALS_LINE), 'goal cabals whatever the Builds setting');
 });
 

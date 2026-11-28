@@ -65,7 +65,7 @@ ship goes through the line with no CI and no push; a lane's run goes to `land/<l
 catches every run and `'land/<lane>/**'` routes one lane's. Anything the map doesn't list is full, so a missing
 line costs time, never safety; `tools/land.sh --lane` prints the lane a commit would take. When "every workflow
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
-`CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. When a major build's
+`CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. When a Plot's
 `--full` run must also see a workflow the gate leaves out (Peek's `desktop.yml`, which runs on main only), name it in
 `BUILD_WORKFLOWS` in `land.local.sh`: `'desktop.yml'` for every build, or `'desktop.yml:<paths file>'` only when the build
 changes a path that file lists. That file must name everything the workflow tests (the code too, not just its harness),

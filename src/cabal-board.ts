@@ -43,6 +43,9 @@ export interface BoardAsk {
   text: string;
   blocking: boolean;
   opened_at: number;
+  /** The lead's answer (#2289): null while it is open. The board carries the open asks, then the newest answered few. */
+  answer: string | null;
+  answered_at: number | null;
 }
 
 export interface BoardMember {
@@ -133,6 +136,7 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
   const claims = ref && repoDir ? parseClaims((await gitOut(['show', `${ref}:build-claims.md`], repoDir)) ?? '') : new Map<number, string[]>();
   const rows = store.cabalRows(leadId);
   const asks = store.cabalAsks(leadId);
+  const answered = answeredAsks(store, leadId); // read with the open ones, before any await: an answer meanwhile can't show an ask twice
   const tickets = new Map(rows.filter((r) => r.ticket_id != null).map((r) => [r.ticket_id!, store.getTicket(r.ticket_id!)]));
   const fileLists = rows.map((r) => rowFiles(r.files));
   const doubled = doubledFiles(fileLists);
@@ -176,7 +180,7 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
     kind: ref ? 'build' : 'goal',
     build: ref ? lead.build : null,
     members,
-    asks: asks.map((a) => askOf(store, lead.project_id, a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
+    asks: [...asks, ...answered].map((a) => askOf(store, lead.project_id, a, byTicket.get(a.ticket_id), store.getTicket(a.ticket_id))),
     log: store.cabalLog(leadId),
     red: cabal.red ? { text: cabal.red, at: cabal.red_at ?? cabal.created_at } : null,
     width: cabal.width,
@@ -218,10 +222,23 @@ const askOf = (store: Store, leadScheme: number, a: CabalAsk, row: CabalMemberRo
   text: a.text,
   blocking: !!a.blocking,
   opened_at: a.opened_at,
+  answer: a.answer,
+  answered_at: a.answered_at,
 });
 
+/** The newest answered asks, so the board shows what the lead said (#2289). */
+const answeredAsks = (store: Store, leadId: number) =>
+  store
+    .cabalAsks(leadId, false)
+    .filter((a) => a.answered_at != null)
+    .sort((x, y) => (y.answered_at ?? 0) - (x.answered_at ?? 0))
+    .slice(0, 10);
+
+/** The asks still waiting on the lead. */
+export const openAsks = (b: Pick<Board, 'asks'>) => b.asks.filter((a) => a.answered_at == null);
+
 /** A build's cabal is always "Build 7" (Josh, 2026-11-25: "Build 7's Overseer"); a name only names a goal cabal. */
-export const cabalName = (store: Store, lead: Ticket, name: string) => (lead.build != null ? `Build ${lead.build}` : name || String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title);
+export const cabalName = (store: Store, lead: Ticket, name: string) => (lead.build != null ? `Plot ${lead.build}` : name || String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title);
 
 /** People's name for the lead: "Build 7's Overseer", "Worker machines' Overseer". */
 export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}${/s$/i.test(board.name) ? "'" : "'s"} Overseer`;
@@ -240,7 +257,7 @@ const waited = (ms: number) => (ms < 3_600_000 ? `${Math.round(ms / 60_000)} min
 export function timelineText(store: Store, seen: Board): string {
   const lead = store.getTicket(seen.lead.id)!;
   const rows = new Map(store.cabalRows(lead.id).map((r) => [r.id, r]));
-  const out = [`${seen.name} cabal timeline (Pacific). Board: #/p/${seen.lead.project_id}/cabal/${seen.lead.number} · ${overseerOf(seen)} spent ${money(seen.lead.spend)}, the cabal ${money(seen.counts.spend)}`, 'Members:'];
+  const out = [`${/^Plot \d/.test(seen.name) ? seen.name : `${seen.name} Plot`} timeline (Pacific). Board: #/p/${seen.lead.project_id}/cabal/${seen.lead.number} · ${overseerOf(seen)} spent ${money(seen.lead.spend)}, the Plot ${money(seen.counts.spend)}`, 'Members:'];
   for (const m of seen.members) {
     const row = rows.get(m.row);
     const t = row?.ticket_id != null ? store.getTicket(row.ticket_id) : undefined;
@@ -278,11 +295,12 @@ export function timelineText(store: Store, seen: Board): string {
 export function boardText(b: Board, me: Pick<TicketFields, 'number' | 'project_id'> | null = null): string {
   const c = b.counts;
   const out = [
-    `${b.name} cabal (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.working} at work, up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
+    `${/^Plot \d/.test(b.name) ? b.name : `${b.name} Plot`} (${b.kind === 'build' ? `build/${b.build}` : 'goal, no branch'}) · ${overseerOf(b)} #${b.lead.number} · ${c.members} on the roster, ${c.started} started · ${c.merged} ${b.kind === 'build' ? 'merged' : 'shipped'} · ${c.open} open · ${c.working} at work, up to ${b.width} at once · ${c.running} building · ${money(c.spend)} spent`,
   ];
   if (b.red) out.push(`RED (${pacificClock(b.red.at)}): ${b.red.text}`);
-  out.push(b.asks.length ? `Open asks (${b.asks.length}):` : 'No open asks.');
-  for (const a of b.asks) out.push(`- ask ${a.id}${a.blocking ? ' BLOCKING' : ''} from ${a.from}${a.number != null ? ` ${a.scheme ? `${a.scheme} ` : ''}#${a.number}` : ''} (${pacificClock(a.opened_at)}): ${a.text}`);
+  const open = openAsks(b);
+  out.push(open.length ? `Open asks (${open.length}):` : 'No open asks.');
+  for (const a of open) out.push(`- ask ${a.id}${a.blocking ? ' BLOCKING' : ''} from ${a.from}${a.number != null ? ` ${a.scheme ? `${a.scheme} ` : ''}#${a.number}` : ''} (${pacificClock(a.opened_at)}): ${a.text}`);
   if (!b.members.length) out.push('Roster: empty.');
   else out.push('Members (row id · label #N title | state | waits on | note | spend | risk | claims or files):');
   for (const m of b.members) {

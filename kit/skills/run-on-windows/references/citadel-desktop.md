@@ -45,6 +45,8 @@ point, and leaves a shot at `%TEMP%\electron-drag.png`. After editing `public/`,
 `rig.ts reload` wants the Edge driver. Electron is the one in `%LOCALAPPDATA%\defender-copy`. A turn without the
 `tailscale` command sets `RIG_HOST=perigee.tail59477f.ts.net` for `rig.ts up`.
 
+`scripts/electron-app/strip.mjs` (#2276) opens a route (`'#/home'`, a scheme) in the desktop app on the same dev copy and prints the title strip's rectangle, where the page starts, and `under`: what text or icon sits beneath the caption buttons (empty is right). It shots the window normal and narrow to `%TEMP%\electron-strip-*.png`. Home shows only with two or more schemes: `rig.ts up` seeds a second.
+
 `scripts/electron-app/reload.mjs` (#1697) times reloads the same way (`reload.mjs <rig URL> - 6`): reload to the app drawn and
 to the splash gone, and each front file as 200, 304 or served from cache. Touch `shell-cache-off` in the dev copy's data folder
 first when live has the service worker's shell off, or every file comes from the worker.

@@ -59,21 +59,24 @@
 .g-cabal { --gc: hsl(265 45% 52%); }
 .g-cabal > h3 { color: var(--gc); }
 /* A cabal's card (#2092, public/cabal-card.js): a summary whose name opens the Overseer's chat and whose arrow opens the box, its members' rows under it. */
-.cabal-card { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: var(--space-1) 0; transition: border-color 0.15s; }
-.cabal-card:hover, .cabal-card[data-open] { border-color: var(--gc); }
+.cabal-card { border: 1px solid var(--gc); border-radius: var(--radius-sm); margin: var(--space-1) 0; } /* always in the Plot's colour (Cara, 2026-11-27: "Always purple"): the card isn't a click target, and nothing on it may change or fade on hover, since every redraw makes a new card (#2280) */
 .sidebar .cabal-sum { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-2); }
-.cabal-top { display: flex; align-items: flex-start; gap: var(--space-2); }
-.sidebar .cabal-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); color: inherit; text-decoration: none; }
-.sidebar .cabal-name:is(a):hover .cabal-title b { text-decoration: underline; }
+.cabal-top { display: flex; align-items: center; gap: var(--space-2); }
+.sidebar .cabal-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-1); color: inherit; text-decoration: none; }
+.sidebar .cabal-name:is(a):hover .num { text-decoration: underline; }
 /* The arrow opens and shuts the box; a phone-sized hit area around a small chevron. */
 .sidebar .cabal-toggle { flex: none; display: grid; place-items: center; width: 44px; height: 44px; margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .sidebar .cabal-toggle:hover { color: var(--gc); }
 .cabal-arrow { width: 0.5rem; height: 0.5rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-25%) rotate(45deg); transition: transform 0.15s; }
 .cabal-toggle[aria-expanded="true"] .cabal-arrow { transform: translateY(25%) rotate(-135deg); }
 .cabal-card[data-open] .cabal-sum { background: color-mix(in srgb, var(--gc) 8%, transparent); }
-.cabal-tag { align-self: flex-start; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gc); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
-.cabal-title { overflow-wrap: anywhere; }
-.cabal-title .num { color: var(--muted); font-size: 0.8rem; }
+.cabal-tag { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gc); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; }
+.cabal-top .card-badge { flex: none; }
+.g-cabal > h3 { display: flex; min-width: 0; }
+.g-cabal > h3 .cabal-h { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-cabal > h3 .muted { flex: none; white-space: pre; }
+.cabal-state .cabal-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cabal-name .num { color: var(--muted); font-size: 0.8rem; }
 /* The meter is the board's (project.css), a little taller so a segment is easier to point at. */
 .sidebar .cabal-card .cabal-meter { order: 0; flex: none; margin: 0; height: 8px; }
 .sidebar .cabal-card .cabal-meter i:is([data-s="roster"], [data-s="sealed"], [data-s="closed"]) { background: color-mix(in srgb, var(--muted) 35%, var(--panel)); }
@@ -82,11 +85,27 @@
 .cabal-build { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 0.75rem; color: var(--muted); }
 .cabal-build a { position: relative; z-index: 1; display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--space-1); } /* tap target: Preview sits apart from the toggle, and over the row that starts inside its box */
 .cabal-build:has(a) { margin-top: calc(-1 * var(--space-2)); margin-bottom: -7px; padding-bottom: 0; } /* the tall link brings its own room; the same open or shut, or a toggle shifts the list by it (#2197) */
-.cabal-members { border-top: 1px solid var(--line); padding-left: var(--space-2); }
-.cabal-members.opening { animation: cabal-open 0.15s ease-out; } /* the click that opens it only: the list redraws on every tick (#2181) */
-.cabal-planned { margin: 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; }
+.cabal-members { border-top: 1px solid var(--line); padding: 0 var(--space-2); }
+.cabal-members > .thread-row:last-child { border-bottom-color: transparent; } /* the card's own edge closes the list */
+:is(.cabal-planned, .cabal-gone).opening { animation: cabal-open 0.15s ease-out; } /* the click that opens it only: the list redraws on every tick (#2181) */
+.cabal-lead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: 0.75rem; }
+.cabal-state { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; gap: 4px; font-weight: 650; color: var(--muted); }
+.cabal-state i { width: 6px; height: 6px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; }
+.cabal-state[data-s="running"] { color: var(--running); }
+.cabal-state[data-s="running"] i { background: currentColor; animation: pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .cabal-state i { animation: none !important; } }
+/* Not started (Cara, 2026-11-27: "a little more visible"): a soft held-violet tint and a dashed edge, so it reads as planned, not as a row. */
+.cabal-members .thread-row.active { border-color: transparent transparent color-mix(in srgb, var(--gc) 30%, transparent); box-shadow: inset 3px 0 0 var(--accent); } /* the card's own edge is the border: a boxed row beside it read as two (#2277) */
+.cabal-planned { margin: var(--space-1) 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; border: 1px dashed color-mix(in srgb, var(--held) 45%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--held) 10%, var(--panel)); }
+.cabal-planned .muted { color: var(--held); font-weight: 600; white-space: nowrap; }
 @keyframes cabal-open { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .cabal-card { transition: none; } .cabal-members.opening { animation: none; } }
+/* A dismissed member of the Plot, under the not-started lines of an open card (Cara, 2026-11-27): a quiet link to its chat. */
+.sidebar .cabal-gone { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h); padding: var(--space-1) var(--space-2); box-sizing: border-box; font-size: 0.8rem; color: var(--muted); text-decoration: none; overflow-wrap: anywhere; }
+.sidebar .cabal-gone:hover > span:first-child { text-decoration: underline; }
+.cabal-gone > span:first-child { flex: 1; min-width: 0; }
+.cabal-gone .muted { flex: none; font-weight: 600; white-space: nowrap; }
+.cabal-gone:last-child { margin-bottom: var(--space-1); } /* room before the card's edge, as the not-started lines have */
+@media (prefers-reduced-motion: reduce) { :is(.cabal-planned, .cabal-gone).opening { animation: none; } }
 .g-build > h3 { color: var(--gc); }
 .g-build > h3 .muted, .g-cabal > h3 .muted { text-transform: none; font-weight: normal; }
 .g-feature { --gc: hsl(265 55% 55%); }
@@ -157,17 +176,17 @@
 .thread-row .urgent-mark { margin-right: 0.3rem; vertical-align: 0.05em; }
 /* An open card waiting on people (#575): an outlined amber chip beside the state pill, a link to the card itself;
    grey like the parked pill on a parked or dismissed row. */
-.thread-row .card-badge { --chip: var(--waiting); align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);
+:is(.thread-row, .cabal-sum) .card-badge { --chip: var(--waiting); align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);
   border: 1px solid var(--chip); border-radius: 999px; color: var(--chip); background: var(--panel); cursor: pointer; }
 .thread-row.f-idle .card-badge { --chip: var(--closed); }
 /* Only someone else's cards (#1121): violet like its "Waiting on <name>" pill, so amber stays for cards of yours. */
-.thread-row .card-badge.theirs { --chip: var(--held); }
+:is(.thread-row, .cabal-sum) .card-badge.theirs { --chip: var(--held); }
 /* A running turn past a spend stage (#723; Cara, 2026-11-14: "a different background color or a red "!""): the badge
    goes red and the row takes a red tint until Keep going or the turn's end. */
 .thread-row .card-badge.spend { --chip: var(--error); }
 .thread-row.spend, .thread-group .thread-row.spend { background: color-mix(in srgb, var(--error) 12%, var(--panel)); }
 .thread-row.spend.active, .thread-group .thread-row.spend.active { background: color-mix(in srgb, var(--error) 20%, var(--panel)); }
-.thread-row .card-badge:hover, .thread-row .card-badge:focus-visible { background: color-mix(in srgb, var(--chip) 18%, var(--panel)); }
+:is(.thread-row, .cabal-sum) .card-badge:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--chip) 18%, var(--panel)); }
 /* On phones its hit area reaches the full control height (#471) without growing the chip or the row. */
 @media (max-width: 800px) {
   .thread-row .card-badge { position: relative; padding: calc(0.25rem - 1px) calc(0.6rem - 1px); }
@@ -414,6 +433,9 @@
 .new-tag { display: inline-block; margin-right: 0.35rem; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.75em; line-height: 1.3; vertical-align: 0.05em; color: var(--on-accent); background: var(--accent); }
 /* Until a row is picked: the counts, then a row per scheme with its last days' ships as bars (one scale for all). */
 .home-overview { padding: 0.25rem 0; }
+/* In a desktop app the pane's top is the title bar strip, where a scheme page keeps its head row clear of the window controls.
+   The overview has no such row, so its banner and tiles start below the strip instead of under the controls (#2276). */
+@media (display-mode: window-controls-overlay) { .home-overview { padding-top: calc(var(--top-inset) - var(--strip-pad, 0px) + 0.5rem); } }
 .home-overview > .home-panel { margin-bottom: 1rem; }
 .home-overview-body { display: flex; flex-direction: column; gap: 0.75rem; max-width: 52rem; }
 .home-overview-body > .settings-section { margin: 0.5rem 0 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 0.6rem; }

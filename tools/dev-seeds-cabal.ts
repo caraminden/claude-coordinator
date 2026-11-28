@@ -86,12 +86,12 @@ function formingCard(c: SeedCtx): string {
     id: 'cabalseedcard',
     questions: [
       {
-        header: 'Start the cabal',
+        header: 'Start the Plot',
         question: `Build 10's Overseer (#${lead.number}) asks to start 6 members, merging into Build 10, about $118, 4 at once.\n\n${lines}`,
         roster,
         multiSelect: false,
         options: [
-          { label: 'Start the cabal', description: 'The Overseer starts them 4 at a time (the rest wait their turn) and may unseal, stop and reseal its own members, and each start stands up to its row\u0027s cost; the Taskmaster hears of each start. Anyone not listed needs another card.', recommended: true },
+          { label: 'Start the Plot', description: 'The Overseer starts them 4 at a time (the rest wait their turn) and may unseal, stop and reseal its own members, and each start stands up to its row\u0027s cost; the Taskmaster hears of each start. Anyone not listed needs another card.', recommended: true },
           { label: 'Not yet', description: 'Nothing starts. Say what to change and the Overseer posts a new card.' },
         ],
       },

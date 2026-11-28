@@ -347,6 +347,34 @@ test('the window controls keep the base colour for a see-through background and 
   }
 });
 
+// #2287: Citadel's own modal dialogs (the "Attached image" viewer) dim the window controls with their backdrop, and closing puts back
+// the colour that was there, a contraption bar's included.
+test('an open modal dialog dims the window controls and closing it puts the colour back', { skip }, async () => {
+  const page = await browser.page(base, { dark: false });
+  const meta = `document.querySelector('meta[name=theme-color][media*="light"]').content`;
+  await page.eval(`(async () => {
+    const { tintTitleBar, syncModalTint } = await import('/base.js');
+    window.tint = tintTitleBar; window.sync = syncModalTint;
+    if (!document.querySelector('meta[name=theme-color]')) document.head.insertAdjacentHTML('beforeend', '<meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light), (display-mode: window-controls-overlay) and (prefers-color-scheme: light)">');
+    document.body.insertAdjacentHTML('beforeend', '<dialog id="m" class="cui-dialog"><style>#m::backdrop { background: rgb(0 0 0 / 0.4); }</style>hi</dialog>');
+  })()`);
+  const plain = await page.eval(meta);
+  await page.eval(`(document.getElementById('m').showModal(), sync())`);
+  const dim = await page.eval(meta);
+  assert.notEqual(dim, plain, 'the backdrop dims the controls');
+  assert.equal(dim, '#939391', 'by the backdrop laid over the page colour');
+  await page.eval(`(tint('rgb(18, 52, 86)'), sync())`);
+  assert.notEqual(await page.eval(meta), '#123456', 'a contraption bar colour is dimmed too while it is open');
+  await page.eval(`(document.getElementById('m').close(), sync())`);
+  assert.equal(await page.eval(meta), '#123456', 'closing puts the contraption bar colour back');
+  await page.eval(`(tint(null), 1)`);
+  assert.equal(await page.eval(meta), plain, 'and leaving it, the plain colour');
+  await page.eval(`(tint(null, 'rgb(0 0 0 / 0.4)'), 1)`);
+  assert.equal(await page.eval(meta), '#939391', 'a contraption modal over a page with no bar dims the plain colour');
+  await page.eval(`(tint(null), 1)`);
+  assert.equal(await page.eval(meta), plain);
+});
+
 // The header's cost chip (#1913; Josh, 2026-11-24: "about $12 so far of about $15" while a turn runs): finished turns plus the running turn's estimate.
 test('the budget chip adds the running turn to the finished turns, as an estimate, and goes amber on the total', { skip }, async () => {
   const page = await inboxPage('ok');

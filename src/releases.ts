@@ -17,6 +17,7 @@ import { fixLineIn } from './fix-proof.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
 import { behindOld, landPhase, ordinal, ridingOf, TRACK, type EarlyTest, type LandTicket, type Wait } from './waits.ts';
+import type { QuickInfo } from './quick-view.ts';
 
 export interface Target {
   /** Unique within its scheme: "citadel-server". */
@@ -74,7 +75,7 @@ export interface Progress {
   /** A waiting ship's early test (#1905): running, passed, failed or dropped, with its words. */
   early?: EarlyTest;
   /** Its ship train (Citadel's land line): the front with its riders, a rider, or a waiter's train ("Releasing next"). */
-  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
+  train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[]; quick?: true };
 }
 
 export interface Change extends Progress {
@@ -182,6 +183,8 @@ export interface TargetView {
   releaseKey?: string;
   /** Its Roll back to last green button and pin (src/rollback.ts, #1016); absent when its kind can't or there's no last green. */
   rollback?: RollbackInfo;
+  /** Quick trains (#2245, src/quick-view.ts): on or off, the ones live with full tests behind, and a red; Citadel's server card only. */
+  quick?: QuickInfo;
 }
 
 export interface SchemeReleases {
@@ -230,6 +233,8 @@ export interface ReleasesDeps {
   releaseKey?: (tv: Omit<TargetView, 'testCopies'>) => string | null;
   /** A target's Roll back to last green (src/rollback.ts), or null. */
   rollback?: (tv: Omit<TargetView, 'testCopies'>, views: Omit<TargetView, 'testCopies'>[]) => RollbackInfo | null;
+  /** A target's quick trains (src/quick-view.ts), or null: Citadel's own server card only. */
+  quick?: (tv: Omit<TargetView, 'testCopies'>) => QuickInfo | null;
   /** Put each scheme's changes still on their way to main (open PRs) on its targets (PrsInFlight.attach, #655). */
   inFlight?: (views: Omit<TargetView, 'testCopies'>[], fresh: boolean) => void;
   /** Read the ship lines off the server's thread, for the next inFlight that isn't `fresh` (LandsInFlight.refresh, #1980). */
@@ -266,7 +271,8 @@ export class Releases {
       const deploy = this.d.deploy?.(t);
       const releaseKey = this.d.releaseKey?.(t);
       const rollback = this.d.rollback?.(t, views);
-      scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}), ...(releaseKey ? { releaseKey } : {}), ...(rollback ? { rollback } : {}) });
+      const quick = this.d.quick?.(t);
+      scheme(t.target.projectId).targets.push({ ...t, testCopies: [], ...(deploy ? { deploy } : {}), ...(releaseKey ? { releaseKey } : {}), ...(rollback ? { rollback } : {}), ...(quick ? { quick } : {}) });
     }
     // Who placed the waiting ships (#1358), for the line's rows.
     for (const s of byScheme.values()) {
@@ -693,7 +699,7 @@ export function previewCopies(store: Store, d: { own: () => Project | null; runn
   if (own) {
     for (const n of d.builds(own.id)) {
       const r = d.running(`build-${n}`);
-      add(own.id, { kind: 'build-preview', target: CITADEL_TARGET, name: `Build ${n}`, path: buildPreviewPath(n), build: n, running: !!r, commit: r?.commit ?? null });
+      add(own.id, { kind: 'build-preview', target: CITADEL_TARGET, name: `Plot ${n}`, path: buildPreviewPath(n), build: n, running: !!r, commit: r?.commit ?? null });
     }
   }
   return out;

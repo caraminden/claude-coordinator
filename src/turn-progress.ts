@@ -10,6 +10,25 @@ import type { TurnState } from './runner.ts';
 /** What the task lists need from the Runner. */
 export interface TurnProgressDeps {
   store: Store;
+  emit(ticketId: number, kind: string, data: unknown): { created_at: number };
+  broadcastTicket(ticketId: number): void;
+}
+
+/**
+ * The plan call the server makes for a minion whose ship went through (#2278): the first `ship` step still open and every
+ * step before it are done. Later steps stay: with several ship steps (stay_open), a ship covers up to the first one.
+ * null when the plan has no open ship step (no plan, or already ticked), so a plan saved without kinds is left as it is.
+ */
+export function shipTickInput(p: ReturnType<typeof createProgress>): { steps: { n: number; status: 'done' }[] } | null {
+  const open = (t: { status: string }) => t.status !== 'completed' && t.status !== 'deleted';
+  const at = p.tasks.findIndex((t: { kind?: string; status: string }) => t.kind === 'ship' && open(t));
+  if (at < 0) return null;
+  const steps = p.tasks
+    .slice(0, at + 1)
+    .filter(open)
+    .map((t: { n?: number; id: string }) => ({ n: t.n ?? Number(t.id), status: 'done' as const }))
+    .filter((s: { n: number }) => Number.isInteger(s.n) && s.n >= 1);
+  return steps.length ? { steps } : null;
 }
 
 export class TurnProgress {
@@ -64,6 +83,23 @@ export class TurnProgress {
       }
     }
     return p;
+  }
+
+  /**
+   * A ship of the minion's went through (#2278): its open `ship` step and the steps before it are ticked, as a plan call the
+   * server makes for it (an event, so a replay finds the same). A refused or queued hand-off never gets here.
+   */
+  tickShipped(ticketId: number) {
+    const p = this.progressFor(ticketId);
+    const input = shipTickInput(p);
+    if (!input) return;
+    const data = { type: 'assistant', message: { content: [{ type: 'tool_use', id: `server-ship-${Date.now()}`, name: 'mcp__thread__plan', input }] } };
+    applyEvent(p, 'claude', data, this.d.emit(ticketId, 'claude', data).created_at);
+    this.recordSteps(ticketId, p);
+    const t = this.d.store.getTicket(ticketId);
+    const line = t ? progressLine(p, t.status === 'running') : '';
+    if (line) this.d.store.setLastActivity(ticketId, line);
+    this.d.broadcastTicket(ticketId);
   }
 
   /** Save a ticket's task-list state, which holds every event up to `upTo`. */

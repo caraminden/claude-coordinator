@@ -23,6 +23,7 @@ const DIR = join(process.env.TMPDIR || tmpdir(), 'wco-rig');
 const STATE = join(DIR, 'state.json');
 const SHOTS = join(DIR, 'shots');
 const TOPBAR_ROUTE = '#/p/99999'; // a route error: Citadel shows its own .topbar there
+const HOME_ROUTE = '#/home'; // the overview (corner checks it); Citadel lists it only for two or more schemes, so up seeds a second
 interface State {
   token: string;
   host: string;
@@ -93,7 +94,8 @@ async function up() {
   for (let i = 0; i < 50 && !state().rigPort; i++) await sleep(200);
   if (!state().rigPort) die(`the rig server didn't start: ${join(DIR, 'server.log')}`);
   console.log(devCopy('seed', 'wco-fixture').trim());
-  const db = new DatabaseSync(join(state().data, 'coordinator.db'), { readOnly: true });
+  const db = new DatabaseSync(join(state().data, 'coordinator.db'));
+  if ((db.prepare('SELECT COUNT(*) AS n FROM projects').get() as { n: number }).n < 2) db.prepare('INSERT INTO projects (name, created_at) VALUES (?, ?)').run('Second', Date.now());
   const scheme = db.prepare("SELECT id FROM projects WHERE name = 'Seeded'").get() as { id: number };
   const t = db.prepare("SELECT id, number FROM tickets WHERE title = 'WCO rig artifact' ORDER BY id DESC").get() as { id: number; number: number };
   const a = db.prepare('SELECT id FROM artifacts WHERE ticket_id = ?').get(t.id) as { id: number };
@@ -101,7 +103,7 @@ async function up() {
   const s = { ...state(), scheme: `#/p/${scheme.id}`, minion: `#/p/${scheme.id}/t/${t.number}`, artifact: `#/a/${a.id}` };
   writeFileSync(STATE, JSON.stringify(s));
   const u = `http://${s.host}:${s.rigPort}/${s.token}`;
-  console.log(`\nRig up: fixture at /apps/wco-fixture/, routes ${s.scheme} ${TOPBAR_ROUTE} ${s.artifact}. On the box, start the driver (it holds the screen):`);
+  console.log(`\nRig up: fixture at /apps/wco-fixture/, routes ${s.scheme} ${TOPBAR_ROUTE} ${s.artifact}, plus ${HOME_ROUTE} for corner. On the box, start the driver (it holds the screen):`);
   console.log(
     JSON.stringify({
       task: 'run',

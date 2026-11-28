@@ -637,7 +637,12 @@ function fastModeRow(p) {
   const [row, sum] = settingsRow(
     { part: 'fast-mode', icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
     h('label', { class: 'toggle', title: locked ? 'Off for Citadel itself' : 'Ship now, test behind' }, on, 'Ship now, test behind'),
-    locked && h('p', { class: 'muted small settings-help' }, 'Off for Citadel itself: every scheme runs on it. Cara picked "Later" (Nov 18); it\'s decided around Nov 26 from the other schemes\' numbers.'),
+    locked &&
+      h(
+        'p',
+        { class: 'muted small settings-help' },
+        'Off for Citadel itself: every scheme runs on it (Cara, Nov 18: "Later"). Citadel\'s quick trains are not fast mode: only low-risk ships that touch nothing sensitive, on a quick check with the full tests run behind, and they are off until a person turns them on after the one-week recount (on or after Dec 4, with #1896\'s failing test looked up). Releases shows where they stand.',
+      ),
     settingsHelp(
       'Low and medium changes ship live on the smoke check alone, and the full suite runs on main behind them.',
       "A red reopens the minion whose change broke it, and goes to the Taskmaster if it isn't fixed in 30 minutes. Failures already known on main don't hold other changes up. High-risk changes and changes to the ship pipeline keep the full gate, and CI reds on main from fast ships send no Mandate alerts, except from watched workflows.",

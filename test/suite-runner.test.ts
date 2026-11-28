@@ -105,19 +105,17 @@ test('the shards split the files between them, each file once, longest first ont
   const secs = [200, 190, 180, 60, 50, 40, 30, 20, 10, 5, 5, 1];
   const files = secs.map((_, i) => `/r/test/f${String(i).padStart(2, '0')}.test.ts`);
   const times = new Map(secs.map((s, i) => [`test/f${String(i).padStart(2, '0')}.test.ts`, s]));
-  const parts = [0, 1, 2, 3].map((i) => shard(files, times, i, 4, 0, cwd));
+  const parts = [0, 1, 2, 3].map((i) => shard(files, times, i, 4, cwd));
   assert.deepEqual(parts.flat().sort(), files, 'every file in exactly one shard');
   const load = parts.map((p) => p.reduce((n, f) => n + times.get(f.slice(3))!, 0));
   assert.deepEqual(load, [200, 196, 200, 195], 'each next-longest file onto the emptiest shard, ties to the lowest');
-  // The burn-in's head start on shard 0 sends the longest file elsewhere.
-  assert.ok(!shard(files, times, 0, 4, 120, cwd).includes('/r/test/f00.test.ts'));
   // A new file counts as the median (the 6th of 11 known: 40 s with f11 unknown), not first or last.
   const fresh = new Map(times);
   fresh.delete('test/f11.test.ts');
-  const withNew = [0, 1, 2, 3].map((i) => shard(files, fresh, i, 4, 0, cwd));
+  const withNew = [0, 1, 2, 3].map((i) => shard(files, fresh, i, 4, cwd));
   assert.deepEqual(withNew.flat().sort(), files);
   // More shards than files: the rest are empty.
-  assert.deepEqual(shard(files.slice(0, 2), times, 3, 4, 0, cwd), []);
+  assert.deepEqual(shard(files.slice(0, 2), times, 3, 4, cwd), []);
 });
 
 test('a shard run runs only its own files and keeps only their times; --merge-times puts the shards together', async () => {

@@ -35,7 +35,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'src/routes/projects.ts': [2127, 'every /projects route; split by page is queued (+4: runs_on, #1973) (+3: create_ticket puts a minion on a cabal board, #2090) (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792) (+30: same-scheme Taskmaster message, #1855) (+4: the stale check and its wait for queued saves, #1859) (+3: the claim keep checks and who ships beside it, #1985) (+4: a first open answers with the folder of its Taskmaster while that write is queued, #1903) (+8: createMinion, the create path a card pick shares, #2050)'],
   'src/tripwire.ts': [1847, 'the tripwire rules; high risk to edit, so a split waits for its own change (+6: a whole /host/<name> of a machine\'s owner, Build 7 T8, #2070) (raised once for the Biome reformat, #1792) (+10: types replacing any, #1816) (+1: a turn may change its own copies of app data, #1884)'],
   'src/routes/tickets.ts': [1937, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792) (+3: a hand-off and a deploy report move its place in line, #1888) (+1: the machine wait and Runs on mark of a minion, Build 7)'],
-  'tools/dev-seeds.ts': [2111, 'seed data for dev copies; grows with every table (raised once for the Biome reformat, #1792; by 2 for the Flow seed moved out to dev-seeds-flow.ts, #1989; by 2 for the cabal seeds in dev-seeds-cabal.ts, #2090; +3: types replacing any, #2075)'],
+  'tools/dev-seeds.ts': [2121, 'seed data for dev copies; grows with every table (raised once for the Biome reformat, #1792; by 2 for the Flow seed moved out to dev-seeds-flow.ts, #1989; by 2 for the cabal seeds in dev-seeds-cabal.ts, #2090; +3: types replacing any, #2075; +10: the stale-plan-card seed, #2273)'],
 };
 
 // Symlinks are skipped on purpose: their target is counted where it really lives.
@@ -109,13 +109,15 @@ export const SHIP_LIMITS = {
     'tools/land/settings.sh': 10_000,
     'tools/land/ship.sh': 10_000,
     'tools/land/quick.sh': 21_000, // #2243's gap train (Cara, 2026-11-27, on its ship card: "Ship it, raise the limit")
+    'tools/land/behind.sh': 10_000, // #2244's full run behind a quick train (Cara, 2026-11-27, on its ship card: "Ship It")
   } as Record<string, number>,
   // +2,500 for step 7's phase functions (their wrappers and indents); Cara, 2026-11-26: "Do steps 6 and 7"
   // +2,900 for #2212's main_red_hold; Cara, 2026-11-27, on its card: "Raise it 2.9 KB"
   // +5,800 for #2209, ship CI on GitHub with the desktop as its fallback (Cara, 2026-11-27: "github should actually be
   // the main CI? with my desktop as the fallback")
   // +23,000 for #2243's gap train, tools/land/quick.sh and its hooks (Cara, 2026-11-27, on its ship card: "Ship it, raise the limit")
-  total: 251_000,
+  // +10,000 for #2244's full run behind a quick train, tools/land/behind.sh and its hooks (Cara, 2026-11-27, on its ship card: "Ship It")
+  total: 261_000,
   longLines: 176,
 };
 

@@ -35,7 +35,19 @@ export const RESERVED: Reserved[] = [
     why: 'Citadel no longer says "fold" (Cara, 2026-11-19, "Retire it")',
     // Not "case-fold": that's text, not work.
     match: /(?<!\bcase-)\bfold(?:s|ed|ing)?\b(?:[- ]in\b)?/gi,
-    suggest: '"ship" for a change going onto main, "merge into the build" for a cabal member, "a collapsed section" or "hidden behind a toggle" for UI, and "add to" or "refit" otherwise',
+    suggest: '"ship" for a change going onto main, "merge into the Plot" for a Plot member, "a collapsed section" or "hidden behind a toggle" for UI, and "add to" or "refit" otherwise',
+  },
+  {
+    term: 'cabal',
+    why: 'A group of minions under one Overseer is a "Plot" now, not a "cabal" (Cara, 2026-11-27, picked "Plot" on #2270\'s card); code, tool and file names (`cabal`, `citadel:cabal`, `build/<n>`) keep theirs',
+    match: /\b(?:(?:build|goal)\s+)?cabals?\b/gi,
+    suggest: '"Plot 11" for the group, "Plot 11\'s Overseer", "a member of Plot 11"',
+  },
+  {
+    term: 'major build',
+    why: 'A group of minions is a "Plot" now, and "Build <n>" or a "major build" for it is retired (Cara, 2026-11-27, picked "Plot" on #2270\'s card); a build that compiles (an APK build, "build the feature") is fine',
+    match: /\bmajor\s+builds?\b|(?<!\b(?:desktop|apk|android|windows|release|replaces|supersedes)\s)\bbuild\s+#?\d+\b(?!\s+(?:is|was)\s+published\b)/gi,
+    suggest: '"Plot 11" for the group ("merged into Plot 11", "Plot 11 shipped")',
   },
   {
     term: 'merge',
@@ -55,9 +67,9 @@ export const RESERVED: Reserved[] = [
       ].join('|'),
       'gi',
     ),
-    allow: /^(?:builds?|cabals?|feeders?|git)$/i,
+    allow: /^(?:builds?|plots?|cabals?|feeders?|git)$/i,
     always: /\bmain\b/i,
-    suggest: '"ship it", "shipped to main", "ready to ship", "shipped PRs" or "the ship card"; "merge into Build <n>" for a cabal member',
+    suggest: '"ship it", "shipped to main", "ready to ship", "shipped PRs" or "the ship card"; "merge into Plot <n>" for a Plot member',
   },
   {
     term: 'land',

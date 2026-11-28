@@ -1107,6 +1107,8 @@ export function progressLine(p, running, worked = false) {
   if (!running && p.turnFailed) return 'Last turn failed: see the error below';
   if (total && !(running && !current && done === total)) {
     const count = `${done} of ${total} done`;
+    // Idle on a card: the minion waits on a person, whatever step is left over (#2273), like the list's null state.
+    if (!running && p.asked && done < total) return `Waiting on you · ${count}`;
     if (current) return running ? `${stageWords(p, current, current.activeForm || current.subject)}… · ${count}` : `Paused at: ${stageWords(p, current, current.subject)} · ${count}`;
     if (done === total) return `Done · ${total}/${total} steps`;
     return `${!running ? 'Paused' : done ? 'Working' : 'Planning'}…${running && p.lastAction ? ` ${p.lastAction} ·` : ''} ${count}`;

@@ -19,7 +19,7 @@ const cur = () => /** @type {View} */ (view);
 /** @type {Record<EdgeKind, { word: string, tone: string, hue: string }>} */
 const KIND = {
   claim: { word: 'Queue', tone: 'warn', hue: 'waiting' },
-  build: { word: 'Build', tone: 'violet', hue: 'teal' },
+  build: { word: 'Plot', tone: 'violet', hue: 'teal' },
   start_after: { word: 'Starts after', tone: 'neutral', hue: 'held' },
   wait: { word: 'Waits on', tone: 'info', hue: 'running' },
 };
@@ -109,7 +109,7 @@ function stateOf(n) {
     const st = rowState(t, usage);
     return { word: st.cell || st.label, label: st.label, spoken: st.cell ? spokenCell(st) : null, fam: t.asleep && t.status !== 'closed' ? 'idle' : st.fam || 'idle', pulse: !!st.pulse, t };
   }
-  if (n.status === 'build') return { word: 'Build', fam: 'idle' };
+  if (n.status === 'build') return { word: 'Plot', fam: 'idle' };
   if (n.status === 'closed') return { word: 'Dismissed', fam: 'idle' };
   // ADR 0027: people read "sealed", never the stored "parked".
   return { word: n.state === 'parked' ? 'sealed' : n.state || n.status, fam: n.status === 'running' ? 'work' : 'idle', pulse: n.status === 'running' };

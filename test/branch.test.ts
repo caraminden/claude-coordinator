@@ -177,7 +177,7 @@ test('a feeder merged into its build reads as in its build, then live once the b
   assert.deepEqual(shipLine(await inBuild(), 0, null), { stage: 'branch', text: 'On its branch: 1 commit not in build/7', commit: mine.slice(0, 7) }, 'not merged in yet');
   git(repo, 'update-ref', 'refs/heads/build/7', mine); // tools/land.sh --into build/7
   const folded = shipLine(await inBuild(), 0, null);
-  assert.deepEqual([folded?.stage, folded?.text], ['build', 'Merged into Build 7, not live until the build ships']);
+  assert.deepEqual([folded?.stage, folded?.text], ['build', 'Merged into Plot 7, not live until the build ships']);
   assert.equal(shipLine(await status('feeder'), 0, null)?.stage, 'branch', 'without its build, just a branch');
 
   // main moves on; the build minion merges it in, and the build lands by merge and fast-forward.

@@ -50,11 +50,11 @@ test('a name reused for a later goal gets its own retro: only minions made after
 test('an effort that is mostly one major build is skipped: the build retro covers it (#1751)', () => {
   const [v] = due([t({ build: 4 }), t({ build: 4 }), t()], 'Build-ish');
   assert.equal(v.act, 'skip');
-  assert.match(v.why, /Build 4/);
+  assert.match(v.why, /Plot 4/);
   // Half or fewer in one build is still its own effort.
   assert.equal(due([t({ build: 4 }), t({ build: 5 }), t(), t()], 'Mixed')[0].act, 'start');
   // A build number with no build minion (Delve's "found in" build on a bug) has no build retro to cover it.
-  assert.equal(due([t({ build: 4 }), t({ build: 4 }), t()], 'Bugs from Build 4', undefined, NOW, () => false)[0].act, 'start');
+  assert.equal(due([t({ build: 4 }), t({ build: 4 }), t()], 'Bugs from Plot 4', undefined, NOW, () => false)[0].act, 'start');
 });
 
 test("a new minion joins its leader's effort, else its parent's; an unnamed chain is named after its leader (#1751)", () => {
@@ -78,7 +78,7 @@ test('the tick starts one retro minion in a scheme that is not Citadel, and reco
   };
   for (let i = 0; i < 3; i++) mk(peek.id, 'Overlay rewrite');
   for (let i = 0; i < 3; i++) mk(other.id, 'Build work', 2);
-  store.setSetting(buildOwnerKey(other.id, 2), 999); // Build 2 has its own build minion, whose retro covers it
+  store.setSetting(buildOwnerKey(other.id, 2), 999); // Plot 2 has its own build minion, whose retro covers it
   mk(other.id, 'Too small');
   const made: { project: number; title: string; props: Record<string, string> }[] = [];
   const sent: { id: number; text: string }[] = [];
@@ -239,7 +239,7 @@ test('an effort mostly one led cabal gets no effort retro once its lead wrote th
   const said = await retros.tick();
   assert.deepEqual(made, ['Retro: Dropped']);
   assert.ok(
-    said.some((l) => /"Led": no retro, .*one led cabal/.test(l)),
+    said.some((l) => /"Led": no retro, .*one led Plot/.test(l)),
     said.join('\n'),
   );
   assert.ok(store.getSetting(doneKey(peek.id, 'Led')));

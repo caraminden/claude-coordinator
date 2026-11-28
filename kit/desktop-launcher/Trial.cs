@@ -148,6 +148,43 @@ namespace Citadel.Desktop
         }
     }
 
+    /// <summary>Why a copy in the tray isn't restarted into an update now (Tray.Hold); No restarts it.</summary>
+    public enum Held { No, NothingNew, SecondTry, WindowOpen, InUse }
+
+    /// <summary>
+    /// Updates while the app sits in the tray (#2279; Cara, 2026-11-27, "Yes, update in the tray"). The launcher stays beside
+    /// the copy it started, reads the feed every Every (plus up to a third more at random, so a room of PCs doesn't ask at
+    /// once), and restarts the app into what it downloaded once the app is idle: none of its windows shows (minimised
+    /// counts as showing) and nobody has touched the PC's keyboard or mouse for Idle. A window someone has open is never
+    /// closed under them: the update waits for the next hide or start.
+    /// </summary>
+    public static class Tray
+    {
+        public static readonly TimeSpan Every = TimeSpan.FromMinutes(30);
+        public static readonly TimeSpan Idle = TimeSpan.FromMinutes(5);
+
+        /// <summary>When to read the feed next, `r` in [0, 1) the random part.</summary>
+        public static TimeSpan NextCheck(TimeSpan every, double r) { return every + TimeSpan.FromTicks((long)(every.Ticks / 3 * r)); }
+
+        /// <summary>
+        /// Whether to restart now. A new launcher put in place (`launcherWaits`) is a reason of its own. A build's second try
+        /// (it failed once) waits for a start by the person: a build that crashed once doesn't get to crash again unseen.
+        /// </summary>
+        public static Held Hold(State s, bool launcherWaits, bool windowShows, TimeSpan sinceInput) { return Hold(s, launcherWaits, windowShows, sinceInput, Idle); }
+
+        /// <summary>Hold with another idle time: a test's launcher.json sets a short one.</summary>
+        public static Held Hold(State s, bool launcherWaits, bool windowShows, TimeSpan sinceInput, TimeSpan idle)
+        {
+            bool build = s.Pending != null && !SecondTry(s);
+            if (!build && !launcherWaits) return s.Pending != null ? Held.SecondTry : Held.NothingNew;
+            if (windowShows) return Held.WindowOpen;
+            return sinceInput < idle ? Held.InUse : Held.No;
+        }
+
+        /// <summary>The waiting build failed once (its next try is its last). A restart in the tray for a new launcher doesn't try it either.</summary>
+        public static bool SecondTry(State s) { return s.Pending != null && s.Struck != null && s.Struck.Contains(s.Pending.Id); }
+    }
+
     public class Rollback
     {
         public int Bad;

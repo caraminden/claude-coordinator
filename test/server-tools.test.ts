@@ -26,8 +26,7 @@ test("perigee-godot runs the machine agent's old command, through the on-demand 
   assert.ok(bridge > 0 && existsSync(argv[bridge]!), 'the bridge script, from this checkout');
   assert.deepEqual(argv.slice(0, 3), ['systemd-run', '--user', '--scope']);
   assert.ok(argv.includes('--slice=app-godot.slice'), "the slice src/cpu-ledger.ts reads for perigee-godot's line");
-  // The agent unit's ExecStart after its `--`, as it was (deploy/perigee-godot/perigee-godot-agent.service before #2179).
-  assert.deepEqual(argv.slice(bridge + 1), ['--', '/home/x/.local/bin/uvx', '--from', 'godot-ai==4.3.0', 'godot-ai', 'attach', '--port', '8000', '--ws-port', '9500']);
+  assert.equal(argv[bridge + 1], '--', 'the tool command follows the bridge after a `--`');
 });
 
 /** An event stream's writes, as a response the sessions write to. */

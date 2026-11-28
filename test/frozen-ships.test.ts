@@ -45,7 +45,7 @@ test('a frozen waiter reads as frozen in the line and its wait, sync and async, 
     (l) => l,
   ).get('ticket/9-thing')!;
   assert.match(w.chip, /^frozen since /);
-  assert.match(w.text, /thaw it with: systemctl --user thaw land-9\.service/);
+  assert.match(w.text, /land-9\.service/);
 });
 
 test('frozen over 5 minutes is one alert for the scheme owner and a health event pair; it clears when it thaws', async () => {

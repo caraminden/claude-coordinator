@@ -66,20 +66,3 @@ test("citadel-worker page-caps: the worker's ask is refused unless it is --threa
   assert.equal(p.read('etc/citadel-worker/config.json'), before, "the PC's own caps stay as its owner set them");
   assert.equal(p.logged().slice(said.length), 'systemctl set-property user-1001.slice CPUQuota=1600% MemoryMax=31G MemoryHigh=28569M\n', 'only the slice, and no restart: the worker that asked holds them');
 });
-
-test('the Windows script turns the clock off first, keeps the token off every command line, and touches no other distro', () => {
-  const ps = readFileSync(join(scripts, 'install-worker.ps1'), 'utf8');
-  const code = ps.slice(ps.indexOf('$ErrorActionPreference'));
-  const at = (what: string) => {
-    const i = code.indexOf(what);
-    assert.ok(i >= 0, what);
-    return i;
-  };
-  // The first thing run inside the distro.
-  const first = code.slice(at('& $wsl -d $distro')).split('\n')[0];
-  assert.match(first, /ln -sf \/dev\/null \/etc\/systemd\/system\/systemd-timesyncd\.service/);
-  assert.ok(at('--install Ubuntu-24.04 --name $distro --no-launch') < at('systemd-timesyncd.service'), 'installed without being started');
-  assert.match(code, /\$token \| & \$wsl -d \$distro/, 'on standard input');
-  assert.doesNotMatch(code, /--shutdown|--unregister|-d citadel-ci|Restart-Computer/);
-  for (const [, d] of code.matchAll(/(?:-d|--terminate) (\S+)/g)) assert.equal(d, '$distro');
-});

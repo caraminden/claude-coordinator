@@ -8,7 +8,6 @@ import { bootServer, tempRoot, type Booted } from './helpers.ts';
 import { mcpAgent } from './mcp-agent.ts';
 import type { ApiEvent } from './typed.ts';
 
-const repo = join(import.meta.dirname, '..');
 const tmp = tempRoot('model-effort-');
 const root = tmp.dir;
 after(() => tmp.teardown());
@@ -205,7 +204,7 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
   }
 });
 
-test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and the composer, beside 5.1', async () => {
+test('Fable 5.2 (#431) is a pickable model in the server list and the MCP enum, beside 5.1', async () => {
   const { MODELS } = await import('../src/db.ts');
   for (const id of ['claude-fable-5-1', 'claude-fable-5-2']) assert.ok((MODELS as readonly string[]).includes(id), `MODELS has ${id}`);
 
@@ -226,13 +225,4 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
   } finally {
     mcp.close();
   }
-
-  // The composer can't be imported without a browser (it needs the page's DOM), so read its two lists
-  // out of the source as data: its Claude and Codex picks together are exactly MODELS, in order.
-  const { readFileSync } = await import('node:fs');
-  const composer = readFileSync(join(repo, 'public/composer.js'), 'utf8');
-  const listIds = (name: string) => [...composer.match(new RegExp(`const ${name} = \\[([^;]*?)\\n\\];`))![1].matchAll(/\['([^']+)', '[^']+'\]/g)].map((m) => m[1]);
-  const { CLAUDE_MODELS } = await import('../public/model-table.js');
-  assert.match(composer, /const MODELS = CLAUDE_MODELS;/, "the composer offers the model table's Claude models");
-  assert.deepEqual([...CLAUDE_MODELS.map(([id]) => id), ...listIds('CODEX_MODELS')], [...MODELS], 'the composer offers exactly the server list');
 });

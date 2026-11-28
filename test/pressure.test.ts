@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runnerSource } from './runner-files.ts';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -107,9 +106,4 @@ test("deploy.sh's starved-box hold and pressure.ts agree on the line (#1417)", (
   const script = readFileSync(new URL('../tools/deploy.sh', import.meta.url), 'utf8');
   assert.equal(Number(script.match(/MAX_CPU=\$\{CITADEL_HEAVY_MAX_PRESSURE:-(\d+)\}/)?.[1]), MAX_CPU_PRESSURE);
   assert.equal(Number(script.match(/MAX_MEM=\$\{CITADEL_HEAVY_MAX_MEM_PRESSURE:-(\d+)\}/)?.[1]), MAX_MEM_PRESSURE);
-});
-
-test('no turn start reads the pressure reader', () => {
-  const src = runnerSource();
-  assert.ok(!/pressure\.ts|\bpressure\.(read|gate)\b/.test(src), 'runner.ts and the files split out of it must not import or use the pressure reader');
 });

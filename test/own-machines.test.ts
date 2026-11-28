@@ -116,6 +116,7 @@ test('a new machine always has an owner: createMachine, a join code with no one 
   assert.throws(() => redeemJoin(store, () => 'tok', { code: orphan, report }), /no one to own the machine/);
 });
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test('the owner backfill: created_by, else its join code, else left for a person; shared roles stay lent to everyone (Build 10 H1)', () => {
   const file = join(dir, 'backfill.db');
   const s = new Store(file);

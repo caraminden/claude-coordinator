@@ -58,6 +58,7 @@ function before33(name: string) {
   return { path, old, cara, josh };
 }
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test('opening an older database gives every machine a list that lends it exactly as before (#438)', () => {
   const { path, old, cara, josh } = before33('a.db');
   const store = new Store(path);
@@ -109,6 +110,7 @@ test('opening an older database gives every machine a list that lends it exactly
   store.db.close();
 });
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test('the move runs once: a later change to a list stays, and a machine an older release unscoped is converted again', () => {
   const { path } = before33('b.db');
   let store = new Store(path);

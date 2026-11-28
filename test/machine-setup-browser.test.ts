@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { bootServer, stopProcs, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
+import { until } from './wait.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 
 const bin = chromium();
@@ -80,10 +81,7 @@ test('a machine lends what is ticked under Choose what it shares from what its a
   writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { command: process.execPath, args: [mcpServer], env: { KEY: 'sk-secret-123' } } } }));
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ workspaces: { vault: { path: join(dir, 'vault') } } }));
   startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json')], env: { CLAUDE_CONFIG_DIR: dir } });
-  for (const end = Date.now() + 20_000; !(await machine('tick-box')).found?.length; ) {
-    if (Date.now() > end) throw new Error('the agent never reported');
-    await new Promise((r) => setTimeout(r, 100));
-  }
+  await until('the agent to report', async () => (await machine('tick-box')).found?.length);
   await openMachines();
   const row = await choose('tick-box', 'tools');
   const boxes = `[...${row}.querySelectorAll('.machine-lends label')]`;
@@ -97,10 +95,7 @@ test('a machine lends what is ticked under Choose what it shares from what its a
     // The box ticks at once and its save goes behind (optimistic): wait for the server to hold it, not the box.
     await wait(`tick ${n} to save`, `fetch('api/machines').then((r) => r.json()).then((l) => (${saved[n]})(l.find((m) => m.name === 'tick-box').lend))`);
   }
-  for (const end = Date.now() + 20_000; (await machine('tick-box')).status !== 'ready'; ) {
-    if (Date.now() > end) throw new Error(`never Ready: ${JSON.stringify(await machine('tick-box'))}`);
-    await new Promise((r) => setTimeout(r, 100));
-  }
+  await until('tick-box Ready', async () => (await machine('tick-box')).status === 'ready');
   const m = await machine('tick-box');
   assert.deepEqual(m.lend, { server: 'godot-ai', workspaces: ['vault'] });
   assert.equal(await page.eval<boolean>('!!document.querySelector("#machine-setup strong")'), false, 'ticking made no new token to paste');
@@ -110,10 +105,7 @@ test('a machine lends what is ticked under Choose what it shares from what its a
 test('a machine set up before ticks shows what it lends as set on that computer, with a way to reinstall', { skip }, async () => {
   const { machine: old, token } = (await srv.call('/api/machines', { name: 'old-box' })).data;
   startMachineAgent({ base: srv.base, token });
-  for (const end = Date.now() + 20_000; !(await machine('old-box')).online; ) {
-    if (Date.now() > end) throw new Error('the old agent never connected');
-    await new Promise((r) => setTimeout(r, 100));
-  }
+  await until('the old agent to connect', async () => (await machine('old-box')).online);
   assert.equal((await machine('old-box')).managed, false);
   await openMachines();
   const row = await choose('old-box', 'tools');

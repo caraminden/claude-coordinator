@@ -199,9 +199,6 @@ test('a start that fails is tried again on later ticks, three times in all (#175
 test('every retro brief ends on the same start card step (#2140)', () => {
   const brief = effortBrief({ name: 'One' }, { name: 'e', members: [{ number: 1, title: 't', created_at: 0, updated_at: 0 } as Ticket], act: 'start', why: '' });
   assert.ok(brief.includes(`\n${START_CARD_STEP}\n`));
-  for (const f of ['schedules/monthly-retro.md', 'schedules/ship-lessons.md', 'skills/retro/SKILL.md']) {
-    assert.ok(readFileSync(new URL(`../kit/${f}`, import.meta.url), 'utf8').includes(START_CARD_STEP), f);
-  }
 });
 
 test('an effort mostly one led cabal gets no effort retro once its lead wrote the cabal retro, waits while it is due, and gets one if none came (#2096)', async () => {

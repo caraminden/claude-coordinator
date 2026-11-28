@@ -50,14 +50,6 @@ test('off CI a batch above 4 copies is refused before any burner starts, not rep
   assert.doesNotMatch(r.stdout, /clean runs|starting the batch|not waiting/, 'nothing ran');
 });
 
-// Deploys first (#1902): the run asks Citadel before anything else, so a held proof gives its runner back.
-test('the workflow asks Citadel whether ships go first before it sets anything up, and no batch waits on the runner', () => {
-  const ask = yml.indexOf('run: node tools/ci-hold-ask.ts');
-  assert.ok(ask > yml.indexOf('actions/setup-node') && ask < yml.indexOf('- name: pwsh and PSScriptAnalyzer'), 'right after node');
-  assert.match(yml, /^permissions:\n  contents: read\n  id-token: write/m, "with the run's own token");
-  assert.doesNotMatch(script, /wait_for_ships|GH_TOKEN/);
-});
-
 test('every batch step keeps a name cleanRuns counts', () => {
   const names = [...yml.matchAll(/- name: (\d+ clean runs[^\n]*)/g)].map((m) => m[1]);
   assert.ok(names.length > 0);

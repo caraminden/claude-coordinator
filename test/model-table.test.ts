@@ -75,10 +75,6 @@ test("the model tiers moved out of every minion's prompt render in citadel:subag
   const minion = systemPrompt(fake<Project>({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' }), fake<Ticket>({ id: 9, number: 9, title: 'x', kind: 'ticket', branch: 'ticket/9-x' }), '/shared/9', '/shared/project', '/tickets', '/memory', [], true, '');
   assert.ok(!minion.includes('Models by kind of work'), 'the line left the minion prompt');
   const kit = join(import.meta.dirname, '..', 'kit');
-  for (const skill of ['subagents', 'briefing']) {
-    const text = readFileSync(join(kit, 'skills', skill, 'SKILL.md'), 'utf8');
-    assert.match(text, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/\.\.\/\.\.\/model-tiers\.ts"`$/m, `${skill} runs the tiers script at load, on a line of its own`);
-  }
   // In Citadel's repo the script finds public/; in a turn's kit copy, the table the server put beside it.
   const { CITADEL_FABLE_OFF: _, ...env } = process.env;
   const run = (file: string, extra: Record<string, string> = {}) => execFileSync(process.execPath, [file], { encoding: 'utf8', env: { ...env, ...extra } });

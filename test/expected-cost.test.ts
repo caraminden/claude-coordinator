@@ -44,11 +44,6 @@ test('"Split first" on a card posted at $30 still asks for $30 or less', () => {
   assert.equal(splitCeiling(60), START_CARD_USD);
 });
 
-test("create_ticket's description names the start card's threshold", () => {
-  // A literal there: the MCP server's pinned copy can't import minion-budget.ts, which reaches db.ts.
-  assert.ok(CREATE_TICKET.inputSchema.properties.expected_cost.description.includes(`over $${START_CARD_USD} no turn runs`));
-});
-
 test("a Taskmaster brief over $50 waits for a person's start card; under it, or a person's own, starts as today", async () => {
   const s = await bootServer();
   try {

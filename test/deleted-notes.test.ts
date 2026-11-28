@@ -176,6 +176,7 @@ test('a note deleted mid-turn is not put back by a turn that starts before that 
   assert.equal(s.has(server, 'a.md'), false);
 });
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test('a row stored before the fix for a note deleted on disk restores nothing, and goes at the next save', async () => {
   const s = scheme();
   await s.seed();

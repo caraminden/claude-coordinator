@@ -120,6 +120,7 @@ test("held mail: the cold clock runs from the first one, a release puts it behin
   assert.equal(s.m.size, 0, 'nothing of theirs is left to run later, nor a clock for mail that is gone');
 });
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test('migration folds every old store into one record each, keeps each message once, and leaves the rest of the rows alone', () => {
   const late = { end: 9, msg: msg('steered') };
   const s = mapStore({
@@ -156,6 +157,7 @@ test('migration folds every old store into one record each, keeps each message o
   assert.equal(JSON.stringify([...s.m]), after);
 });
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test('a migration cut off after its new rows were written runs again without doubling a message', () => {
   const s = mapStore({ 'waiting:1': [msg('a', 1)], 'mail:1': [msg('m', 2)] });
   const del = s.deleteSetting;

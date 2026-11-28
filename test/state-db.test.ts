@@ -70,6 +70,7 @@ test('opening a database moves its session state into state.db, and the main fil
   again.db.close();
 });
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test("a start cut off between the copy and the drop finishes on the next, the main file's rows winning", () => {
   const d = dir();
   const file = join(d, 'coordinator.db');
@@ -100,6 +101,7 @@ test('a copy of the main file (previews, boot-check) leaves session state out', 
   s.db.close();
 });
 
+// shortcut: a one-off recovery path; delete this test together with its code once every deployed database (and any backup worth restoring) is past it.
 test("restoring an old backup brings back only what state.db lacks or holds an older copy of, and drops deleted minions' rows", () => {
   const d = dir();
   const file = join(d, 'coordinator.db');

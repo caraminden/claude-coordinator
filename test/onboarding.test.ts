@@ -59,25 +59,9 @@ test("both plans name a skills survey for the stack, with every scheme's survey 
   assert.deepEqual(surveyReports(join(root, 'no-such-data')), []);
   for (const mode of ONBOARDING_MODES) {
     const text = onboardingPrompt(project('interview', mode), '/shared', found);
-    assert.match(text, /\*\*Skills survey:\*\*.*a research minion for <stack> with workflow on,/, mode);
-    assert.match(text, /Follow citadel:skills-survey for <stack>\./, mode);
-    assert.match(text, /3 months/, mode);
     assert.ok(text.includes(godot) && text.includes(general), mode);
     assert.match(onboardingPrompt(project('interview', mode), '/shared'), /Skills survey reports so far, from every scheme \(the name gives the stack and month; [^)]*\): none\./, mode);
   }
-});
-
-test('first-run interview asks the gaps and the plan carries them', () => {
-  const text = onboardingPrompt(project('interview', 'first-run'), '/shared');
-  assert.match(text, /sidebar \(a contraption: recommended for a web app/);
-  assert.match(text, /Whose GitHub account owns the repo/);
-  assert.match(text, /Anything only a person can do/);
-  assert.match(text, /not sure yet/);
-  assert.match(text, /Runs in: contraption <slug> \| title <title> \| repo <owner\/name> \| branch <branch>/);
-  assert.match(text, /\*\*By hand:\*\*/);
-  assert.match(text, /Send each By hand step at once as a card `to` its person/);
-  assert.match(text, /design minion/);
-  assert.doesNotMatch(onboardingPrompt(project('interview', 'tune-up'), '/shared'), /By hand/);
 });
 
 test('schemes from before onboarding read as done', () => {

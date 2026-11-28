@@ -198,12 +198,14 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
 
 async function stateOf(t: Ticket | undefined, ship: 'shipped' | 'merged' | null, ref: string | null, repoDir: string | null, asks: CabalAsk[], deps: BoardDeps): Promise<MemberState> {
   if (!t) return 'roster';
-  if (ref && repoDir && (await mergedInto(repoDir, t, ref))) return 'merged';
+  const merged = !!(ref && repoDir && (await mergedInto(repoDir, t, ref)));
+  const open = t.status !== 'closed';
+  // A merged commit isn't finished work: a member still at work, blocked or sealed keeps that state (#2302).
+  const live = open && asks.some((a) => a.ticket_id === t.id && a.blocking) ? 'blocked' : open && t.status === 'running' ? 'running' : open && deps.parked(t) ? 'sealed' : null;
+  if (merged && !live) return 'merged';
   if (ship === 'shipped') return 'shipped';
   if (t.status === 'closed') return 'closed';
-  if (asks.some((a) => a.ticket_id === t.id && a.blocking)) return 'blocked';
-  if (t.status === 'running') return 'running';
-  if (deps.parked(t)) return 'sealed';
+  if (live) return live;
   return 'idle';
 }
 

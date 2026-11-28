@@ -8,11 +8,10 @@ import type { Session } from './auth.ts';
 import { BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, ONBOARDING, ONBOARDING_MODES, type Project } from './db.ts';
 import { adminAskRefusal, adminOwned } from './access.ts';
 import { GO_FROM, label, SHIP_PATHS, shippingGate, TRY_FIRST, values } from '../public/shipping.js';
-import { refuseStaleFields } from './instructions-save.ts';
 import { KIT_DIR, listSkills, offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
 import { AGENT_NAME } from './auth.ts';
-import { afterAllWrites, HttpError, oneOf, str, writes, type App } from './http.ts';
+import { HttpError, oneOf, readJson, str, type App } from './http.ts';
 
 /** Every setting the PATCH takes; what is left out stays. */
 export const SETTING_FIELDS = [
@@ -50,6 +49,7 @@ export const SETTING_FIELDS = [
 ] as const;
 
 type Store = App['store'];
+type Body = Awaited<ReturnType<typeof readJson>>;
 export type SettingsPatch = Partial<
   Pick<
     Project,
@@ -87,7 +87,7 @@ export type SettingsPatch = Partial<
 export type SettingsPlan = { name: string; settings: SettingsPatch; instructions: string; repoUrl: string | null };
 
 /** Validates a scheme settings body and works out what to write; throws an HttpError to refuse. Writes nothing. */
-export async function planSettings(body: Record<string, any>, project: Project, store: Store, session: Session, caller: { id: number } | null | undefined): Promise<SettingsPlan> {
+export async function planSettings(body: Body, project: Project, store: Store, session: Session, caller: { id: number } | null | undefined): Promise<SettingsPlan> {
   const settings: SettingsPatch = {};
   const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
   // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
@@ -182,9 +182,12 @@ export async function planSettings(body: Record<string, any>, project: Project, 
       throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
     }
   }
-  while (body.was !== undefined && writes.landed?.(true)) await afterAllWrites(() => {}); // another save still queued is another version; from here to this save's write there is no await
-  if (body.was !== undefined) refuseStaleFields(body.was, store.getProject(project.id)!, { instructions, ...settings });
-  // Worked out before anything is written, since it can still refuse (too many approval rules). The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
+  return { name, settings, instructions, repoUrl };
+}
+
+/** The one shipping gate, applied to a save's settings; throws an HttpError when the merge approval can't fit. Sync, so a stale check before it has no await between it and the write. */
+export function gateSettings(project: Project, settings: SettingsPatch): void {
+  // The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
   const gate = shippingGate({ ...project, ...settings });
   if (gate.go_from !== (settings.go_from ?? project.go_from)) settings.go_from = gate.go_from;
   if (gate.approval_rules !== (settings.approval_rules ?? project.approval_rules)) {
@@ -194,7 +197,6 @@ export async function planSettings(body: Record<string, any>, project: Project, 
       throw new HttpError(400, `Shipping ticks "Merge a pull request" under Approvals, which doesn't fit: ${(e as Error).message}`);
     }
   }
-  return { name, settings, instructions, repoUrl };
 }
 
 /** The permanent lines for the Taskmaster's chat about what a save changed (who changed what, since rules decide what needs a person's OK). */

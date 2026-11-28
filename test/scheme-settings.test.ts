@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
 import type { Session } from '../src/auth.ts';
-import type { Project } from '../src/db.ts';
+import { type Project, Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
-import { planSettings, settingsNotes } from '../src/scheme-settings.ts';
+import { tempRoot } from './helpers.ts';
+import { gateSettings, planSettings, settingsNotes } from '../src/scheme-settings.ts';
 
 // The scheme settings PATCH's validation and notes, called with no server (#2324).
-const project = { id: 1, name: 'Citadel', instructions: 'old', ship_path: 'land', go_from: 'high', land_mode: 'off', plugin_dirs: '', optional_plugin_dirs: '', approval_rules: '', repo_dir: null, repo_url: null } as unknown as Project;
+const tmp = tempRoot('scheme-settings-');
+after(() => tmp.teardown());
+const store = new Store(join(tmp.dir, 'db.sqlite'));
+const project = store.getProject(store.createProject('Citadel', null).id)!;
 const admin = { name: 'Cara', admin: true } as Session;
 const member = { name: 'Josh', admin: false } as Session;
-const store = { getProject: () => project, props: { listGroups: () => [] } } as never;
 
 const plan = (body: Record<string, unknown>, who = admin) => planSettings(body, project, store, who, null);
 const refused = async (body: Record<string, unknown>, status: number, text: RegExp, who = admin) => {
@@ -54,4 +58,10 @@ test('notes say who changed what, and only what changed', () => {
   assert.match(settingsNotes(project, { ci_quiet: '' }, 'Cara')[0]!, /quiet CI workflows to: none\./);
   assert.match(settingsNotes(project, { onboarding: 'skipped' }, 'Cara')[0]!, /skipped the scheme's setup/);
   assert.equal(settingsNotes(project, { approval_rules: 'a', ci_watch: 'b' }, 'Cara').length, 2);
+});
+
+test('the shipping gate lifts the go threshold to match a merge approval', () => {
+  const settings = { ship_path: 'pr-person' } as const;
+  gateSettings(project, settings);
+  assert.equal((settings as { go_from?: string }).go_from, 'all');
 });

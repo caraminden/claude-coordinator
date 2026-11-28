@@ -1,7 +1,7 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
 import { checkAsk, formatAsk } from '../ask-form.ts';
-import { planSettings, SETTING_FIELDS, settingsNotes } from '../scheme-settings.ts';
+import { gateSettings, planSettings, SETTING_FIELDS, settingsNotes } from '../scheme-settings.ts';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { checkNeed } from '../needs.ts';
@@ -44,7 +44,7 @@ import { thrown } from '../thrown.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
 import { timerBroken } from '../timer-alerts.ts';
 import { mailParksUnderOldRule } from '../rule-parks.ts';
-import { heldPlan, readVerdicts, refuseStale, ruleHome, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
+import { heldPlan, readVerdicts, refuseStale, refuseStaleFields, ruleHome, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
 import { runDescribe } from '../review-describe.ts';
 import { postPlan } from '../plan-cards.ts';
 import { cardHref } from '../card-links.ts';
@@ -1076,6 +1076,9 @@ export const projectRoutes: Route[] = [
       if (SETTING_FIELDS.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       for (const k of SETTING_FIELDS) if (body[k] !== undefined) store.usage.used('setting', `scheme.${k}`, session.uid ?? session.name); // the usage ledger (#1306)
       const { name, settings, instructions, repoUrl } = await planSettings(body, project, store, session, caller);
+      while (body.was !== undefined && writes.landed?.(true)) await afterAllWrites(() => {}); // another save still queued is another version; from here to this save's write there is no await
+      if (body.was !== undefined) refuseStaleFields(body.was, store.getProject(project.id)!, { instructions, ...settings });
+      gateSettings(project, settings); // worked out before anything is written, since it can still refuse (too many approval rules)
       // Renamed first: it is the only change that can still be refused (a taken name).
       if (name !== project.name) {
         try {

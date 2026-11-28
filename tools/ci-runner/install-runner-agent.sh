@@ -3,7 +3,7 @@
 # then adds, lists and removes schemes' Linux runners when someone asks `ci_runners` with os linux. The Linux twin of
 # install-runner-agent.ps1; tools/ci-runner/README.md ("Linux runners on plain Linux", "Linux runners in WSL") says
 # where it fits. On a Linux PC the machine agent's elevate.sh runs it (One kind of machine H2: the one sudo paste the
-# Machines page shows, on Set up for CI runners). Run it as root; running it again updates the agent and its scripts.
+# Machines page shows, on Set up for CI runners). Run it as root; once installed, the agent keeps itself and its scripts current (#2310); running this again does it at once.
 #
 #   bash install-runner-agent.sh <citadel machines url>        # asks for the machine token, or reads CC_MACHINE_TOKEN
 #
@@ -15,9 +15,11 @@
 #   2. installs what the agent and the runners need from the distro's archive (Node, git, curl, the runner's libicu);
 #      on a Linux without apt it names what to install and stops;
 #   3. downloads runner-agent.mjs, add-runner.sh, list-runners.sh, remove-runner.sh, runner-slot.sh and launch-slot.sh from Citadel into
-#      /opt/citadel-runner-agent, root's alone (the agent never downloads code itself), and prints their SHA-256;
+#      /opt/citadel-runner-agent, root's alone, and prints their SHA-256 (after a deploy the agent fetches the ones that
+#      changed itself, checks each against the SHA-256 Citadel sends, and swaps them in between jobs: #2310);
 #   4. keeps the machine token in a file there;
-#   5. installs the systemd service citadel-runner-agent (restarted if it ever stops) and waits until it connects.
+#   5. installs the systemd service citadel-runner-agent (restarted if it ever stops; --supervise starts the agent again
+#      on its new files after an update, and back on the old ones if they don't connect) and waits until it connects.
 # On plain Linux all runners share citadel-runners.slice, held to 75% of the PC, or the owner's own number in caps.json.
 # Each scheme's runners get a user of their own (no sudo) when add-runner.sh adds them. It touches no runner and
 # nothing on Windows.
@@ -113,6 +115,8 @@ fi
 # 3. The agent and its scripts, as Citadel serves them now, in a folder only root can read or change.
 systemctl stop citadel-runner-agent 2>/dev/null || true
 install -d -m 700 -o root -g root "$dir"
+# An update the agent had under way, or one it rolled back, ends with this install (#2310).
+rm -f "$dir/update.json" "$dir/update-failed.json" "$dir"/*.old "$dir"/*.new
 for f in runner-agent.mjs ci-runner/add-runner.sh ci-runner/list-runners.sh ci-runner/remove-runner.sh ci-runner/runner-slot.sh ci-runner/launch-slot.sh; do
   to=$dir/${f#ci-runner/}
   curl -fsSL -o "$to" "$url/$f" || die "Couldn't download $url/$f"
@@ -131,7 +135,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=$(command -v node) $dir/runner-agent.mjs $url --token-file $dir/machine-token --log $log
+ExecStart=$(command -v node) $dir/runner-agent.mjs --supervise $url --token-file $dir/machine-token --log $log
 WorkingDirectory=$dir
 Restart=always
 RestartSec=60

@@ -6,19 +6,20 @@
   Citadel #328 (Josh, 2026-11-05: "Citadel installs it itself"). Nobody runs it by hand any more (One kind of machine H2,
   Cara 2026-11-26, "One agent, helpers hidden"): pressing Set up on CI runners makes the PC's machine agent write its
   elevate.ps1, which runs this, as administrator, with that PC's own token, in the one Admin PowerShell paste the
-  Machines page shows. A runner agent installed the old way keeps working. Running it again updates the agent and its
-  scripts to Citadel's current ones. It:
+  Machines page shows. A runner agent installed the old way keeps working. Once installed, the agent keeps itself and its
+  scripts at Citadel's current ones (#2310); running this again does the same at once, and resets a stuck update. It:
     1. checks it's elevated and that Node 18+ and Git for Windows are here;
     2. makes C:\ProgramData\citadel-runner-agent, readable and writable only by Administrators and SYSTEM, so no
        unelevated program can change what the agent runs;
     3. downloads runner-agent.mjs, add-runner.ps1, list-runners.ps1, remove-runner.ps1, sample-load.ps1,
        keep-runners.ps1 and start-runner.ps1 (the
-       session runner's launcher, for add-runner.ps1 -Session by hand) from Citadel into it
-       (the agent never downloads code itself: these copies are what it runs until you install again) and
-       prints their SHA-256;
+       session runner's launcher, for add-runner.ps1 -Session by hand) from Citadel into it, and prints their
+       SHA-256. After a deploy the agent fetches the ones that changed itself, from the same address, checks each
+       against the SHA-256 Citadel sends, and swaps them in between jobs (#2310, tools/ci-runner/README.md);
     4. keeps the machine token in a file there;
     5. registers the scheduled task "Citadel runner agent", run as SYSTEM with highest privileges, at startup and
-       retried every 5 minutes, and starts it now: no reboot, no logon needed;
+       retried every 5 minutes, and starts it now: no reboot, no logon needed. It runs the agent with --supervise,
+       which starts it again on its new files after an update, and back on the old ones if they don't connect;
     6. waits until its log says it connected;
     7. proves the CPU cap on this PC with keep-runners.ps1 -Prove (#552): a throwaway job of CPU-burning processes,
        about 20 seconds, touching no runner.
@@ -73,6 +74,10 @@ Get-CimInstance -ClassName Win32_Process -Filter "Name = 'node.exe'" |
   Where-Object { $_.CommandLine -like "*$dir\runner-agent.mjs*" } |
   ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null }
 
+# An update the agent had under way, or one it rolled back, ends with this install (#2310).
+foreach ($left in 'update.json', 'update-failed.json') { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $dir $left) }
+Get-ChildItem -Path (Join-Path $dir '*') -Include '*.old', '*.new' -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
 # 2. The folder, Administrators and SYSTEM only (by SID, so a non-English Windows reads them too).
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
@@ -112,7 +117,7 @@ Set-Content -Path $tokenFile -Value $MachineToken -Encoding ASCII -NoNewline
 # 5. The task: SYSTEM, highest privileges, at startup, and every 5 minutes in case it ever stops (IgnoreNew skips a
 # run while one is going). No console: SYSTEM's tasks run in session 0, where nobody sees a window.
 $log = Join-Path $dir 'runner-agent.log'
-$action = New-ScheduledTaskAction -Execute $node -WorkingDirectory $dir -Argument "`"$dir\runner-agent.mjs`" $url --token-file `"$tokenFile`" --log `"$log`""
+$action = New-ScheduledTaskAction -Execute $node -WorkingDirectory $dir -Argument "`"$dir\runner-agent.mjs`" --supervise $url --token-file `"$tokenFile`" --log `"$log`""
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $triggers = (New-ScheduledTaskTrigger -AtStartup), (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650))

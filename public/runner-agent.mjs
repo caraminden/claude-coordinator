@@ -620,14 +620,16 @@ export function rollBack(dir, code) {
  */
 export async function supervise(args, { dir, log, start = (a) => spawn(process.execPath, a, { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], windowsHide: true }) }) {
   let stopping = false;
-  // systemd's stop reaches the child too, and Ctrl+C its whole group: this waits for the child's own wind-down.
+  let child = null;
+  // Passed on, and this waits for the child's own wind-down (it wakes the runners it put to sleep, at most 30 s).
   for (const sig of ['SIGTERM', 'SIGINT'])
     process.on(sig, () => {
       stopping = true;
+      child?.kill(sig);
       setTimeout(() => process.exit(0), 35_000).unref();
     });
   for (;;) {
-    const child = start([join(dir, 'runner-agent.mjs'), ...args, '--supervised']);
+    child = start([join(dir, 'runner-agent.mjs'), ...args, '--supervised']);
     const code = await new Promise((resolve) => {
       child.on('error', (err) => {
         log(`Couldn't start the runner agent: ${err.message}`);
@@ -1458,7 +1460,11 @@ async function main() {
   };
   setInterval(() => wake.tick().catch((err) => log(`Couldn't wake the runners: ${err.message}`)), 10_000).unref();
   // Stopped (systemd's stop, Ctrl+C, or its supervisor gone): the runners it put to sleep wake first, as with no agent at all; at most 30 s.
+  let stopped = false;
   const stop = (sig) => {
+    // Once: systemd's stop reaches it twice, straight and through its supervisor.
+    if (stopped) return;
+    stopped = true;
     log(`${sig}: waking the runners Citadel's plan had asleep, then stopping.`);
     setTimeout(() => process.exit(0), 30_000).unref();
     wake.plan = null;
@@ -1467,7 +1473,7 @@ async function main() {
       .catch((err) => log(`Couldn't wake the runners: ${err.message}`))
       .finally(() => process.exit(0));
   };
-  for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => stop(sig));
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => stop(sig));
   // Its supervisor's pipe closes when that process is gone (the task ended, killed): this one goes too, or two would run.
   if (supervised) process.once('disconnect', () => stop('its supervisor ended'));
   // Runners a restarted agent put to sleep before stay so only until Citadel's first plan or PLAN_HOLD_MS.

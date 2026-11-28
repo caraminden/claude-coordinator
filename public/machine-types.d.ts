@@ -156,7 +156,8 @@ export interface MachineRow {
   /** A CI runner host's row. */
   runners: boolean;
   /** Its CI runner agents connected now, beside its agent (Build 7 M2b). */
-  runner_agents?: { os: 'windows' | 'linux'; host: string; since: number }[];
+  /** Its CI runner agents connected now; `update` is where its own update stands (#2310), null until it says, and `latest` the version Citadel serves. */
+  runner_agents?: { os: 'windows' | 'linux'; host: string; since: number; self_update?: boolean; update?: { version: string; state: 'current' | 'waiting' | 'updating' | 'failed'; why: string; at: number } | null; latest?: string | null }[];
   roles?: MachineRole[];
   /** The roles Pause all switched off; null when it isn't paused. */
   paused: MachineRoleKey[] | null;

@@ -487,7 +487,7 @@ function machineHead(m) {
   // An agent from before reports nothing (Build 7 M2): Update gives the command that puts the new one in its place.
   const update = m.update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: 'Its agent is from before: the new one says what this PC can do. Opens the command that replaces it', onclick: () => connectComputer(m) }, 'Update');
   // A CI runner agent from before the balancer (Build 7 M6b): the button opens its details at the update line.
-  const ciUpdate = m.runner_update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: "Its CI runner agent is from before: it keeps every runner awake instead of following this PC's balance. Opens the line that updates it", onclick: open }, 'Update CI agent');
+  const ciUpdate = m.runner_update && !gone && managesHere(m) && h('button', { type: 'button', class: 'secondary small', title: "Its CI runner agent is from before: it can't update itself. Opens the line that updates it once, after which it does", onclick: open }, 'Update CI agent');
   const word = gone ? toneChip('info', 'Removing…') : null;
   return fix || update || ciUpdate || word ? h('span', { class: 'machine-fix' }, word || '', update || '', ciUpdate || '', fix || '') : null;
 }
@@ -517,7 +517,7 @@ function machineBody(m) {
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on')),
       ),
       m.screen ? kv('Screen', machineScreen(m.screen)) : [],
-      m.runner_update && managesHere(m) ? kv('CI agent', ciAgentUpdate(m)) : [],
+      m.runner_agents?.length || (m.runner_update && managesHere(m)) ? kv('CI agent', ...(m.runner_agents ?? []).map(ciAgentVersion), m.runner_update && managesHere(m) ? ciAgentUpdate(m) : '') : [],
       managesHere(m) ? kv('Name', machineRename(m)) : [],
       kv('Notes', machineNotes(m)),
       tokenIsMine(m) ? kv('Token', machineTokenShow(m)) : [],
@@ -554,14 +554,32 @@ const CI_AGENT_UPDATE = {
   },
 };
 
+/** Each CI runner agent's version and where its own update stands (#2310), as a toned chip and its why.
+ * @param {NonNullable<import('./types.js').MachineRow['runner_agents']>[number]} r */
+function ciAgentVersion(r) {
+  const os = r.os === 'linux' ? 'Linux' : 'Windows';
+  const u = r.update;
+  if (!r.self_update) return h('div', { class: 'small' }, toneChip('warn', 'Can’t update itself'), ` ${os}: installed before it could. Run its install once more (below).`);
+  if (!u) return h('div', { class: 'small' }, toneChip('neutral', 'Checking'), ` ${os}: hasn't said its version yet.`);
+  const chip = { current: toneChip('ok', 'Up to date'), waiting: toneChip('info', 'Update waiting'), updating: toneChip('info', 'Updating'), failed: toneChip('danger', 'Update failed') }[u.state];
+  const behind = u.state !== 'current' && r.latest && r.latest !== u.version ? `, Citadel has ${r.latest}` : '';
+  return h('div', { class: 'small' }, chip, ` ${os}: version `, h('code', {}, u.version), `${behind}${u.why ? `. ${u.why}` : ''}`);
+}
+
 /** Why an old CI runner agent wants updating (Build 7 M6b), and the line for each one there.
- * @param {{ runner_update: { url?: string | null, os: ('windows' | 'linux')[] } }} m */
+ * @param {{ runner_update: { url?: string | null, os: ('windows' | 'linux')[], plans?: boolean } }} m */
 function ciAgentUpdate(m) {
   const u = (m.runner_update.url ?? location.origin).replace(/\/$/, '');
   return h(
     'div',
     {},
-    h('div', { class: 'cui-notice', 'data-tone': 'warn', role: 'status' }, h('strong', {}, 'Its CI runner agent is from before.'), " It keeps every runner awake and squeezes the others to 30% while a ship runs, instead of following this PC's balance. Run its install again to update it; its runners and token stay."),
+    h(
+      'div',
+      { class: 'cui-notice', 'data-tone': 'warn', role: 'status' },
+      h('strong', {}, 'Its CI runner agent is from before.'),
+      m.runner_update.plans ? " It keeps every runner awake and squeezes the others to 30% while a ship runs, instead of following this PC's balance." : ' It can’t update itself yet.',
+      ' Run its install once more; from then on it updates itself, and its runners and token stay.',
+    ),
     m.runner_update.os.map((os) => [h('p', { class: 'small' }, CI_AGENT_UPDATE[os].where), markdownElement(`\`\`\`${CI_AGENT_UPDATE[os].tag}\n${CI_AGENT_UPDATE[os].line(u)}\n\`\`\``)]),
   );
 }

@@ -72,8 +72,8 @@ agent's output (and any tokens its scripts fetched) collapsed under it; a `list`
 
 What keeps the agent narrow:
 - **Only its own scripts.** It runs the scripts installed next to it, with a scheme id and a
-  count, and refuses any other job or field. It never downloads code: installing again is how
-  its scripts change.
+  count, and refuses any other job or field. The only code it fetches is its own files, from the address it already
+  dials, each checked against the SHA-256 Citadel sends ("It updates itself" below).
 - **One job at a time.** It's killed after 15 minutes, and it never restarts the PC.
 - **It never sees a token.** The scripts fetch their own registration tokens (the Linux
   `remove-runner.sh` a removal token) from Citadel with the agent's machine token, and its output is scrubbed of anything token-shaped
@@ -154,8 +154,30 @@ The steps below are for an agent from before, and for a CI runner host row.
    **Citadel runner agent** (SYSTEM, at startup, retried every 5 minutes), starts it and waits
    until it connects, then proves the CPU cap (#552, "Cap and yield" below). There's no reboot and no runner is registered or removed. The Machines page then shows
    it online.
-3. Run the same line again whenever these scripts change, to update the agent. The lines it
-   prints at the end say how to stop or remove it; removing the agent leaves its runners in place. Installing again keeps `caps.json`.
+3. From then on it updates itself ("It updates itself" below): nobody runs the line again when these scripts change.
+   An agent installed before #2310 can't yet: its row's **Update CI agent** shows this line once more, after which it
+   can. Running the line again still updates at once, and clears a stuck or rolled-back update. The lines it prints at
+   the end say how to stop or remove it; removing the agent leaves its runners in place. Installing again keeps `caps.json`.
+
+### It updates itself (#2310)
+
+Cara, 2026-11-28: "Can we make it able to update itself?" Each runner agent, Windows and WSL or Linux, keeps its files
+at Citadel's current ones with nobody at the PC:
+
+- **What it fetches.** On connect and after every deploy, Citadel sends the SHA-256 of each file the install put in the
+  agent's folder (`AGENT_FILES` in `src/ci-runner.ts`), as it serves them now (read with the front end, so a deploy
+  changes them together). The agent fetches the ones that differ from `/runner-agent.mjs` and `/ci-runner/<name>` on
+  the address it already dials, and checks each hash. Only names of its own folder (`*.mjs`, `*.ps1`, `*.sh`, no path)
+  are taken. What it may run doesn't change: the job allowlist is the agent's code, and the SYSTEM task stays as it is.
+- **When it swaps.** Every file is fetched and checked before any is swapped. It waits for its own job and for every
+  one-job runner it watches to end; after 15 minutes of waiting no new one starts until it has swapped. Standing runner
+  services use none of these files, so their jobs run on. It keeps the old files as `<name>.old` and starts again on
+  the new ones (the task and service run it with `--supervise`, a small parent that restarts it).
+- **When it fails.** A download that fails or doesn't match leaves every file as it was, says why on the Machines row
+  ("CI agent"), and tries again in 5 minutes or at the next deploy. A new version that stops before it connects is put
+  back to the `.old` files by the supervisor, and that version isn't taken again; the row says so.
+- **What the row shows.** "CI agent" names each runner agent's version (a 12-digit hash of its files), whether it is
+  current, waiting for a job, updating or failed, and why.
 
 ## By hand (the fallback)
 
@@ -412,7 +434,7 @@ with how many are busy and what waits.
   2 minutes with every runner of their pool busy and the CPU under 60%), **full** (jobs wait and the PC is busy
   too), else **fine**. A verdict that holds for 30 minutes (a crash at once) becomes one quiet Mandate item for
   the schemes with runners there, taken away when it ends. It never rings.
-- **Turning it on** on a PC installed before it shipped: the agents never update themselves, so run each host's
+- **Turning it on** on a PC installed before it shipped: agents installed before #2310 don't update themselves, so run each host's
   install line again. Windows: step 2 of "Install the runner agent" above, for the Windows runner host. WSL:
   `wsl -d citadel-ci -u root`, then step 3 of "Set it up" under "Linux runners in WSL", for the WSL runner host.
   Until then the panel shows the queues from GitHub and "No samples yet".

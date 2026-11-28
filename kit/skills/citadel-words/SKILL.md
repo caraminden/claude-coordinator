@@ -256,8 +256,8 @@ Never in text people read. The Citadel-wide wording check sends some of them bac
 **Fold** _(retired)_: say ship for main, merge into the Plot for a Plot member, collapsed section for UI.
 **Merge** _(restricted)_: only into a Plot's branch or as a raw git step; onto main is ship.
 **Feeder** _(retired)_: say Plot member.
-**Cabal**, **Build** _(for a group of minions, retired)_: say Plot ("Plot 11", "merged into Plot 11"); "build" for compiling stays, an APK build or "build the feature".
-**Major build** _(retired)_: say Plot.
+**Cabal** _(retired)_: say Plot ("Plot 11", "Plot 11's Overseer"); a goal cabal and a build cabal are both a Plot.
+**Major build**, **Build <n>** _(retired)_: say Plot ("merged into Plot 11") when it names a group of minions; "build" for compiling stays, an APK build or "build the feature".
 **Parked** _(retired)_: say sealed; unpark is unseal.
 **Coordinator** _(retired)_: say Taskmaster.
 **Ticket**, **Thread** _(retired)_: say minion.

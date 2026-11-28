@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PoolSight, SeenJob } from '../src/ci-ships.ts';
-import { actionsMinutes, FALLBACK, type FallbackDeps, type FallbackLook, Fallbacks, type Gh, machineReasons, perigeeNext, restartOnGithub, routeOf } from '../src/runner-fallback.ts';
-import { place, type PoolJob, type PoolMachine, type PoolPc, RunnerPool } from '../src/runner-pool.ts';
+import { actionsMinutes, FALLBACK, type FallbackDeps, type FallbackLook, Fallbacks, type Gh, machineReasons, noMachine, perigeeNext, perigeeRunner, restartOnGithub, routeOf } from '../src/runner-fallback.ts';
+import type { PoolJob, PoolMachine, PoolPc } from '../src/runner-pool.ts';
+import { RunnerPool } from '../src/runner-pool.ts';
 
 // Where a pool job goes when no machine can take it (Build 11 P5, specs/one-runner-pool.md section 5). Cara, 2026-11-27,
 // #2264's card Q3: "Public repos go to GitHub", "perigee can be a fallback for private repos, just need to load balance
@@ -17,17 +18,18 @@ function job(o: Partial<PoolJob> = {}): PoolJob {
 function pc(o: Partial<PoolMachine> = {}): PoolMachine {
   return { id: 1, name: 'cara-desktop', priority: null, os: ['windows', 'linux'], session: true, schemes: [PEEK], limit: 16, free: 16, off: null, ...o };
 }
-const one = (jobs: PoolJob[], machines: PoolMachine[]) => place({ jobs, machines, now: NOW, lastStart: new Map(), warm: new Map() });
-
-test('place() tells "no room" from "no machine": only no machine can lead to a fallback', () => {
-  assert.equal(one([job()], [pc({ free: 0 })])[0].none, false, 'machines on but full: no room');
-  assert.equal(one([job({ since: NOW - 5 * MIN })], [pc({ free: 0 })])[0].none, false, 'a big job holding a full machine is still no room');
-  assert.equal(one([job()], [pc()])[0].none, false, 'placed');
-  assert.equal(one([job()], [pc({ off: 'is offline' })])[0].none, true, 'every machine off');
-  assert.equal(one([job()], [pc({ os: ['linux'] })])[0].none, true, 'no machine runs its OS');
-  assert.equal(one([job()], [pc({ schemes: [] })])[0].none, true, 'no machine lends its scheme CI');
-  assert.equal(one([job({ needs: { os: 'windows', session: false, size: 24 } })], [pc()])[0].none, true, "too big for any machine's limit");
-  assert.equal(one([job({ needs: { os: 'windows', session: true, size: 4 } })], [pc({ session: false })])[0].none, true, 'nobody signed in for a desktop job');
+test('"no room" is not "no machine": only no machine can lead to a fallback', () => {
+  const none = (j: PoolJob, ms: PoolMachine[]) => noMachine(j, ms);
+  assert.equal(none(job(), [pc({ free: 0 })]), false, 'machines on but full, or held for a big job: no room');
+  assert.equal(none(job(), [pc({ limit: 2, cap: 16, free: 2 })]), false, "busy with minion turns: the turns' share leaves too little room now, but its CI limit fits, so it waits there");
+  assert.equal(none(job(), [pc()]), false, 'a machine that can take it');
+  assert.equal(none(job(), [pc({ off: 'is offline' })]), true, 'every machine off');
+  assert.equal(none(job(), [pc({ off: 'is paused' }), pc({ id: 2, name: 'tiny', limit: 2 })]), true, 'one off and the only open one too small: no machine');
+  assert.equal(none(job(), [pc({ os: ['linux'] })]), true, 'no machine runs its OS');
+  assert.equal(none(job(), [pc({ schemes: [] })]), true, 'no machine lends its scheme CI');
+  assert.equal(none(job({ needs: { os: 'windows', session: false, size: 24 } }), [pc()]), true, "too big for any machine's limit");
+  assert.equal(none(job({ needs: { os: 'windows', session: false, size: 12 } }), [pc({ limit: 16, cap: 8 })]), true, "too big for the owner's CI cap");
+  assert.equal(none(job({ needs: { os: 'windows', session: true, size: 4 } }), [pc({ session: false })]), true, 'nobody signed in for a desktop job');
 });
 
 test("why each machine couldn't take it, one line each", () => {
@@ -84,7 +86,7 @@ function world(o: { pub?: boolean; minutes?: { used: number; included: number };
   const settle = () => new Promise((r) => setImmediate(r));
   return { fb, told, restarts, perigeeStarts, ends, tick: (ms: number) => (now += ms), settle, setQuiet: (q: boolean) => (quiet = q) };
 }
-const look = (j: PoolJob, none: boolean): FallbackLook => ({ job: j, none, reasons: none ? ['cara-desktop is offline'] : [] });
+const look = (j: PoolJob, none: boolean): FallbackLook => ({ job: j, labels: ['self-hosted', 'peek-auras-ci-linux'], none, reasons: none ? ['cara-desktop is offline'] : [] });
 
 test('no room never falls back, however long it waits', async () => {
   const w = world();
@@ -167,6 +169,9 @@ test("perigee takes private repos' Linux jobs one at a time, only while quiet: a
   w.fb.look([look(a, true), look(b, true)]);
   await w.settle();
   assert.deepEqual(w.perigeeStarts, [1], 'the second queues while the first runs');
+  assert.deepEqual([w.fb.waiting('caraminden/peek-auras', 1), w.fb.waiting('caraminden/peek-auras', 2)], [false, true], 'the one running on perigee is not waiting for a machine; the one queued there is');
+  assert.equal(w.fb.shipWaiting('caraminden/peek-auras'), true, "a ship job of the repo waits: its ship's line says so");
+  assert.equal(w.fb.shipWaiting('caraminden/other'), false);
   w.ends[0]();
   await w.settle();
   w.fb.look([look(b, true)]);
@@ -184,13 +189,14 @@ test("a private repo's Linux job waits, and says so, while perigee's own runner 
   assert.match(w.told[0].text, /perigee's own runner isn't set up, so it waits for a machine/);
 });
 
-function fakeGh(o: { event?: string; tip?: string; dispatch?: number; newRunAfter?: number } = {}) {
+function fakeGh(o: { event?: string; tip?: string; dispatch?: number; newRunAfter?: number; running?: boolean; ended?: string } = {}) {
   const calls: string[] = [];
   let lists = 0;
   const gh: Gh = async (method, path, body) => {
     calls.push(`${method} ${path}${body ? ` ${JSON.stringify(body)}` : ''}`);
     if (method === 'GET' && path === 'repos/o/r/actions/runs/50') return { status: 200, body: { id: 50, path: '.github/workflows/windows.yml', head_branch: 'land/fix', head_sha: 'abc', status: 'queued', event: o.event ?? 'push' } };
     if (method === 'GET' && path.startsWith('repos/o/r/git/ref/heads/')) return { status: 200, body: { object: { sha: o.tip ?? 'abc' } } };
+    if (method === 'GET' && path === 'repos/o/r/actions/runs/50/jobs?filter=latest&per_page=100') return { status: 200, body: { jobs: [{ status: 'queued' }, { status: o.running ? 'in_progress' : 'completed' }] } };
     if (method === 'POST' && path.endsWith('/dispatches')) return { status: o.dispatch ?? 204, body: null };
     if (method === 'GET' && path.startsWith('repos/o/r/actions/runs?'))
       return {
@@ -199,8 +205,9 @@ function fakeGh(o: { event?: string; tip?: string; dispatch?: number; newRunAfte
           workflow_runs:
             ++lists > (o.newRunAfter ?? 0)
               ? [
-                  { id: 51, path: '.github/workflows/windows.yml' },
                   { id: 49, path: '.github/workflows/windows.yml' },
+                  { id: 51, path: '.github/workflows/windows.yml', ...(o.ended ? { status: 'completed', conclusion: o.ended } : { status: 'queued' }) },
+                  { id: 52, path: '.github/workflows/other.yml' },
                 ]
               : [],
         },
@@ -217,6 +224,7 @@ test('a restart starts the new run on the same commit and sees it before it canc
   assert.deepEqual(r, { ok: true, why: "started again on GitHub's runners as run 51" });
   assert.deepEqual(f.calls, [
     'GET repos/o/r/actions/runs/50',
+    'GET repos/o/r/actions/runs/50/jobs?filter=latest&per_page=100',
     'GET repos/o/r/git/ref/heads/land/fix',
     'POST repos/o/r/actions/workflows/windows.yml/dispatches {"ref":"land/fix","inputs":{"route":"github"}}',
     'GET repos/o/r/actions/runs?head_sha=abc&event=workflow_dispatch&per_page=20',
@@ -239,10 +247,17 @@ test("a restart that can't be made cancels nothing: the job waits, never fails",
   const never = fakeGh({ newRunAfter: 1e9 });
   assert.equal((await restartOnGithub(never.gh, 'o/r', 50, async () => {})).ok, false);
   assert.equal(cancels(never), 0, 'no new run seen: the old one is left');
+  const running = fakeGh({ running: true });
+  assert.match((await restartOnGithub(running.gh, 'o/r', 50, async () => {})).why, /a job of its run is running now/);
+  assert.equal(running.calls.filter((c) => c.includes('dispatches') || c.endsWith('/cancel')).length, 0, 'a machine picked a job of it up meanwhile: cancelling would kill it');
+  const failed = fakeGh({ ended: 'startup_failure' });
+  assert.match((await restartOnGithub(failed.gh, 'o/r', 50, async () => {})).why, /ended at once \(startup_failure\), so the old run is left waiting/);
+  assert.equal(cancels(failed), 0, "a new run that never started doesn't cost the old one its chance at a machine");
 });
 
 test("the pool hands the fallback its own waiting jobs, marked no machine or no room; not Citadel's ships, heavy jobs or a standing scheme's", () => {
   const looks: FallbackLook[][] = [];
+  const reads: ReadonlySet<string>[] = [];
   const peek = 'caraminden/peek-auras';
   const citadel = 'caraminden/claude-coordinator';
   const off: PoolPc = { id: 1, name: 'cara-desktop', priority: null, os: ['windows', 'linux'], session: true, schemes: [PEEK, 2], limit: 8, off: 'is offline', hosts: ['DESK'] };
@@ -255,7 +270,7 @@ test("the pool hands the fallback its own waiting jobs, marked no machine or no 
     now: () => NOW,
     pooled: () => true,
     start: async () => ({ name: '', ok: true, output: '' }),
-    fallback: { look: (j) => looks.push(j) },
+    fallback: { look: (j, read) => (looks.push(j), reads.push(read)) },
   });
   const j = (repo: string, id: number, labels: string[], ship = false): SeenJob => ({ repo, id, run: id, name: `job ${id}`, labels, ship, created: NOW, status: 'queued', runner: null });
   const jobs = [j(peek, 1, ['self-hosted', 'peek-auras-ci']), j(citadel, 2, ['self-hosted', 'citadel-ci'], true), j(peek, 3, ['self-hosted', 'peek-auras-ci-linux', 'citadel-heavy-apk'])];
@@ -266,10 +281,12 @@ test("the pool hands the fallback its own waiting jobs, marked no machine or no 
     looks[0].map((l) => [l.job.id, l.none, l.reasons]),
     [[1, true, ['cara-desktop is offline']]],
   );
+  assert.deepEqual(looks[0][0].labels, ['self-hosted', 'peek-auras-ci']);
+  assert.deepEqual([...reads[0]], [peek, citadel], 'the repos it read, so a failed read keeps its jobs');
 });
 
-// A fake GitHub for the minutes count: each repo's visibility, workflows' billable time and dispatched runs' jobs.
-function minutesGh(repos: Record<string, { private: boolean; billable?: Record<string, number>[]; jobs?: { group: string; labels: string[]; mins: number }[]; down?: string }>) {
+// A fake GitHub for the minutes count: each repo's visibility and this month's dispatched runs, with their jobs.
+function minutesGh(repos: Record<string, { private: boolean; runs?: { group: string; labels: string[]; mins: number }[][]; down?: string }>) {
   const asked: string[] = [];
   const of =
     (repo: string): Gh =>
@@ -278,44 +295,175 @@ function minutesGh(repos: Record<string, { private: boolean; billable?: Record<s
       const r = repos[repo];
       if (r.down && path.includes(r.down)) return { status: 502, body: null };
       if (path === `repos/${repo}`) return { status: 200, body: { private: r.private } };
-      if (path.startsWith(`repos/${repo}/actions/workflows?`)) return { status: 200, body: { workflows: (r.billable ?? []).map((_, i) => ({ id: i + 1 })) } };
-      const t = path.match(/workflows\/(\d+)\/timing$/);
-      if (t) return { status: 200, body: { billable: Object.fromEntries(Object.entries(r.billable?.[Number(t[1]) - 1] ?? {}).map(([os, mins]) => [os, { total_ms: mins * MIN }])) } };
-      if (path.includes('/actions/runs?event=workflow_dispatch')) return { status: 200, body: { workflow_runs: r.jobs?.length ? [{ id: 7 }] : [] } };
-      if (path.endsWith('/runs/7/jobs?per_page=100')) return { status: 200, body: { jobs: (r.jobs ?? []).map((j) => ({ runner_group_name: j.group, labels: j.labels, started_at: new Date(NOW).toISOString(), completed_at: new Date(NOW + j.mins * MIN).toISOString() })) } };
+      const page = path.match(/actions\/runs\?event=workflow_dispatch&status=completed&created=>=2026-11-01&per_page=100&page=(\d+)$/);
+      if (page) {
+        const ids = (r.runs ?? []).map((_, i) => i + 1);
+        return { status: 200, body: { workflow_runs: ids.slice((Number(page[1]) - 1) * 100, Number(page[1]) * 100).map((id) => ({ id })) } };
+      }
+      const jobs = path.match(/\/runs\/(\d+)\/jobs\?filter=all&per_page=100$/);
+      if (jobs) return { status: 200, body: { jobs: (r.runs?.[Number(jobs[1]) - 1] ?? []).map((j) => ({ runner_group_name: j.group, labels: j.labels, started_at: new Date(NOW).toISOString(), completed_at: new Date(NOW + j.mins * MIN).toISOString() })) } };
       return { status: 404, body: null };
     };
   return { of, asked };
 }
 
-test("the minutes count: private repos only, Windows double, the higher of GitHub's billable time and the fallback's own runs", async () => {
+test("the minutes count is Citadel's own: private repos' dispatched jobs on GitHub's runners, each rounded up, Windows double, macOS ten times; each ended run read once", async () => {
   const gh = minutesGh({
-    'caraminden/peek-auras': { private: true, billable: [{ WINDOWS: 100 }, { UBUNTU: 50 }], jobs: [{ group: 'GitHub Actions', labels: ['windows-latest'], mins: 9.5 }] },
-    'caraminden/claude-coordinator': { private: false, billable: [{ UBUNTU: 5000 }] },
-  });
-  const m = await actionsMinutes(gh.of, ['caraminden/peek-auras', 'caraminden/claude-coordinator'], '2026-11-01');
-  assert.deepEqual(m, { used: 250, included: FALLBACK.included });
-  assert.ok(!gh.asked.some((p) => p.startsWith('repos/caraminden/claude-coordinator/')), "a public repo's minutes are free: never read");
-
-  // GitHub's billable time reads nothing (a cycle's start, or the field gone quiet): the fallback's own runs still count, rounded up, Windows double.
-  const quiet = minutesGh({
     'caraminden/peek-auras': {
       private: true,
-      billable: [{}],
-      jobs: [
-        { group: 'GitHub Actions', labels: ['windows-latest'], mins: 9.5 },
-        { group: 'Default', labels: ['self-hosted'], mins: 60 },
+      runs: [
+        [
+          { group: 'GitHub Actions', labels: ['windows-latest'], mins: 9.5 },
+          { group: 'Default', labels: ['self-hosted', 'peek-auras-ci'], mins: 60 },
+        ],
+        [{ group: 'GitHub Actions', labels: ['ubuntu-latest'], mins: 3 }],
+        [{ group: 'GitHub Actions', labels: ['macos-latest'], mins: 1 }],
       ],
     },
+    'caraminden/claude-coordinator': { private: false, runs: [[{ group: 'GitHub Actions', labels: ['ubuntu-latest'], mins: 5000 }]] },
   });
-  assert.deepEqual(await actionsMinutes(quiet.of, ['caraminden/peek-auras'], '2026-11-01'), { used: 20, included: FALLBACK.included });
+  const counted = new Map<string, number>();
+  const m = await actionsMinutes(gh.of, ['caraminden/peek-auras', 'caraminden/claude-coordinator'], '2026-11-01', counted);
+  assert.deepEqual(m, { used: 20 + 3 + 10, included: FALLBACK.included }, 'a self-hosted job is free');
+  assert.ok(!gh.asked.some((p) => p.startsWith('repos/caraminden/claude-coordinator/')), "a public repo's minutes are free: never read");
+  const jobReads = () => gh.asked.filter((p) => p.includes('/jobs?')).length;
+  const before = jobReads();
+  assert.deepEqual(await actionsMinutes(gh.of, ['caraminden/peek-auras'], '2026-11-01', counted), m);
+  assert.equal(jobReads(), before, "an ended run's minutes are kept, not read again");
+});
+
+test('the minutes count reads every page of runs, and fails closed past the pages it counts', async () => {
+  const many = (n: number) => minutesGh({ 'caraminden/peek-auras': { private: true, runs: Array.from({ length: n }, () => [{ group: 'GitHub Actions', labels: ['ubuntu-latest'], mins: 1 }]) } });
+  assert.deepEqual(await actionsMinutes(many(150).of, ['caraminden/peek-auras'], '2026-11-01', new Map()), { used: 150, included: FALLBACK.included });
+  const over = await actionsMinutes(many(FALLBACK.countPages * 100).of, ['caraminden/peek-auras'], '2026-11-01', new Map());
+  assert.ok('error' in over && /more than 1000 runs/.test(over.error), JSON.stringify(over));
 });
 
 test('the minutes count fails closed: a read GitHub refuses, or a repo no login reads, is an error, so private Windows jobs wait', async () => {
-  const down = minutesGh({ 'caraminden/peek-auras': { private: true, billable: [{ WINDOWS: 1 }], down: '/timing' } });
-  const m = await actionsMinutes(down.of, ['caraminden/peek-auras'], '2026-11-01');
+  const down = minutesGh({ 'caraminden/peek-auras': { private: true, runs: [[{ group: 'GitHub Actions', labels: ['windows-latest'], mins: 1 }]], down: '/jobs?' } });
+  const m = await actionsMinutes(down.of, ['caraminden/peek-auras'], '2026-11-01', new Map());
   assert.ok('error' in m && /502/.test(m.error), JSON.stringify(m));
   assert.equal(routeOf({ os: 'windows', session: false, size: 4 }, false, m).route, 'wait');
-  const none = await actionsMinutes(() => null, ['caraminden/peek-auras'], '2026-11-01');
+  const none = await actionsMinutes(() => null, ['caraminden/peek-auras'], '2026-11-01', new Map());
   assert.ok('error' in none);
+});
+
+test('the jobs of one run that reach 10 minutes together go as one: one restart, one message naming them all', async () => {
+  const w = world({ pub: true });
+  const a = job({ id: 1, run: 9, name: 'build' });
+  const b = job({ id: 2, run: 9, name: 'test' });
+  w.fb.look([look(a, true), look(b, true)]);
+  w.tick(FALLBACK.afterMs);
+  w.fb.look([look(a, true), look(b, true)]);
+  await w.settle();
+  assert.deepEqual(w.restarts, [{ repo: 'caraminden/peek-auras', run: 9 }]);
+  assert.equal(w.told.length, 1);
+  assert.match(w.told[0].text, /jobs "build", "test" \(run 9, a ship\)/);
+});
+
+test("a repo whose read failed keeps its jobs' 10 minutes; a repo read without them has ended them", async () => {
+  const w = world({ pub: true });
+  w.fb.look([look(job(), true)], new Set(['caraminden/peek-auras']));
+  w.tick(5 * MIN);
+  w.fb.look([], new Set());
+  w.tick(5 * MIN);
+  w.fb.look([look(job(), true)], new Set(['caraminden/peek-auras']));
+  await w.settle();
+  assert.equal(w.restarts.length, 1, 'a failed read kept its clock');
+  const e = world({ pub: true });
+  e.fb.look([look(job(), true)], new Set(['caraminden/peek-auras']));
+  e.tick(5 * MIN);
+  e.fb.look([], new Set(['caraminden/peek-auras']));
+  e.tick(5 * MIN);
+  e.fb.look([look(job(), true)], new Set(['caraminden/peek-auras']));
+  await e.settle();
+  assert.equal(e.restarts.length, 0, 'it ended, so one seen again starts over');
+});
+
+test('a fallback whose reads throw is told and waits, not lost', async () => {
+  const told: string[] = [];
+  let now = NOW;
+  const f = new Fallbacks({ now: () => now, isPublic: async () => Promise.reject(new Error('gh not found')), minutes: async () => ({ error: 'no' }), github: async () => ({ ok: true, why: '' }), tell: (_r, text) => told.push(text), log: () => {} });
+  f.look([look(job(), true)]);
+  now += FALLBACK.afterMs;
+  f.look([look(job(), true)]);
+  await new Promise((r) => setImmediate(r));
+  assert.match(told[0] ?? '', /Citadel couldn't send it on \(gh not found\), so it waits for a machine/);
+  assert.equal(f.waiting('caraminden/peek-auras', 1), true);
+});
+
+test("a job in perigee's line that a machine could take leaves the line and starts its 10 minutes over", async () => {
+  const w = world({ pub: false, perigee: true, quiet: false });
+  const a = job({ needs: { os: 'linux', session: false, size: 4 } });
+  w.fb.look([look(a, true)]);
+  w.tick(FALLBACK.afterMs);
+  w.fb.look([look(a, true)]);
+  await w.settle();
+  assert.equal(w.told.length, 1);
+  w.fb.look([look(a, false)]);
+  w.setQuiet(true);
+  w.fb.look([look(a, true)]);
+  await w.settle();
+  assert.deepEqual(w.perigeeStarts, [], 'not started: it left the line');
+  w.tick(FALLBACK.afterMs);
+  w.fb.look([look(a, true)]);
+  await w.settle();
+  assert.deepEqual(w.perigeeStarts, [1], 'ten more minutes with no machine: back in the line, and told again');
+  assert.equal(w.told.length, 2);
+});
+
+test("perigee's start that fails tells the Taskmaster, and the job waits for a machine", async () => {
+  const told: string[] = [];
+  let now = NOW;
+  const f = new Fallbacks({
+    now: () => now,
+    isPublic: async () => false,
+    minutes: async () => ({ error: 'no' }),
+    github: async () => ({ ok: true, why: '' }),
+    tell: (_r, text) => told.push(text),
+    log: () => {},
+    perigee: { quiet: () => true, start: async () => Promise.reject(new Error('GitHub answered 403 for a runner config')) },
+  });
+  const a = job({ needs: { os: 'linux', session: false, size: 4 } });
+  f.look([look(a, true)]);
+  now += FALLBACK.afterMs;
+  f.look([look(a, true)]);
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.match(told[1] ?? '', /perigee couldn't start caraminden\/peek-auras's job "build" \(run 1\): GitHub answered 403 for a runner config\. It waits for a machine\./);
+  assert.equal(f.waiting('caraminden/peek-auras', 1), true);
+});
+
+test("perigee's runner: the config goes only to run(), never a log line; one that took no job in 2 minutes is stopped and taken off GitHub", async () => {
+  const lines: string[] = [];
+  const ran: { name: string; config: string }[] = [];
+  const removed: number[] = [];
+  let stopped = 0;
+  let idle: () => void = () => {};
+  let busy = false;
+  const p = perigeeRunner({
+    pressure: () => 12,
+    jit: async (_repo, name, labels) => (assert.deepEqual(labels, ['self-hosted', 'peek-auras-ci-linux']), assert.equal(name, 'perigee-1'), { id: 900, config: 'SECRET-JIT' }),
+    run: (name, config) => (ran.push({ name, config }), { done: new Promise(() => {}), stop: () => stopped++ }),
+    runner: async () => ({ busy }),
+    remove: async (_repo, id) => void removed.push(id),
+    wait: () => new Promise<void>((r) => (idle = r)),
+    log: (l) => lines.push(l),
+  });
+  assert.equal(p.quiet(), true);
+  const r = await p.start(job(), ['self-hosted', 'peek-auras-ci-linux']);
+  assert.equal(r.ok, true);
+  assert.deepEqual(ran, [{ name: 'perigee-1', config: 'SECRET-JIT' }]);
+  idle();
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual([stopped, removed], [1, [900]]);
+  assert.ok(!lines.some((l) => l.includes('SECRET-JIT')), 'the config is a credential');
+  busy = true;
+  stopped = 0;
+  await p.start(job(), ['self-hosted', 'peek-auras-ci-linux']);
+  idle();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(stopped, 0, 'a runner on its job is left to finish');
+  assert.equal(perigeeRunner({ pressure: () => FALLBACK.perigee.quietPct, jit: async () => ({ id: 0, config: '' }), run: () => ({ done: Promise.resolve(), stop() {} }), runner: async () => null, remove: async () => {}, log() {} }).quiet(), false, 'at 30% CPU pressure it is not quiet');
 });

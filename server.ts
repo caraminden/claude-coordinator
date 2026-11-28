@@ -1483,6 +1483,7 @@ const deployState = (() => {
 // CI runs in flight (#546): a minion's PR (the PR watcher below names its runs) and a landing's CI gate, every 20 s.
 // Build 11 P5: a ship's run whose job no machine could take reads "waiting for a machine" (set once the pool's fallback is made).
 let poolWaiting: (slug: string, run: number) => boolean = () => false;
+let poolShipWaiting: (slug: string) => boolean = () => false;
 const ciRuns = new CiRuns({ changed: (id) => waits.check(id), machineWait: (slug, run) => poolWaiting(slug, run) });
 let liveSlug: string | null = null;
 void originRepo(import.meta.dirname).then((slug) => (liveSlug = slug));
@@ -1674,7 +1675,7 @@ const prDeps = {
 const mainReader = new MainReader({ ...prDeps, finder: targetFinder });
 // Every other scheme's open PRs, on its first target (#655).
 const prsInFlight = new PrsInFlight(prDeps);
-const landsInFlight = new LandsInFlight({ store, finder: targetFinder, landings });
+const landsInFlight = new LandsInFlight({ store, finder: targetFinder, landings, machineWait: (slug) => poolShipWaiting(slug) });
 // The other test copies (#627): minions' downloads, preview sites and debug APKs, read with the targets on the slow poll.
 const testCopyReader = new TestCopyReader({
   store,
@@ -2405,6 +2406,7 @@ const poolFallback = new Fallbacks({
   log: (line) => console.log(line),
 });
 poolWaiting = (slug, run) => poolFallback.waiting(slug, run);
+poolShipWaiting = (slug) => poolFallback.shipWaiting(slug);
 // The runner pool, watching only (Build 11 P1, src/runner-pool.ts): each look's self-hosted jobs go in its books
 // (pool_jobs) and its line, and it logs where it would start each. Nothing on any PC changes until P3 turns it on.
 const runnerPool = new RunnerPool({

@@ -261,7 +261,7 @@ export interface FallbackLook {
   reasons: string[];
 }
 
-type Track = { repo: string; run: number; since: number; told: boolean; route: Route | null; why: string | null };
+type Track = { repo: string; run: number; ship: boolean; since: number; told: boolean; route: Route | null; why: string | null };
 type Sent = { key: string; job: PoolJob; labels: readonly string[]; t: Track };
 
 export class Fallbacks {
@@ -291,13 +291,13 @@ export class Fallbacks {
       seen.add(key);
       let t = this.track.get(key);
       if (!none) {
-        // Once sent on (to GitHub, perigee's line), it stays sent; only one never sent starts over. A machine can take it
-        // now, so it leaves perigee's line.
-        if (t && !t.route) this.track.delete(key);
+        // Gone to GitHub (or running on perigee) it stays sent. One never sent, or still in perigee's line, starts over:
+        // a machine can take it now, so it leaves that line.
+        if (t && (!t.route || this.perigeeJobs.has(key))) this.track.delete(key);
         this.perigeeJobs.delete(key);
         continue;
       }
-      if (!t) this.track.set(key, (t = { repo: job.repo.toLowerCase(), run: job.run, since: now, told: false, route: null, why: null }));
+      if (!t) this.track.set(key, (t = { repo: job.repo.toLowerCase(), run: job.run, ship: job.ship, since: now, told: false, route: null, why: null }));
       if (t.told || now - t.since < FALLBACK.afterMs) continue;
       t.told = true;
       const run = `${t.repo}#${job.run}`;
@@ -310,15 +310,23 @@ export class Fallbacks {
     for (const [k, t] of [...this.track]) if (gone(k, t.repo)) this.track.delete(k);
     for (const k of this.perigeeLine) if (gone(k, this.perigeeJobs.get(k)?.t.repo ?? '')) this.perigeeJobs.delete(k);
     this.perigeeLine = this.perigeeLine.filter((k) => this.perigeeJobs.has(k));
-    for (const [run, g] of due)
-      void this.send(g.sent, g.reasons).catch((e: unknown) => this.d.log(`Runner pool fallback: ${run}: ${e instanceof Error ? e.message : String(e)}`));
+    for (const [run, g] of due) void this.send(g.sent, g.reasons).catch((e: unknown) => this.d.log(`Runner pool fallback: ${run}: ${e instanceof Error ? e.message : String(e)}`));
     this.perigeeTick();
   }
 
-  /** A job of the run has had no machine for FALLBACK.afterMs and isn't gone to GitHub: its ship's line reads "waiting for a machine". */
+  /** A job of the run has had no machine for FALLBACK.afterMs and isn't gone to GitHub or running on perigee: its ship's line reads "waiting for a machine". */
   waiting(repo: string, run: number): boolean {
+    return this.stuck(repo, (t) => t.run === run);
+  }
+
+  /** A ship job of the repo is waiting for a machine: the ship's line reads so (a repo ships one change at a time). */
+  shipWaiting(repo: string): boolean {
+    return this.stuck(repo, (t) => t.ship);
+  }
+
+  private stuck(repo: string, which: (t: Track) => boolean): boolean {
     const r = repo.toLowerCase();
-    return [...this.track.values()].some((t) => t.told && t.route !== 'github' && t.repo === r && t.run === run);
+    return [...this.track].some(([k, t]) => t.told && t.route !== 'github' && k !== this.perigeeRunning && t.repo === r && which(t));
   }
 
   private async cached<T>(key: string, get: () => Promise<T>): Promise<T> {

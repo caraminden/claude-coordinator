@@ -1122,6 +1122,8 @@ export interface LandDeps {
   /** Handed-off lands (src/land.ts Landings): which minions have one, and its output so far (code null while it runs). */
   landings: { handoffs(): number[]; look(ticketId: number): Promise<{ output: string; code: number | null } | null>; lastLook(ticketId: number): { output: string; code: number | null } | null | undefined };
   now?: () => number;
+  /** P5: one of the repo's ship jobs has had no machine for 10 minutes and waits for one (src/runner-fallback.ts). */
+  machineWait?: (repo: string) => boolean;
 }
 
 /** A land's place in the line as a number: landing (no place) is 0, "next" 1, "2nd" 2, and so on. */
@@ -1260,7 +1262,9 @@ export class LandsInFlight {
       const targets = all.filter((x) => x.projectId === t.project_id);
       const on = new Set(shipsTo(this.filesOf(t, targets[0]?.branch ?? 'main', p.repo_dir), targets));
       if (!this.seen.has(id)) this.seen.set(id, now);
-      const lead = landProgress(run!.output, this.seen.get(id)!);
+      let lead = landProgress(run!.output, this.seen.get(id)!);
+      // A repo's one ship holds its land lock, so a ship job of the repo waiting for a machine is this one's CI.
+      if (!lead.waitingOn && this.d.machineWait?.(repoSlug(p.repo_url) ?? '')) lead = { ...lead, waitingOn: 'waiting for a machine', text: 'shipping: its CI is waiting for a machine', brief: 'no machine' };
       const change: Change = { ...asChange(t), ...lead, ...(q && at >= 0 && q.line[at]?.frozen && frozenLead(lead, q.line[at].frozen!)) };
       const l = q && at >= 0 ? q.line[at] : null;
       const waits = l?.got === 0;

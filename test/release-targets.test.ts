@@ -1813,6 +1813,47 @@ test('handed-off lands list in line order, not minion-number order (#766)', asyn
   );
 });
 
+test("a scheme's ship whose CI job has had no machine for 10 minutes reads waiting for a machine (Plot 11 P5)", () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `land-repo-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  landOne(repo, Date.now(), 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const a = store.createTicket({ project_id: p.id, title: 'Overlay fix', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(a.id, root, 'ticket/1-overlay');
+  const b = store.createTicket({ project_id: p.id, title: 'Next one', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(b.id, root, 'ticket/2-next');
+  const outs = new Map([
+    [a.id, 'queue: got the land lock\n'],
+    [b.id, 'queue: 2nd in line for the land lock\n'],
+  ]);
+  const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main' };
+  const asked: string[] = [];
+  let stuck = false;
+  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => [a.id, b.id], look: async (id) => ({ output: outs.get(id)!, code: null }), lastLook: (id) => ({ output: outs.get(id)!, code: null }) }, now: () => 1000, machineWait: (slug) => (asked.push(slug), stuck) });
+  const rows = () => {
+    const vs = [{ target: { id: ci.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }];
+    lands.attach(vs as never);
+    return ((vs[0].next as { changes: { title: string; text: string; waitingOn: string | null }[] } | null)?.changes ?? []).map((c) => [c.title, c.waitingOn, c.text]);
+  };
+  assert.deepEqual(rows()[0], ['Overlay fix', null, 'shipping: tests, then onto main']);
+  stuck = true;
+  assert.deepEqual(
+    rows(),
+    [
+      ['Overlay fix', 'waiting for a machine', 'shipping: its CI is waiting for a machine'],
+      ['Next one', 'in line to ship (2nd)', 'in line to ship (2nd)'],
+    ],
+    'only the one shipping: the rest of the line waits for the lock, not a machine',
+  );
+  assert.ok(
+    asked.every((s) => s === 'o/peek'),
+    JSON.stringify(asked),
+  );
+});
+
 test("a minion's second ship waits in the line while its first waits to go out, and shows once (2RE5)", async () => {
   const store = new Store(join(root, `c-${++n}.db`));
   const repo = join(root, `land-repo-${n}`);

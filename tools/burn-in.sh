@@ -11,7 +11,7 @@
 #                                           source files to or that import them (in turns), one file after another, within
 #                                           BURN_IN_LIMIT (150) s; with BURN_IN_TIMES (a file it keeps), one whose last
 #                                           burn-in at the same content took longer than the time left is not started;
-#                                           each file's copies run at most BURN_IN_CPUS (nproc) at a time (below, #2290)
+#                                           a heavy file's copies run fewer at a time, to fit the runner (below, #2290)
 #   tools/burn-in.sh --importers <path>...  the test files that import those paths, nearest first, with why (no run)
 #
 # One file: exits 0 when every copy passed, 1 when one failed or was stopped at the limit (its output is printed, then a
@@ -25,11 +25,15 @@
 # BURN_IN_NICE: a prefix for each copy (the flake proof's `nice -n 19`).
 # BURN_IN_INNER: set off CI to 4 / copies, the in-file concurrency a test file that reads it should use (#2073); in a
 # --ship run, to BURN_IN_CPUS / the copies running at a time.
-# --ship fits the runner (#2290): each file's 10 copies all run, but at most BURN_IN_CPUS (default nproc) at a time, fewer
-# by the file's own concurrency, each next copy starting as one ends. GitHub's runners have 4 CPUs: on Nov 28 ten copies
-# of test/list-reads.test.ts at once there (30 servers) ran a load of 40 to 60 and left 0.8 GB of 16 free, and 8 to 10
-# of 10 copies failed on a 20 s boot wait in #2286's runs; 4 at a time took 13 s a batch against 56 s for 10 at once.
-# A 16-CPU runner (the desktop) still runs all 10 at once. The pass rule is the same: every copy passes.
+# --ship fits the runner (#2290): each file's 10 copies all run and must all pass, but a heavy file's run at most k at a
+# time, each next copy starting as one ends. One copy runs alone first and is weighed (weigh, below): k = BURN_IN_CPUS
+# (nproc) x BURN_IN_LOAD (2.5) / the CPUs that copy kept busy, from 2 to all 10. A file that reads BURN_IN_INNER is
+# not weighed: its in-file concurrency is capped instead (fit). Why weigh, not a flat nproc: GitHub's runners have 4 CPUs.
+# On Nov 28 ten copies at once there of test/list-reads.test.ts (1.7 to 2 CPUs a copy, 3 servers) ran a load of 40 to
+# 88, left 0.8 to 2.2 GB of 16 free and failed 7 to 10 of 10 copies on a 20 s boot wait (#2286); but #1327's
+# fresh-session race (about 1 CPU a copy) was caught in 9 of 10 copies at 10 at once, 3 runs of 3, and in no copy of 3
+# runs at 4 at a time: a light file's race needs all its copies at once. 2.5 x 4 CPUs runs it 10 at once, list-reads 5,
+# cabal-card-browser (3.1) 3. A 16-CPU runner (the desktop) runs every file lighter than 4 CPUs 10 at once, as before.
 set -uo pipefail
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 copies=${BURN_IN_COPIES:-10}
@@ -157,6 +161,24 @@ fit() {
   return 0
 }
 
+# <file> <seconds>: one copy run alone before a ship's copies, setting weight (the CPUs it kept busy on average: its
+# processes' own CPU time over its wall time, the servers it starts included, so other jobs on a shared runner don't
+# count) and weigh_note (a note when that run failed: the copies still decide). BURN_IN_WEIGHT skips the run (tests).
+weigh() {
+  local file=$1 limit=$2 dir t0 t1 out rc
+  weigh_note='' weight=${BURN_IN_WEIGHT:-}
+  [ -z "$weight" ] || return 0
+  dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/burn-in-weigh.XXXXXX") || { weight=0; return 0; }
+  t0=$(date +%s%N)
+  # times: this subshell's waited-for children, so the test run and everything under it.
+  out=$({ TMPDIR=$dir timeout -k 10 "$limit" "${nice_cmd[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" --test-reporter=spec "$file" >"$dir/run.log" 2>&1; echo "rc $?"; times; })
+  t1=$(date +%s%N)
+  rm -rf "$dir"
+  rc=$(awk '$1 == "rc" { print $2 }' <<<"$out")
+  [ "$rc" = 0 ] || weigh_note="; that run alone failed (exit $rc), and its copies still decide"
+  weight=$(awk -v ns=$((t1 - t0)) 'function s(x) { split(x, a, /[ms]/); return a[1] * 60 + a[2] } $1 != "rc" { n++; if (n == 2) cpu = s($1) + s($2) } END { w = ns > 0 ? cpu / (ns / 1e9) : 0; printf "%.2f", w }' <<<"$out")
+}
+
 if [ "${1:-}" = --importers ]; then
   shift
   importers "$@"
@@ -190,9 +212,9 @@ if [ "${1:-}" != --ship ]; then
 fi
 
 base=${2:?usage: burn-in.sh --ship <base>}
-limit=${BURN_IN_LIMIT:-150} mapped_max=${BURN_IN_MAPPED:-3} cpus=${BURN_IN_CPUS:-$(nproc 2>/dev/null || echo 4)}
+limit=${BURN_IN_LIMIT:-150} mapped_max=${BURN_IN_MAPPED:-3} cpus=${BURN_IN_CPUS:-$(nproc 2>/dev/null || echo 4)} load=${BURN_IN_LOAD:-2.5}
 [[ $cpus =~ ^[1-9][0-9]*$ ]] || { echo "burn-in: BURN_IN_CPUS must be a whole number, not $cpus"; exit 1; }
-[ "$cpus" -ge 2 ] || cpus=2 # copies one at a time can't race each other
+[[ $load =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "burn-in: BURN_IN_LOAD must be a number, not $load"; exit 1; }
 git rev-parse -q --verify "$base^{commit}" >/dev/null || { echo "burn-in: SKIPPED: no commit $base to compare with, so nothing was burned in"; exit 0; }
 rc=0
 out=$("$tools/citadel-node" --no-warnings "$tools/affected.ts" --base "$base" 2>&1) || rc=$?
@@ -227,9 +249,7 @@ fi
 for ((i = 0; i < ${#imp[@]}; i++)); do echo "burn-in: picked ${imp[i]}: it ${imp_why[i]}"; done
 files=("${direct[@]}" "${mapped[@]}" "${imp[@]}")
 [ ${#files[@]} -gt 0 ] || { echo "burn-in: this change adds or changes no test file, and no test is mapped to it or imports it: nothing to burn in"; exit 0; }
-pace=''
-[ "$cpus" -ge "$copies" ] || pace=" (at most $cpus at a time, this runner's CPUs)"
-echo "burn-in: ${#files[@]} file(s), $copies copies of each at once$pace, one file after another, within $limit s: ${direct[*]:+changed: ${direct[*]}}${mapped[*]:+${direct[*]:+; }mapped from the change: ${mapped[*]}}${imp[*]:+${direct[*]}${mapped[*]:+; }importing the change: ${imp[*]}}"
+echo "burn-in: ${#files[@]} file(s), $copies copies of each at once, one file after another, within $limit s: ${direct[*]:+changed: ${direct[*]}}${mapped[*]:+${direct[*]:+; }mapped from the change: ${mapped[*]}}${imp[*]:+${direct[*]}${mapped[*]:+; }importing the change: ${imp[*]}}"
 # Each file's last burn-in on this runner (#2138), "<seconds>\t<file>\t<blob>": a file whose last burn-in at the same
 # content took longer than the time left is skipped, not started. Stopped at the limit it gives no verdict, and on Nov 25
 # and 26 that cost 1,680 s over 197 ship runs and 878 s over 29 (Build 7's machine-sync, 67-93 s a run). A stopped file
@@ -255,16 +275,16 @@ for f in "${files[@]}"; do
     slow+=("$f")
     continue
   fi
-  # This runner's CPUs (fit, above): all its copies run, at most fit_k at a time, and never fewer than 2 at a time, the
-  # fewest that still overlap (a race between copies needs two). A file whose own concurrency leaves room for fewer, or
-  # can't be capped at all, runs 2 at a time, said, rather than refusing the ship for how it is written.
-  why=''
-  fit "$f" "$copies" "$cpus" || why="asks concurrency: $fit_c inside each copy, more than this runner's $cpus CPUs"
-  if [ "$fit_k" -lt 2 ] && [ "$copies" -ge 2 ]; then
-    fit_k=2
-    echo "burn-in: $f ${why:-runs concurrency $fit_c inside each copy}, so its copies run 2 at a time, the fewest that still overlap; ${why:+have it read BURN_IN_INNER (as test/boot-check.test.ts does)}${why:-it may load the runner past its CPUs}"
+  rc=0 t0=$SECONDS fit_inner=''
+  if grep -q "process\.env\.BURN_IN_INNER" "$f"; then
+    fit "$f" "$copies" "$cpus" # its in-file concurrency is capped to fit the CPUs (#2073)
+  else
+    weigh "$f" "$left"
+    read -r weight fit_k < <(awk -v c="$cpus" -v l="$load" -v w="$weight" -v n="$copies" 'BEGIN { k = w > 0.05 ? int(c * l / w) : n; if (k > n) k = n; if (k < 2) k = 2; printf "%.1f %d\n", w, k }')
+    echo "burn-in: $f: one copy alone kept $weight of this runner's $cpus CPUs busy, so $([ "$fit_k" -ge "$copies" ] && echo "all $copies copies run at once" || echo "its $copies copies run at most $fit_k at a time") (a load of up to $load x its CPUs)${weigh_note}"
   fi
-  rc=0 t0=$SECONDS
+  [ "$fit_k" -ge 2 ] || [ "$copies" -lt 2 ] || fit_k=2 # copies one at a time can't race each other
+  left=$((left - (SECONDS - t0)))
   if [ -n "$fit_inner" ]; then BURN_IN_INNER=$fit_inner burn_one "$f" "$copies" "$left" "$fit_k" || rc=$?
   else burn_one "$f" "$copies" "$left" "$fit_k" || rc=$?; fi
   took=$((SECONDS - t0))

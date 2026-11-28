@@ -6,6 +6,9 @@ import { DONE_LINES } from './done-lines.ts';
 import { pacificDay } from './pacific.ts';
 import type { PropertyKey, RegistryReply, ProjectView, Counted, ReviewEntry } from './mcp-types.ts';
 import { scheduleLine, type ScheduleInfo } from './mcp-text.ts';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { repoSlug } from './repo-slug.ts';
 import { C, TICKET_ID, call, propertyText, id, needOne, MODEL, EFFORT, PROPERTIES, NOT_HERE } from './mcp-call.ts';
 
 // What a schedule's runs start with (#387), from the same table: a mechanical checkup is a read-only check.
@@ -504,6 +507,7 @@ export async function runSchemeTool(name: string, args: Record<string, unknown>)
       if (args.screenshots_required !== undefined) body.shots_required = args.screenshots_required;
       if (args.screenshot_note !== undefined) body.shot_note = args.screenshot_note;
       for (const k of ['ship_path', 'go_from', 'try_first'] as const) if (args[k] !== undefined) body[k] = args[k];
+      if (args.ship_path === 'pr-auto') await refuseWithoutAutoMerge(args.repo_url);
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
       if (args.name !== undefined) body.name = args.name;
@@ -624,5 +628,23 @@ export async function runSchemeTool(name: string, args: Record<string, unknown>)
       return 'Deleted.';
     default:
       return NOT_HERE;
+  }
+}
+
+const runGh = promisify(execFile);
+
+/** pr-auto only where GitHub can auto-merge (#2301): a private repo on a free plan can't, and its PRs sit green. Throws naming pr-minion unless the repo answers allow_auto_merge true. */
+async function refuseWithoutAutoMerge(repoUrl: unknown): Promise<void> {
+  const url = typeof repoUrl === 'string' ? repoUrl : (await call<{ project: ProjectView }>('GET', `/api/projects/${C().PROJECT}?tickets=none`)).project.repo_url;
+  const slug = repoSlug(url ?? null);
+  if (!slug) throw new Error("pr-auto needs the scheme's repo on GitHub, and this scheme has none: pick citadel or pr-person");
+  let answer: string;
+  try {
+    answer = (await runGh('gh', ['api', `repos/${slug}`, '--jq', '.allow_auto_merge'], { timeout: 20_000 })).stdout.trim();
+  } catch (err) {
+    answer = `no answer (${(thrown(err).stderr || thrown(err).message || '').toString().trim().slice(0, 200)})`;
+  }
+  if (answer !== 'true') {
+    throw new Error(`Not saved: ${slug} can't auto-merge (GitHub's allow_auto_merge: ${answer || 'empty'}; a private repo on a free plan can't), so pr-auto PRs would sit green. Use ship_path pr-minion (the minion merges once CI is green), or turn on "Allow auto-merge" in the repo's settings and set pr-auto again.`);
   }
 }

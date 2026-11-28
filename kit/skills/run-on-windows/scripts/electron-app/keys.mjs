@@ -7,7 +7,10 @@
 // expects Reload this app and Inspect in each app frame and no new menu in Citadel's page, invokes Reload this app and
 // checks only that frame reloaded (the server counts each /apps/<name>/ load). It leaves a shot per place.
 // RIG_KIT=1: each app frame draws its own menu (cancels contextmenu, as rail.js's kit menu does), so none should come up.
-//   node keys.mjs <build|checkout|edge> [keys|rclick|all]     RIG_INPUT=cdp: clicks and keys through DevTools (Input.dispatch*), for when
+// `stuck` (#2263): the page is stuck on Reconnecting…, its live stream asked and never answered (as #2260's boot window left
+// it), the server since recovered; each key must bring a page whose new stream connects. The page has a service worker that
+// serves /c/ from its cache, as Citadel's does (public/sw.js), so a reload counts by the page's own hello, not /c/ loads.
+//   node keys.mjs <build|checkout|edge> [keys|rclick|stuck|all]     RIG_INPUT=cdp: clicks and keys through DevTools (Input.dispatch*), for when
 // real input can't reach the window: while an elevated window (an admin console left open on the box) has the foreground,
 // Windows drops a normal process's injected input. DevTools' events take the same browser-side path from the focused
 // frame's widget (before-input-event, the context-menu event), but skip Windows' own message loop.
@@ -20,8 +23,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 const [build = 'checkout', what = 'all'] = process.argv.slice(2);
-if (!['keys', 'rclick', 'all'].includes(what) || (build === 'edge' && what === 'rclick')) {
-  console.log(`FAIL nothing to run: mode '${what}'${build === 'edge' ? ' in an Edge window (keys only)' : ''}; use keys, rclick or all`);
+if (!['keys', 'rclick', 'stuck', 'all'].includes(what) || (build === 'edge' && what === 'rclick')) {
+  console.log(`FAIL nothing to run: mode '${what}'${build === 'edge' ? ' in an Edge window (keys only)' : ''}; use keys, rclick, stuck or all`);
   process.exit(1);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -95,13 +98,57 @@ const report = () => {
     at: { top: r(t), same: r(document.getElementById('same')), sandboxed: r(document.getElementById('sandboxed')), cross: r(document.getElementById('cross')) } })));
 };
 addEventListener('load', report); addEventListener('resize', report);
+${
+  what === 'stuck'
+    ? `say('/hello');
+navigator.serviceWorker?.register('/sw.js').catch(() => {});
+const state = document.body.appendChild(document.createElement('b'));
+state.style.cssText = 'position:fixed;top:8px;left:8px;font:16px sans-serif';
+state.textContent = 'Reconnecting…';
+const es = new EventSource('/api/events');
+es.onopen = () => { state.textContent = 'Connected'; say('/connected'); };
+es.onerror = () => { state.textContent = 'Reconnecting…'; };
+fetch('/api/boot').catch(() => {});`
+    : ''
+}
 </script>`;
+// The fixture's service worker: /c/ from its cache, as Citadel's does; the rest from the network.
+const sw = `self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open('shell').then((c) => c.add('/c/'))); });
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', (e) => {
+  if (e.request.mode === 'navigate' && new URL(e.request.url).pathname === '/c/') e.respondWith(caches.open('shell').then((c) => c.match('/c/')).then((h) => h ?? fetch(e.request)));
+});`;
+// stuck: while held, the live stream and the boot fetch are asked and never answered (#2260's boot window); else answered.
+let held = true;
+const hung = []; // requests held, never answered
+const streams = []; // streams answered and open
+let hellos = 0,
+  connects = 0,
+  asked = 0;
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   const send = (body, type = 'text/html') => {
     res.writeHead(200, { 'content-type': type, 'cache-control': 'max-age=600' });
     res.end(body.replaceAll('${PORT}', String(PORT)));
   };
+  if (u.pathname === '/sw.js') {
+    res.writeHead(200, { 'content-type': 'text/javascript' });
+    return res.end(sw);
+  }
+  if (u.pathname === '/api/events' || u.pathname === '/api/boot') {
+    if (u.pathname === '/api/events') asked++;
+    if (held) return void hung.push(res);
+    if (u.pathname === '/api/boot') return res.writeHead(200, { 'content-type': 'application/json' }).end('{}');
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+    res.write('retry: 1000\n\ndata: hi\n\n');
+    streams.push(res);
+    return;
+  }
+  if (u.pathname === '/hello') {
+    hellos++;
+    layout = null;
+  }
+  if (u.pathname === '/connected') connects++;
   if (u.pathname === '/c/') {
     layout = null;
     loads.push({ hard: /no-cache/.test(req.headers['cache-control'] ?? '') || /no-cache/.test(req.headers.pragma ?? '') });
@@ -262,6 +309,57 @@ if (what === 'keys' || what === 'all') {
       if (reloaded) await ready();
     }
   }
+}
+
+if (what === 'stuck') {
+  console.log('input', cdp ? 'DevTools' : 'real (SendKeys, mouse_event)');
+  // The first page loaded while held: its stream was asked and never answered.
+  const first = (await until(() => asked > 0, 10000)) && (await sleep(1500), connects === 0);
+  console.log(`${first ? 'ok  ' : 'RIG?'} first page: stream asked ${asked}x, connected ${connects}x, ${hung.length} requests held`);
+  if (!first) fails++;
+  const keys = [
+    ['^r', 'Ctrl+R'],
+    ['{F5}', 'F5'],
+    ['^+r', 'Ctrl+Shift+R'],
+    ['^{F5}', 'Ctrl+F5'],
+  ];
+  let shot = false;
+  for (const where of places) {
+    for (const [k, name] of keys) {
+      // Stuck again: the deploy drops the open stream, the page asks again inside the boot window, and nothing answers.
+      if (connects) {
+        held = true;
+        const a = asked;
+        for (const s of streams.splice(0)) s.destroy();
+        if (!(await until(() => asked > a, 8000))) console.log('RIG? the page never asked again after the drop');
+      }
+      // The boot window is over: the server answers again, but nothing on the page asks.
+      held = false;
+      const c0 = connects,
+        h0 = hellos;
+      await sleep(2000);
+      const still = connects === c0;
+      if (!shot) {
+        await input(`shot ${path.join(shots, 'stuck-before.png')}`);
+        shot = true;
+      }
+      focus = null;
+      await front();
+      await mouse(where, 'left', false);
+      const focused = await until(() => focus === where, 3000);
+      const f = focus,
+        s = seen.length;
+      await press(k);
+      const reloaded = await until(() => hellos > h0, 5000);
+      const back = await until(() => connects > c0, 6000);
+      const ok = still && focused && reloaded && back;
+      if (!ok) fails++;
+      console.log(`${ok ? 'PASS' : 'FAIL'} stuck, focus ${where.padEnd(9)} (focused: ${f ?? 'unknown'}) ${name.padEnd(12)} -> ${reloaded ? 'reload' : 'no reload'}, ${back ? 'stream connected' : 'still not connected'}; ${hung.length} held so far${seen.length > s ? `; the page got ${seen.slice(s).join(', ')}` : ''}`);
+      if (!back) await input(`shot ${path.join(shots, `stuck-${where}-${name.replaceAll('+', '')}.png`)}`);
+      if (reloaded) await ready();
+    }
+  }
+  await input(`shot ${path.join(shots, 'stuck-after.png')}`);
 }
 
 // An open menu would take the next right-click, so each one is closed and the rig waits until it's gone.

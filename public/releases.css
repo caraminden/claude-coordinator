@@ -73,8 +73,8 @@ b.waits { color: var(--held); }
 .rel-change .try { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; font-size: 0.92em; }
 .rel-change .try button { padding: 0.2rem 0.7rem; font-size: inherit; }
 .rel-change .where { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.92em; }
-.rel-change a, .rel-list a, .rel-card-sm .num { color: var(--accent); text-decoration: none; }
-.rel-change a:hover, .rel-list a:hover { text-decoration: underline; }
+.rel-change a, .rel-list a, .rel-quick a, .rel-card-sm .num { color: var(--accent); text-decoration: none; }
+.rel-change a:hover, .rel-list a:hover, .rel-quick a:hover { text-decoration: underline; }
 .rel-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.3rem 0.4rem; }
 .rel-list li > a { min-width: 0; overflow-wrap: anywhere; padding-block: 2px; }
 .rel-list li .muted { flex: none; }
@@ -215,7 +215,7 @@ b.waits { color: var(--held); }
 .rel-quick { margin: 0.45rem 0 0; padding: 0.45rem 0.6rem; border-radius: 8px; font-size: 0.88em; border: 1px solid color-mix(in srgb, var(--qk) 35%, var(--line)); background: color-mix(in srgb, var(--qk) 5%, var(--panel)); }
 .rel-quick > b, .rel-quick > .rel-qtip > b { color: var(--qk); }
 .rel-quick > div { margin-top: 0.2rem; overflow-wrap: anywhere; }
-.rel-quick.red { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); background: color-mix(in srgb, var(--error) 5%, var(--panel)); }
+.rel-quick.red { box-shadow: inset 3px 0 var(--error); border-color: color-mix(in srgb, var(--error) 45%, var(--line)); background: color-mix(in srgb, var(--error) 5%, var(--panel)); }
 .rel-quick.red > b { color: var(--error); }
 .rel-qhead { color: var(--qk); font-weight: 600; }
 .rel-change.quick:not(.front) { background: color-mix(in srgb, var(--qk) 6%, var(--panel)); box-shadow: inset 3px 0 var(--qk); }

@@ -64,6 +64,7 @@ import { addArchitectureCheck, addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
 import { cabalLead, putOnCabal } from './cabals.ts';
 import { afterAllWrites, buildNumber, HttpError, isRecord, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { poolKey } from '../ci-runner.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 /** Each scheme's chains, kept 5 s: every chat open asks for them (#1679). */
@@ -878,6 +879,8 @@ export const projectRoutes: Route[] = [
       } catch {
         throw new HttpError(409, 'A scheme with that name already exists');
       }
+      // New schemes start on the runner pool (Build 11 P6, #2305): no standing runners, one one-job runner per CI job.
+      app.store.setSetting(poolKey(project.id), true);
       if (source !== 'none') {
         const dir = join(projectDir(app.dataDir, project.id), 'repo');
         try {

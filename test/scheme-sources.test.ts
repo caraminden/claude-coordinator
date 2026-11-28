@@ -146,6 +146,8 @@ test('none, and no source with no URL: no repo, plain folders for minions', asyn
     assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.equal(r.data.repo_dir, null);
     await minionStartsOnMain(r.data.id);
+    // A new scheme's CI starts on the runner pool (Build 11 P6), never on standing runners.
+    assert.ok((await s.call('/api/ci/pool')).data.pooled.includes(r.data.id));
   }
 });
 

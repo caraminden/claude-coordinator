@@ -536,7 +536,7 @@ test("a start names a scheme, a slot of 1 to 16, a one-time id and the runner's 
   assert.deepEqual(jobCommand(checkJob(start(2)), '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'start', '3', '2', ONCE, 'u']);
   // A desktop job's start (P6): only `session: true`, which runs the script with -Session, and never on Linux.
   const desk = checkJob({ ...start(2), session: true });
-  assert.equal(desk.session, true);
+  assert.equal('session' in desk && desk.session, true);
   assert.deepEqual(jobCommand(desk, 'C:\\agent', 'u', 'C:\\Windows', 'windows').args.slice(-1), ['-Session']);
   assert.throws(() => jobCommand(desk, '/a', 'u', undefined, 'linux'), /Windows session/);
   for (const session of [false, 'true', 1]) assert.throws(() => checkJob({ ...start(2), session }), /refused/, String(session));

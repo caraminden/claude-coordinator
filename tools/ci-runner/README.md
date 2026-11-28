@@ -590,8 +590,11 @@ left as they are.
 - **Start.** Citadel mints the runner's config with the scheme owner's GitHub login. It does so only for a machine whose
   CI role is on and lent to that scheme (`lendsCi`, `src/ci-runner.ts`). It holds the config under a one-time id for
   2 minutes (`src/runner-slots.ts`) and sends the agent `{op: 'start', scheme, slot, once, name}`, `name` being the
-  runner's pool name. A job whose labels end in `-desktop` is refused: it needs a person's session, which a slot's
-  task isn't. The agent runs
+  runner's pool name. A job whose labels end in `-desktop` (it opens windows or reads the screen) gets `session: true`
+  too, Windows only (P6, #2305): `runner-slot.ps1 -Session` registers that slot's task for the person signed in at
+  the console (Interactive, on their own desktop, under `conhost --headless`), grants them read on the pool and modify
+  on the slot, and refuses when nobody is signed in. The pool starts one desktop job of a scheme at a time per machine,
+  as its one session runner did. The agent runs
   `runner-slot.ps1 -Op Start` (or `runner-slot.sh start`) as SYSTEM or root. That makes the slot folder
   `C:\citadel-pool\<repo>\slot-<n>` (Linux: `/opt/citadel-pool/<repo>/slot-<n>`) and starts the slot's task or unit
   as the low-rights account: NETWORK SERVICE on Windows, the scheme's `ci-<repo>-<hash>` user on Linux. The launcher

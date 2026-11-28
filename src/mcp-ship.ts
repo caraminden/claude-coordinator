@@ -84,15 +84,13 @@ export const HOST_CHECK = {
 export const CI_RUNNERS = {
   name: 'ci_runners',
   description:
-    "For odd cases only: a scheme's runner registers by itself on a PC lending it CI once its workflows ask, and comes off when the scheme is unticked there, so never call add just to give a scheme CI. Add, list or remove this scheme's self-hosted GitHub Actions runners on a CI PC (more than one can host CI; list shows each), through the CI runner agent there (tools/ci-runner/README.md). `host` names the PC (its machine name from list_machines, or its hostname): add goes there and waits for that PC's own runners to show Idle (left out, it takes the first free PC); list and remove with no host reach every PC. add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo (with os linux, Linux runners labelled <scheme-slug>-ci-linux, in WSL on the same PC, for jobs Windows can't run), skipping ones already there, then waits until GitHub shows them Idle (with a `role`, or on a second PC: until the new ones are online, busy or not). `role` sets what the new runners are for (Citadel puts its labels on them through GitHub; runners already there are left as they are): land (the label alone, which ships take), side (also <label>-side, for long or background jobs), long (also <label>-long), check (only <label>-check). Left out: side on a PC with no land runner for the scheme while another PC has one, else the PC's own order. remove takes this scheme's runners off the PC and GitHub; list shows every runner service on the PC and which are Citadel's. Only for a turn a member of this scheme asked for. An add or remove posts one note in the Taskmaster's chat when it ends; a list posts none. Waits up to 10 minutes; a longer job keeps going, an add's or remove's outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
+    "List the self-hosted GitHub Actions runner services on the PCs that host CI (more than one can; `host` names one, by its machine name from list_machines or its hostname, left out every PC), through the CI runner agent on each (tools/ci-runner/README.md): which are Citadel's, and with os linux the Linux runners in WSL. add and remove are retired (Build 11, the runner pool): the pool starts a one-job runner for each CI job on a machine that lends the scheme CI, so no scheme needs runners added or taken off by hand. Waits up to 10 minutes; posts no note.",
   inputSchema: {
     type: 'object',
     properties: {
-      op: { type: 'string', enum: ['add', 'list', 'remove'] },
-      count: { type: 'number', description: 'add only: how many runners this scheme should have, 1 to 4 (default 1)' },
-      role: { type: 'string', enum: ['land', 'side', 'long', 'check'], description: "add only: what the new runners are for (default: side on a scheme's second PC)" },
-      host: { type: 'string', description: 'Which PC: its machine name or hostname. Left out: add takes the first free PC; list and remove reach every PC' },
-      os: { type: 'string', enum: ['windows', 'linux'], description: 'Which runners: windows (the default) or linux, which the Linux runner agent there (in WSL on a Windows PC, or on plain Linux) adds, lists and removes' },
+      op: { type: 'string', enum: ['add', 'list', 'remove'], description: 'list; add and remove are retired and only say so' },
+      host: { type: 'string', description: 'Which PC: its machine name or hostname. Left out: every PC' },
+      os: { type: 'string', enum: ['windows', 'linux'], description: 'Which runners: windows (the default) or linux, which the Linux runner agent there (in WSL on a Windows PC, or on plain Linux) lists' },
     },
     required: ['op'],
   },
@@ -324,12 +322,12 @@ export async function runShipTool(name: string, args: Record<string, unknown>): 
       return `${files.slice(0, 50).map(line).join('\n')}${files.length > 50 ? `\n… and ${files.length - 50} older` : ''}\n${(usage.scheme / 1024 ** 2).toFixed(1)} MiB in this scheme's store.`;
     }
     case 'ci_runners': {
+      if (args.op === 'add' || args.op === 'remove')
+        return `ci_runners ${String(args.op)} is retired (Build 11, the runner pool): no scheme needs runners added or taken off by hand. The pool starts a one-job runner for each CI job on a machine lending the scheme CI (its CI page shows the line), and a scheme still on standing runners gets them, and loses them, by itself. ci_runners list still shows what is on the PCs.`;
       const started = await call<CiJob>('POST', `/api/projects/${C().PROJECT}/ci-runners`, {
         op: args.op,
-        ...(args.count !== undefined ? { count: args.count } : {}),
         ...(args.os !== undefined ? { os: args.os } : {}),
         ...(args.host !== undefined ? { host: args.host } : {}),
-        ...(args.role !== undefined ? { role: args.role } : {}),
       });
       let job = started;
       for (const end = Date.now() + 10 * 60_000; job.ok === null && Date.now() < end; ) {

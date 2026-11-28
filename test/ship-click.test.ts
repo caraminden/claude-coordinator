@@ -297,13 +297,14 @@ test('a pipeline change ships from the click only for the lane holder; anyone el
   assert.equal((await holder.press(await holder.card())).status, 202);
   assert.equal(holder.state().state, 'outside');
   await until('it ships', () => holder.state().status === 'closed');
+  // The server frees a dismissed holder's lane by name, a moment after it shows as closed: a test that took the lane in
+  // between lost it again, and its Ship It shipped at once (#2315). So the next test starts once the server is done.
+  await until('the server frees its lane', () => !store.claims.get(projectId, 'pipeline-lane'));
 });
 
 test("an armed Ship It ships with no turn once the lane passes to it: the press's own answer doesn't rule it out (#2046)", async () => {
-  store.claims.setQueue(projectId, 'pipeline-lane', [], 'Cara');
-  store.claims.release(projectId, 'pipeline-lane');
   const someone = store.createTicket({ project_id: projectId, title: 'Holder', permission_mode: 'default', created_by: 'Cara' });
-  store.claims.take(projectId, 'pipeline-lane', someone.id, 'Cara');
+  assert.ok(!store.claims.take(projectId, 'pipeline-lane', someone.id, 'Cara').held, 'the lane was free');
   const m = await minion({ file: 'src/pipe/deep/x.ts' });
   assert.equal((await m.press(await m.card())).status, 202);
   assert.equal(m.state().note, ARMED_NOTE);

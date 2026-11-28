@@ -111,7 +111,7 @@ function askLine(b, a, s, reply) {
   return line(
     s,
     `ask-${a.id}`,
-    [h('span', { class: 'name' }, `${from} asked the Overseer`), ...(open ? [...(a.blocking ? [SEP, h('b', { class: 'cabal-blocking' }, 'blocking')] : []), h('span', {}, `${SEP}${waited(Date.now() - a.opened_at)}`)] : [SEP, h('span', { class: 'cabal-answered' }, 'answered')])],
+    [h('span', { class: 'name' }, `${from} asked the Overseer`), ...(open ? [...(a.blocking ? [h('span', {}, SEP, h('b', { class: 'cabal-blocking' }, 'blocking'))] : []), h('span', {}, `${SEP}${waited(Date.now() - a.opened_at)}`)] : [h('span', {}, SEP, h('span', { class: 'cabal-answered' }, 'answered'))])],
     a.text,
     [
       ...askPart(parts.intro, false),

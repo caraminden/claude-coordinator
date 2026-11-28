@@ -95,7 +95,7 @@ const ev = async (expr) => {
   return r.result.value;
 };
 await send('Page.navigate', { url: `${origin}/c/${route}` }, s);
-for (let i = 0; i < 40 && !(await ev("document.body.children.length > 2").catch(() => false)); i++) await sleep(500);
+for (let i = 0; i < 40 && !(await ev('document.body.children.length > 2').catch(() => false)); i++) await sleep(500);
 await sleep(3000);
 const measure = () =>
   ev(`(() => {

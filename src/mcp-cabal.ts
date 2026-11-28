@@ -98,6 +98,10 @@ export async function runCabalTool(name: string, args: Record<string, unknown>):
   }
   if (name === 'cabal_member') return (await call<{ text: string }>('POST', `/api/tickets/${C().TICKET}/cabal/member`, { action: args.action, minion: args.minion })).text;
   if (name !== 'cabal_board') return NOT_HERE;
+  // A call with a member's fields and no action used to read the board and drop the ask (#2300).
+  if (args.ask !== undefined && args.ask !== null && !Number.isInteger(args.ask)) throw new Error("`ask` is the integer ask id for action 'answer'. To open an ask, pass action 'ask' with text '<your question>'. Nothing was sent.");
+  if (args.action === undefined && [...ROW_KEYS, 'text', 'blocking', 'ask', 'width'].some((k) => args[k] !== undefined && args[k] !== null))
+    throw new Error("No action given, so nothing was sent. To ask the lead: action 'ask', text '<your question>' (blocking true if you cannot go on). To set your note: action 'note', note '<one line>'.");
   const action = String(args.action ?? 'read');
   const path = `/api/tickets/${C().TICKET}/cabal`;
   if (action === 'read' || action === 'timeline') {

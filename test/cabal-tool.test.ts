@@ -78,6 +78,19 @@ test('a member sets its note and files; a non-blocking ask is held mail to the l
   assert.doesNotMatch(read.text, /BLOCKING/);
 });
 
+test('a call with a ask or note but no action is refused, not read as a read', async () => {
+  for (const args of [{ ask: 'Which helper?', blocking: true }, { note: 'built' }, { text: 'a question' }, { files: ['a.ts'] }]) {
+    const r = await tool(M1.id, args);
+    assert.ok(r.error, JSON.stringify(args));
+    assert.match(r.text, /[Nn]othing was sent/);
+    assert.match(r.text, /action 'ask'/);
+  }
+  const bad = await tool(M1.id, { action: 'answer', ask: 'seven', text: 'x' });
+  assert.ok(bad.error);
+  assert.match(bad.text, /`ask` is the integer ask id/);
+  assert.ok(!(await tool(M1.id, {})).error, 'a bare read still reads');
+});
+
 test("the lead edits rows, logs and sets the red line; a member can't", async () => {
   assert.match((await tool(LEAD.id, { action: 'row', label: 'Fix', title: 'Fixer', role: 'fixer' })).text, /Row \d+ saved/);
   assert.match((await tool(LEAD.id, { action: 'log', text: 'Josh, 21:20: "Lend it for one merge"' })).text, /Saved/);

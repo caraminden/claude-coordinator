@@ -57,7 +57,6 @@ export function schemeLabels(schemeName: string): string[] {
   return label ? [label, `${label}-linux`, `${label.replace(/-ci$/, '')}-desktop`] : [];
 }
 
-/** The scheme a caller names: its id, its name (any case) or its label's slug. Throws a 409 when that names more than one. */
 /**
  * The per-scheme switch (Plot 11, P3): a scheme whose setting is on has its CI jobs started by the runner pool
  * (src/runner-pool.ts), one one-job runner each, and takes no standing runners; off, the default, it keeps them. A setting,
@@ -67,6 +66,7 @@ export function schemeLabels(schemeName: string): string[] {
 export const poolKey = (scheme: number) => `ci_pool:${scheme}`;
 export const poolOn = (store: { getSetting<T>(key: string): T | null }, scheme: number) => store.getSetting<boolean>(poolKey(scheme)) === true;
 
+/** The scheme a caller names: its id, its name (any case) or its label's slug. Throws a 409 when that names more than one. */
 export function findScheme(store: Store, ref: unknown): Project | undefined {
   if (typeof ref === 'number' || (typeof ref === 'string' && /^\d+$/.test(ref))) return store.getProject(Number(ref));
   if (typeof ref !== 'string' || !ref.trim()) return undefined;

@@ -91,6 +91,7 @@
 .cabal-state[data-s="running"] i { background: currentColor; animation: pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .cabal-state i { animation: none !important; } }
 /* Not started (Cara, 2026-11-27: "a little more visible"): a soft held-violet tint and a dashed edge, so it reads as planned, not as a row. */
+.cabal-members .thread-row.active { border-color: transparent transparent color-mix(in srgb, var(--gc) 30%, transparent); box-shadow: inset 3px 0 0 var(--accent); } /* the card's own edge is the border: a boxed row beside it read as two (#2277) */
 .cabal-planned { margin: var(--space-1) var(--space-2) var(--space-1) 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; border: 1px dashed color-mix(in srgb, var(--held) 45%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--held) 10%, var(--panel)); }
 .cabal-planned .muted { color: var(--held); font-weight: 600; }
 @keyframes cabal-open { from { opacity: 0; } }

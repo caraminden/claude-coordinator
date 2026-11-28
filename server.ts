@@ -2910,6 +2910,11 @@ busySource(() => [...inFlight].filter(([res]) => !res.headersSent).map(([, what]
 // A test server's "is everything you were doing finished?" (#1437, test/helpers.ts settled()): only with CITADEL_TEST_SETTLED=1.
 const SETTLED_ROUTE = config.testSettled;
 
+// Once a handover has let go of this server's work, requests still coming in on connections it already had (Caddy keeps
+// them alive) go on to the new server through the socket, which holds them until it listens: this one starts no turn,
+// timer or write the new one doesn't know about.
+// Declared before the server: the front thread hands it requests during the boot's awaits below (#2260).
+let passingOn = false;
 // Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets), the same check as the front thread's; anything else asking is served as usual.
 const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS_DOMAIN) }, (req, res) =>
   writes.request.run({ seq: 0 }, async () => {
@@ -3234,10 +3239,6 @@ process.on('SIGTERM', () => {
 });
 // The machines-only listener, once it is made below: a warm handover lets go of its port for the new server.
 let agentListener: Server | null = null;
-// Once a handover has let go of this server's work, requests still coming in on connections it already had (Caddy keeps
-// them alive) go on to the new server through the socket, which holds them until it listens: this one starts no turn,
-// timer or write the new one doesn't know about.
-let passingOn = false;
 function passOn(req: IncomingMessage, res: ServerResponse) {
   const up = httpRequest({ host: LOCAL_HOST, port: boundPort, method: req.method, path: req.url, headers: req.headers, agent: false }, (answer) => {
     res.writeHead(answer.statusCode ?? 502, answer.headers);

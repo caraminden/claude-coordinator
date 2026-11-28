@@ -240,6 +240,8 @@ export class SlotWatch {
     /** The last good update of the runner copy, and the last try. */
     this.copied = Number(saved.copied) || 0;
     this.tried = Number(saved.tried) || 0;
+    /** A pooled scheme lends this machine (Citadel says so on connect and every 30 s): until then the copy is neither fetched nor updated. */
+    this.pooled = false;
     // A start that was running when the agent died: whether its runner came up is unknown, so it is reported ended and
     // Citadel takes it off GitHub by name (a runner that took a job is gone after it anyway).
     let lost = false;
@@ -257,6 +259,11 @@ export class SlotWatch {
       if (code === 0) this.started(job, output);
       else this.save();
     };
+  }
+
+  /** Citadel's word on whether a scheme on the pool uses this machine. Slots already running are watched either way. */
+  pool(on) {
+    this.pooled = on === true;
   }
 
   save() {
@@ -355,9 +362,9 @@ export class SlotWatch {
     }
   }
 
-  /** A day since the last good update and 10 minutes since the last try. */
+  /** A pooled scheme uses this machine, a day since the last good update and 10 minutes since the last try. */
   copyDue() {
-    return this.now() - this.copied > COPY_EVERY_MS && this.now() - this.tried > COPY_RETRY_MS;
+    return this.pooled && this.now() - this.copied > COPY_EVERY_MS && this.now() - this.tried > COPY_RETRY_MS;
   }
 
   /** The runner copy at GitHub's newest release, under the job lock, ending a drain; tried again in 10 minutes if it fails (a drain for it, a day later). */
@@ -1214,6 +1221,8 @@ async function main() {
           ships(msg.ships);
         } else if (msg.plan) {
           plan(msg.plan);
+        } else if (typeof msg.pool === 'boolean') {
+          slots.pool(msg.pool);
         }
       }
       throw new Error('the connection closed');

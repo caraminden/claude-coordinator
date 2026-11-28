@@ -732,6 +732,7 @@ export class MachineRelay {
     this.runnerAgents.set(key, runner);
     const ships = this.shipsFor(host);
     if (ships.length) res.write(`data: ${JSON.stringify({ ships })}\n\n`);
+    res.write(`data: ${JSON.stringify({ pool: this.poolFor(machine.id) })}\n\n`);
     this.store.updateMachine(machine.id, { last_seen_at: runner.since });
     // Its CI role goes on the first time a runner agent connects, lent where the machine is; switched off after that, it stays off
     // (`runner_agent` marks that first time, and nothing else). As a role its owner switches on, it goes to every scheme they are
@@ -946,6 +947,16 @@ export class MachineRelay {
   sendShips(shipsFor: (host: string) => Ship[]) {
     this.shipsFor = shipsFor;
     for (const r of this.runnerAgents.values()) r.res.write(`data: ${JSON.stringify({ ships: shipsFor(r.host) })}\n\n`);
+  }
+
+  /**
+   * Whether a scheme on the runner pool uses this machine (Build 11 P2 fix): its runner agent fetches and updates the runner copy
+   * only then. Sent as it connects and at each `sendPool` look; a Citadel that never calls it says no.
+   */
+  private poolFor: (machineId: number) => boolean = () => false;
+  sendPool(poolFor: (machineId: number) => boolean) {
+    this.poolFor = poolFor;
+    for (const [key, r] of this.runnerAgents) r.res.write(`data: ${JSON.stringify({ pool: poolFor(Number(key.split(':')[0])) })}\n\n`);
   }
 
   /** A ship's tests run on the computer a machine's agent is on: the agent's host is that PC's name, with a part of its own after it for a WSL distro. */

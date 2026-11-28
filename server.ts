@@ -805,6 +805,13 @@ const sendRunnerPlans = () => {
   }
 };
 if (!BOOT_CHECK) every('runner plans', MachineBalancer.TICK_MS, sendRunnerPlans);
+// Whether a scheme on the pool uses each machine: its runner agent fetches and updates the runner copy only then.
+const sendPool = () =>
+  machines.sendPool((id) => {
+    const m = store.getMachine(id);
+    return !!m && store.listProjects().some((p) => poolOn(store, p.id) && lendsCi(store, m, p));
+  });
+if (!BOOT_CHECK) every('runner pool flag', 30_000, sendPool);
 machines.agentUrl = MACHINES_URL?.origin ?? null;
 // Where citadel-heavy sends a job whose files come back, or in a scheme with no CI (H2, src/heavy-builds.ts): a machine's Builds role, else perigee's line.
 const buildsRole = (id: number) => store.machineRoles(id).find((r) => r.role === 'builds');

@@ -462,6 +462,26 @@ test('the relay sends each runner agent its part, and a row whose runner agent i
   }
 });
 
+test('a runner agent hears whether a pooled scheme uses its machine, as it connects and at each look', () => {
+  const store = new Store(':memory:');
+  const relay = new MachineRelay(store, () => {});
+  const pc = store.createMachine('desk', 'x', 'Josh', store.createUser({ name: 'Josh', login: 'josh' }).id);
+  const sent: string[] = [];
+  const r = new EventEmitter() as EventEmitter & ServerResponse;
+  Object.assign(r, { writeHead() {}, write: (d: string) => (sent.push(d), true), end: () => r.emit('close') });
+  try {
+    relay.connectAgent(pc, r, { host: 'DESK', command: 'citadel runner agent', runners: true, os: 'windows' });
+    const pools = () => sent.filter((d) => d.includes('"pool"')).map((d) => JSON.parse(d.slice(6)).pool);
+    assert.deepEqual(pools(), [false], 'no pooled scheme until Citadel looks');
+    relay.sendPool((id) => id === pc.id);
+    assert.deepEqual(pools(), [false, true]);
+    relay.sendPool(() => false);
+    assert.deepEqual(pools(), [false, true, false]);
+  } finally {
+    r.end();
+  }
+});
+
 test("an agent's samples say which runners it can wake; anything but a short list of repo names is refused", () => {
   const body = (wakeable: unknown) => ({ os: 'linux', host: 'desk', cores: 8, cpu: 10, mem_total: 1, mem_free: 1, runners: [], wakeable });
   assert.deepEqual(cleanSample(body(['O/Citadel', 'o/citadel', 'o/twi']), 1).wakeable, ['o/citadel', 'o/citadel', 'o/twi']);

@@ -560,6 +560,7 @@ function slotWorld() {
     posted: [] as Record<string, unknown>[],
     down: false,
     failUpdate: false,
+    unpooled: false,
     /** While set, a start waits on it: the agent can be "killed" mid-start. */
     hold: null as Promise<void> | null,
   };
@@ -586,6 +587,8 @@ function slotWorld() {
         return true;
       },
     });
+    // Citadel's pool message: a machine that lends to a pooled scheme. `unpooled` leaves a fresh agent's default, which is idle.
+    if (!f.unpooled) watch.pool(true);
     return { jobs, watch };
   };
   return { f, ...make(), make };
@@ -614,6 +617,28 @@ test("a started slot is watched: its job, its end with the launcher's code, each
     assert.deepEqual(f.ran, ['start', 'state', 'state']);
     await watch.tick();
     assert.deepEqual(f.ran, ['start', 'state', 'state']);
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
+test('a machine no pooled scheme lends to does nothing: no state, no update, no job lock, until Citadel says a pooled scheme uses it', async () => {
+  const { f, make } = slotWorld();
+  try {
+    f.unpooled = true;
+    const { jobs, watch } = make();
+    // A fresh agent (copied 0) is due an update, but not before a pooled scheme uses the machine.
+    await watch.tick();
+    assert.deepEqual(f.ran, []);
+    assert.equal(jobs.busy, null);
+    watch.pool(true);
+    await watch.tick();
+    assert.deepEqual(f.ran, ['state', 'update']);
+    watch.pool(false);
+    watch.copied = 0;
+    f.ran.length = 0;
+    await watch.tick();
+    assert.deepEqual(f.ran, [], 'switched off again: no update');
   } finally {
     rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }

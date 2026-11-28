@@ -3465,7 +3465,9 @@ export class Runner {
         execFile(cmd, args, { timeout: this.containerStartMs }, (err, _out, stderr) => (err ? reject(new Error(err.killed ? `${cmd} did not return within ${this.containerStartMs / 1000} s` : String(stderr).trim() || err.message)) : resolve()));
       });
     // Stopped while it started (stop() wrote exit.json), and maybe finished since: nothing more to start or to say.
-    const over = async () => !(await exists(dir)) || exists(join(dir, 'exit.json'));
+    // exit.json first: the folder is renamed away once the turn ends, and one renamed between a look at the folder and
+    // a look at its exit.json read as a live turn, so a stopped turn reached podman exec (#2319).
+    const over = async () => (await exists(join(dir, 'exit.json'))) || !(await exists(dir));
     const exec = ['podman', 'exec', '-d', place.container, ...wrapper];
     const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${this.store.getTicket(ticketId)?.kind === 'coordinator' ? TASKMASTER_SLICE : TURN_SLICE}`, ...exec];
     place

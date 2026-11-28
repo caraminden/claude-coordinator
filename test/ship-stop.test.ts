@@ -114,9 +114,18 @@ test('a ship hung on the real line lets go of the lock and leaves the line when 
   const q = join(state, 'queue');
   let line: LandTicket[] = [];
   await until('the hung ship holds the line', () => (line = readQueue(q, 4)).some((t) => t.got > 0 && /waiting for CI/.test(t.phase)));
-  // The phase line is written before the sleep forks, so under load the line can be read first: wait for the fork.
+  // The phase line is written before the sleep forks, so under load the line can be read first: wait for the fork. The
+  // sleep, by name: the phase's own `mv` (queue_write's rename) is a child too until it exits, and taken for the sleep it
+  // let the stop come before the fork, so the sleep lived on holding the lock (#2298: "the lock is free", 1 !== 0).
+  const isSleep = (pid: number) => {
+    try {
+      return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0] === 'sleep';
+    } catch {
+      return false; // ended meanwhile
+    }
+  };
   let sleeper: number[] = [];
-  await until('its sleep runs under it', () => (sleeper = descendants(land.pid!)).length > 0);
+  await until('its sleep runs under it', () => (sleeper = descendants(land.pid!)).length > 0 && sleeper.every(isSleep));
   assert.equal(sleeper.length, 1, 'its sleep runs under it');
   const ended = new Promise((r) => land.on('exit', (code, sig) => r(code ?? sig)));
   stopInLine(q, 4, line[0].seq);

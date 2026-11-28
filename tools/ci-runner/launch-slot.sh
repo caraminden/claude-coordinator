@@ -19,8 +19,9 @@ fail() {
 }
 say "launcher once ${once:0:8}: $(id -un), pid $$"
 cd "$dir" || fail "no slot folder $dir"
-# A runner stopped before its job leaves its registration behind (P0, #2266): never start on top of it.
-rm -f .runner .credentials .credentials_rsaparams
+# A runner stopped before its job leaves its registration behind (P0, #2266): never start on top of it. The last run's
+# console goes too, so the agent never reads its job as this runner's.
+rm -f .runner .credentials .credentials_rsaparams runner-console.log
 mkdir -p home
 printf '%s\n' 'DOTNET_CLI_TELEMETRY_OPTOUT=1' 'DOTNET_NOLOGO=1' "HOME=$dir/home" > .env
 cfg=$(curl -fsS -X POST -H 'Content-Type: application/json' --data "{\"once\":\"$once\"}" "$url/api/machines/runner-jit" 2>&1) || fail "Citadel didn't hand over the runner's config: ${cfg:0:200}"

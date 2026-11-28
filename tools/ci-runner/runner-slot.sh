@@ -5,7 +5,7 @@
 #   runner-slot.sh update                                keep /opt/citadel-pool/runner/<version> at GitHub's newest release
 #   runner-slot.sh start <scheme id> <slot> <once> <url>  start slot <n>'s one-job runner
 #   runner-slot.sh stop <scheme id> <slot> <url>          stop it, and wipe what a runner stopped before its job leaves
-#   runner-slot.sh state                                  one JSON line per slot unit: repo, slot, running
+#   runner-slot.sh state                                  one JSON line per slot: repo, slot, running, job, exit
 #
 # A slot is /opt/citadel-pool/<repo>/slot-<n>, owned by the scheme's user (add-runner.sh's ci-<repo>-<hash>, so one scheme's
 # jobs can't touch another's). Its bin, externals and root files are hard links into the one copy of the runner program
@@ -29,11 +29,18 @@ slot_units() { systemctl list-units --all --plain --no-legend 'citadel-slot-*.se
 
 case $op in
 state)
-  slot_units | while read -r unit active; do
-    [[ $unit =~ ^citadel-slot-(.+)-([0-9]+)\.service$ ]] || continue
+  # Every slot folder, read as the scheme's user that owns it (its parent is root's, so a job can't swap the folder).
+  for dir in "$pool"/*/slot-*/; do
+    dir=${dir%/}
+    [[ -d $dir && ! -L $dir && $dir =~ /([^/]+)/slot-([0-9]+)$ ]] || continue
+    repo_name=${BASH_REMATCH[1]} n=${BASH_REMATCH[2]}
+    owner=$(stat -c %U "$dir")
+    [[ $owner == ci-* ]] || continue
     running=false
-    [[ $active == active || $active == activating ]] && running=true
-    printf '{"repo":"%s","slot":%s,"running":%s}\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "$running"
+    systemctl is-active --quiet "citadel-slot-$repo_name-$n.service" && running=true
+    job=$(runuser -u "$owner" -- grep -ao 'Running job: .*' "$dir/runner-console.log" 2> /dev/null | tail -n 1 | cut -c14-200 | tr -cd '[:print:]' | sed 's/["\\]/ /g' || true)
+    code=$(runuser -u "$owner" -- grep -aoE 'runner exited -?[0-9]+' "$dir/slot.log" 2> /dev/null | tail -n 1 | grep -oE -- '-?[0-9]+$' || true)
+    printf '{"repo":"%s","slot":%s,"running":%s%s%s}\n' "$repo_name" "$n" "$running" "${job:+,\"job\":\"$job\"}" "${code:+,\"exit\":$code}"
   done
   exit 0
   ;;

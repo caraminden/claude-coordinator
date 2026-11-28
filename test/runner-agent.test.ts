@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { linuxProcs, checkJob, keeperCommand, ownerCaps, SLICE, sliceCap, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, writeShips } from '../public/runner-agent.mjs';
+import { linuxProcs, checkJob, keeperCommand, ownerCaps, SLICE, sliceCap, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, SLOT_IDLE_MS, SlotWatch, slotStates, writeShips } from '../public/runner-agent.mjs';
 import { bootServer, stopProcs, tempRoot, until } from './helpers.ts';
 
 const ID = 'a'.repeat(24);
@@ -173,7 +173,24 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     const laptop = await srv.call('/api/machines', { name: 'a-laptop' });
     assert.equal((await post(laptop.data.token, { os: 'windows', host: 'x', cores: 1, cpu: 5, mem_total: 1, mem_free: 1, runners: [] })).status, 403);
 
-    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1', 'keep-wsl-up.ps1', 'keep-runners.ps1', 'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh']) {
+    for (const name of [
+      'install-runner-agent.ps1',
+      'add-runner.ps1',
+      'list-runners.ps1',
+      'remove-runner.ps1',
+      'start-runner.ps1',
+      'sample-load.ps1',
+      'keep-wsl-up.ps1',
+      'keep-runners.ps1',
+      'install-runner-agent.sh',
+      'add-runner.sh',
+      'list-runners.sh',
+      'remove-runner.sh',
+      'runner-slot.ps1',
+      'launch-slot.ps1',
+      'runner-slot.sh',
+      'launch-slot.sh',
+    ]) {
       assert.equal((await fetch(`${srv.base}/ci-runner/${name}`)).status, 200, name);
     }
     assert.match(await (await fetch(`${srv.base}/runner-agent.mjs`)).text(), /Citadel's CI runner agent/);
@@ -453,4 +470,116 @@ test("Linux: the owner's squeeze is used, and the all-CI cap goes on the runners
   writeFileSync(join(units, SLICE), '');
   await sliceCap({ cpu: 50 }, { run, units, cores: 8 });
   assert.deepEqual(ran, [`systemctl set-property --runtime ${SLICE} CPUQuota=400%`]);
+});
+
+// One-job runners (runner pool P2, #2269): Citadel's start op, and the agent's own watch on the slots it started.
+const ONCE = 'ab'.repeat(24);
+
+test('a start names a scheme, a slot of 1 to 16 and a one-time id, and runs only runner-slot', () => {
+  assert.deepEqual(checkJob({ id: ID, op: 'start', scheme: 3, slot: 16, once: ONCE }), { id: ID, op: 'start', scheme: 3, slot: 16, once: ONCE });
+  for (const bad of [{ slot: 0 }, { slot: 17 }, { slot: '1' }, { once: ONCE.toUpperCase() }, { once: `${ONCE}; calc` }, { once: undefined }, { extra: 1 }]) {
+    assert.throws(() => checkJob({ id: ID, op: 'start', scheme: 3, slot: 1, once: ONCE, ...bad }), Error, JSON.stringify(bad));
+  }
+  // The agent's own slot ops never come from Citadel.
+  for (const op of ['stop', 'state', 'update']) assert.throws(() => checkJob({ id: ID, op, scheme: 3, slot: 1 }), /refused/);
+  const win = jobCommand({ op: 'start', scheme: 3, slot: 2, once: ONCE }, 'C:\\agent', 'http://perigee:8574', 'C:\\Windows', 'windows');
+  assert.match(win.command, /powershell\.exe$/);
+  assert.deepEqual(win.args.slice(5), [join('C:\\agent', 'runner-slot.ps1'), '-Op', 'Start', '-Scheme', '3', '-Slot', '2', '-Once', ONCE, '-CitadelUrl', 'http://perigee:8574']);
+  assert.deepEqual(jobCommand({ op: 'start', scheme: 3, slot: 2, once: ONCE }, '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'start', '3', '2', ONCE, 'u']);
+  assert.deepEqual(jobCommand({ op: 'stop', scheme: 3, slot: 2 }, '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'stop', '3', '2', 'u']);
+  assert.deepEqual(jobCommand({ op: 'state' }, '/a', 'u', 'C:\\Windows', 'windows').args.slice(6), ['-Op', 'State']);
+});
+
+test("the state op's lines read, and what doesn't read is skipped", () => {
+  assert.deepEqual(slotStates('{"repo":"peek","slot":1,"running":true,"job":"test"}\r\nnoise\n{"repo":"peek","slot":"2","running":false}\n{"running":false,"repo":"delve","slot":3,"exit":0}'), [
+    { repo: 'peek', slot: 1, running: true, job: 'test' },
+    { repo: 'delve', slot: 3, running: false, exit: 0 },
+  ]);
+});
+
+/** A SlotWatch over faked scripts: `states` is what the state op prints next; every op run is kept. */
+function slotWorld() {
+  const dir = mkdtempSync(join(tmpdir(), 'slots-'));
+  const f = { dir, now: Date.UTC(2026, 10, 28), states: [] as object[], ran: [] as string[], posted: [] as Record<string, unknown>[], down: false };
+  const run = async ({ args }: { args: string[] }) => {
+    const op = args.includes('-Op') ? args[args.indexOf('-Op') + 1].toLowerCase() : args[1];
+    f.ran.push(op);
+    if (op === 'state') return { code: 0, output: f.states.map((x) => JSON.stringify(x)).join('\n') };
+    if (op === 'start') return { code: 0, output: `started peek slot 1\nslot: C:\\citadel-pool\\peek\\slot-${args[args.indexOf('-Slot') + 1]}` };
+    return { code: 0, output: 'ok' };
+  };
+  const jobs = new JobRunner({ dir, appUrl: 'http://citadel', token: 'ccm_1_x', run, os: 'windows' });
+  const make = () =>
+    new SlotWatch({
+      jobs,
+      now: () => f.now,
+      post: async (b: Record<string, unknown>) => {
+        if (f.down) return false;
+        f.posted.push(b);
+        return true;
+      },
+    });
+  return { f, jobs, watch: make(), make };
+}
+
+test("a started slot is watched: its job, its end with the launcher's code, and a copy update once no slot runs", async () => {
+  const { f, jobs, watch } = slotWorld();
+  try {
+    // At its first start the copy is due: the update runs under the job lock.
+    await watch.tick();
+    assert.deepEqual(f.ran, ['state', 'update']);
+    f.ran.length = 0;
+    assert.equal((await jobs.handle({ id: ID, op: 'start', scheme: 3, slot: 1, once: ONCE })).ok, true);
+    assert.deepEqual(f.posted, [{ scheme: 3, slot: 1, os: 'windows', event: 'started' }]);
+    f.now += 1000;
+    f.states = [{ repo: 'peek', slot: 1, running: true, job: 'test (linux)' }];
+    await watch.tick();
+    f.states = [{ repo: 'peek', slot: 1, running: false, job: 'test (linux)', exit: 0 }];
+    f.now += SLOT_IDLE_MS * 2;
+    await watch.tick();
+    assert.deepEqual(f.posted.slice(1), [
+      { scheme: 3, slot: 1, os: 'windows', event: 'took', job: 'test (linux)' },
+      { scheme: 3, slot: 1, os: 'windows', event: 'ended', code: 0 },
+    ]);
+    // Watching nothing, with the copy fresh: no script runs at all.
+    assert.deepEqual(f.ran, ['start', 'state', 'state']);
+    await watch.tick();
+    assert.deepEqual(f.ran, ['start', 'state', 'state']);
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
+test('a runner with no job after 2 minutes is stopped, and an agent started again carries on its watch and its unsent reports', async () => {
+  const { f, jobs, watch, make } = slotWorld();
+  try {
+    await watch.tick();
+    await jobs.handle({ id: ID, op: 'start', scheme: 3, slot: 2, once: ONCE });
+    await jobs.handle({ id: ID, op: 'start', scheme: 4, slot: 5, once: ONCE });
+    f.states = [
+      { repo: 'peek', slot: 2, running: true },
+      { repo: 'peek', slot: 5, running: true },
+    ];
+    f.now += SLOT_IDLE_MS - 1;
+    f.ran.length = 0;
+    await watch.tick();
+    assert.deepEqual(f.ran, ['state']);
+    // Citadel is away when the idle runners are stopped: the reports wait.
+    f.down = true;
+    f.now += 2;
+    f.states = [{ repo: 'peek', slot: 2, running: true }];
+    await watch.tick();
+    assert.deepEqual(f.ran, ['state', 'state', 'stop']);
+    assert.equal(f.posted.length, 2);
+    // A new agent (the old one killed) reads slots.json: slot 5 ended while it was gone, and the stop's report goes too.
+    f.down = false;
+    f.states = [];
+    await make().tick();
+    assert.deepEqual(
+      f.posted.slice(2).map((p) => `${p.slot} ${p.event}`),
+      ['2 stopped', '5 ended'],
+    );
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });

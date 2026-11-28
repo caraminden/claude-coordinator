@@ -149,7 +149,7 @@ export class RunnerSlots {
   }
 
   /**
-   * Take off GitHub every runner of this machine's slot minted before `before` that isn't running a job: a one-job runner
+   * Take off GitHub every runner of this machine's slot minted by `before` (an end's time) that isn't running a job: a one-job runner
    * that ended its job is gone already, one that never took a job stays listed (P0, #2266). One GitHub still calls busy
    * (it hasn't seen a killed runner go) is tried again, up to CLEAN_TRIES times.
    */
@@ -159,7 +159,7 @@ export class RunnerSlots {
     for (let tried = 1; tried <= CLEAN_TRIES; tried++) {
       let listed: Listed[];
       try {
-        listed = (await this.tokens.listed(project)).filter((x) => x.name.startsWith(prefix) && (this.minted.get(x.name) ?? 0) < before);
+        listed = (await this.tokens.listed(project)).filter((x) => x.name.startsWith(prefix) && (this.minted.get(x.name) ?? 0) <= before);
       } catch (err) {
         this.log(`couldn't list ${project.name}'s runners to clean slot ${slot}: ${thrown(err).message}`);
         return removed;

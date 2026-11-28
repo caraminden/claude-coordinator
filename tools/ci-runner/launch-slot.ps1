@@ -26,8 +26,9 @@ try {
   $version = (Get-Content -LiteralPath (Join-Path $pool 'runner\current') -Raw).Trim()
   $copy = Join-Path $pool "runner\$version"
 
-  # A runner stopped before its job leaves its registration behind (P0, #2266): never start on top of it.
-  foreach ($f in '.runner', '.credentials', '.credentials_rsaparams') {
+  # A runner stopped before its job leaves its registration behind (P0, #2266): never start on top of it. The last run's
+  # console goes too, so the agent never reads its job as this runner's.
+  foreach ($f in '.runner', '.credentials', '.credentials_rsaparams', 'runner-console.log') {
     $p = Join-Path $Slot $f
     if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
   }

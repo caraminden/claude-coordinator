@@ -30,6 +30,10 @@ const TAIL_LINES = 200;
 const SCRIPTS = { add: 'add-runner.ps1', list: 'list-runners.ps1', remove: 'remove-runner.ps1' };
 // The Linux agent (#510) runs as root inside a WSL distro on the same PC, with bash scripts of the same names.
 const LINUX_SCRIPTS = { add: 'add-runner.sh', list: 'list-runners.sh', remove: 'remove-runner.sh' };
+// One-job runners in slot folders (runner pool P2, #2269): Citadel sends start; stop, state and update are SlotWatch's own.
+const SLOT_SCRIPT = { windows: 'runner-slot.ps1', linux: 'runner-slot.sh' };
+const SLOT_OPS = new Set(['start', 'stop', 'state', 'update']);
+export const MAX_SLOTS = 16;
 
 /** The job Citadel sent, checked field by field: anything else is refused, so the scripts only ever get a number or two. */
 export function checkJob(job) {
@@ -47,7 +51,12 @@ export function checkJob(job) {
     if (!Number.isInteger(job.count) || job.count < 1 || job.count > MAX_RUNNERS) throw new Error(`count must be 1 to ${MAX_RUNNERS}`);
     return { id: job.id, op: 'add', scheme: scheme(job.scheme), count: job.count };
   }
-  throw new Error(`refused: this agent only adds, lists and removes runners (got op ${JSON.stringify(job?.op)} with ${keys || 'nothing'})`);
+  if (job.op === 'start' && keys === 'id,once,op,scheme,slot') {
+    if (!Number.isInteger(job.slot) || job.slot < 1 || job.slot > MAX_SLOTS) throw new Error(`slot must be 1 to ${MAX_SLOTS}`);
+    if (typeof job.once !== 'string' || !/^[0-9a-f]{48}$/.test(job.once)) throw new Error('once must be the one-time id Citadel minted');
+    return { id: job.id, op: 'start', scheme: scheme(job.scheme), slot: job.slot, once: job.once };
+  }
+  throw new Error(`refused: this agent only adds, lists and removes runners and starts one-job runners (got op ${JSON.stringify(job?.op)} with ${keys || 'nothing'})`);
 }
 
 /** Which runners this agent adds: Linux ones where it runs on Linux (in WSL), Windows services everywhere else. */
@@ -55,6 +64,7 @@ export const defaultOs = () => (process.platform === 'linux' ? 'linux' : 'window
 
 /** What runs for a checked job: the script from this agent's own folder, in Windows PowerShell, or in bash on Linux (#510); never a shell line. */
 export function jobCommand(job, dir, appUrl, systemRoot = process.env.SystemRoot ?? 'C:\\Windows', os = defaultOs()) {
+  if (SLOT_OPS.has(job.op)) return slotCommand(job, dir, appUrl, systemRoot, os);
   if (os === 'linux') {
     const args = [join(dir, LINUX_SCRIPTS[job.op])];
     if (job.op !== 'list') args.push(String(job.scheme), appUrl);
@@ -64,6 +74,23 @@ export function jobCommand(job, dir, appUrl, systemRoot = process.env.SystemRoot
   const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, SCRIPTS[job.op])];
   if (job.op !== 'list') args.push('-Scheme', String(job.scheme), '-CitadelUrl', appUrl);
   if (job.op === 'add') args.push('-Count', String(job.count));
+  return { command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args };
+}
+
+/** A slot op's command: runner-slot.ps1 -Op <Op> or runner-slot.sh <op>, with the scheme and slot for start and stop. */
+function slotCommand(job, dir, appUrl, systemRoot, os) {
+  const slotted = job.op === 'start' || job.op === 'stop';
+  if (os === 'linux') {
+    const args = [join(dir, SLOT_SCRIPT.linux), job.op];
+    if (slotted) args.push(String(job.scheme), String(job.slot));
+    if (job.op === 'start') args.push(job.once);
+    if (slotted) args.push(appUrl);
+    return { command: '/bin/bash', args };
+  }
+  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, SLOT_SCRIPT.windows), '-Op', job.op[0].toUpperCase() + job.op.slice(1)];
+  if (slotted) args.push('-Scheme', String(job.scheme), '-Slot', String(job.slot));
+  if (job.op === 'start') args.push('-Once', job.once);
+  if (slotted) args.push('-CitadelUrl', appUrl);
   return { command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args };
 }
 
@@ -122,6 +149,8 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
 export class JobRunner {
   constructor({ dir, appUrl, token, run = runCommand, log = () => {}, os = defaultOs() }) {
     Object.assign(this, { dir, appUrl, token, run, log, os, busy: null });
+    /** Told each job that ran, with its exit code and output: SlotWatch watches a slot it started. */
+    this.done = () => {};
   }
 
   /** The answer for Citadel: { id, ok, output }, output redacted. */
@@ -134,7 +163,7 @@ export class JobRunner {
       return { id: typeof raw?.id === 'string' ? raw.id : '', ok: false, output: `runner agent: ${err.message}` };
     }
     if (this.busy) return { id: job.id, ok: false, output: `runner agent: busy with ${this.busy}; try again when it ends` };
-    const what = `${job.op}${job.scheme ? ` for scheme ${job.scheme}` : ''}${job.count ? `, ${job.count} runner(s)` : ''}`;
+    const what = `${job.op}${job.scheme ? ` for scheme ${job.scheme}` : ''}${job.count ? `, ${job.count} runner(s)` : ''}${job.slot ? `, slot ${job.slot}` : ''}`;
     this.busy = what;
     this.log(`Job ${what}`);
     try {
@@ -142,9 +171,161 @@ export class JobRunner {
       const env = { ...process.env, CC_MACHINE_TOKEN: this.token };
       const { code, output } = await this.run(jobCommand(job, this.dir, this.appUrl, undefined, this.os), env);
       this.log(`Job ${what} ended: exit ${code}`);
+      this.done(job, code, output);
       return { id: job.id, ok: code === 0, output: redact(output) };
     } finally {
       this.busy = null;
+    }
+  }
+}
+
+// ---- One-job runner slots (runner pool P2, #2269; Cara, 2026-11-27, #2264's card: "One-job runners, on demand") ----
+// Citadel's start op runs a slot's one-job runner as the slot's low-rights account (runner-slot.ps1 / .sh). SlotWatch then
+// watches each slot it started, through the script's state op every 15 seconds, and tells Citadel when the runner took
+// a job, when it ended (Citadel then takes its leftovers off GitHub), and when it was stopped: a runner with no job
+// after 2 minutes. It keeps its slots in slots.json beside it, so an agent killed mid-job picks them up at its next start
+// and still reports their end. Between jobs it keeps the machine's one runner copy at GitHub's newest release (a day
+// apart, and only while no slot runs: the script refuses otherwise), holding the job lock so no start runs meanwhile.
+export const SLOT_TICK_MS = 15_000;
+export const SLOT_IDLE_MS = 2 * 60_000;
+export const COPY_EVERY_MS = 24 * 3_600_000;
+const COPY_RETRY_MS = 10 * 60_000;
+const SLOTS_FILE = 'slots.json';
+const OUTBOX_MAX = 200;
+
+/** The state op's lines: { repo, slot, running, job?, exit? } each; lines that don't read are skipped. */
+export function slotStates(output) {
+  const out = [];
+  for (const line of String(output).split(/\r?\n/)) {
+    let v;
+    try {
+      v = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof v?.repo !== 'string' || !Number.isInteger(v.slot) || typeof v.running !== 'boolean') continue;
+    const s = { repo: v.repo, slot: v.slot, running: v.running };
+    if (typeof v.job === 'string' && v.job) s.job = v.job.slice(0, 200);
+    if (Number.isInteger(v.exit)) s.exit = v.exit;
+    out.push(s);
+  }
+  return out;
+}
+
+export class SlotWatch {
+  /** `post(body)` sends one report to Citadel and resolves true once it took it (or refused it for good). */
+  constructor({ jobs, post, now = Date.now, log = () => {} }) {
+    Object.assign(this, { jobs, post, now, log, file: join(jobs.dir, SLOTS_FILE), ticking: false });
+    let saved = {};
+    try {
+      saved = JSON.parse(readFileSync(this.file, 'utf8'));
+    } catch {}
+    this.slots = saved.slots && typeof saved.slots === 'object' ? saved.slots : {};
+    this.outbox = Array.isArray(saved.outbox) ? saved.outbox : [];
+    this.copied = Number(saved.copied) || 0;
+    jobs.done = (job, code, output) => job.op === 'start' && code === 0 && this.started(job, output);
+  }
+
+  save() {
+    try {
+      writeFileSync(`${this.file}.part`, JSON.stringify({ slots: this.slots, outbox: this.outbox, copied: this.copied }));
+      renameSync(`${this.file}.part`, this.file);
+    } catch (err) {
+      this.log(`Couldn't save ${SLOTS_FILE}: ${err.message}`);
+    }
+  }
+
+  report(e, event, extra = {}) {
+    this.outbox.push({ scheme: e.scheme, slot: e.slot, os: this.jobs.os, event, ...extra });
+    if (this.outbox.length > OUTBOX_MAX) this.outbox.splice(0, this.outbox.length - OUTBOX_MAX);
+  }
+
+  /** A start went through: its script printed the slot's folder, whose parent is named for the repo. */
+  started(job, output) {
+    const repo = /^slot: .*[\\/]([^\\/]+)[\\/]slot-\d+\s*$/m.exec(output)?.[1];
+    if (!repo) return this.log(`Slot ${job.slot} of scheme ${job.scheme} started, but its script named no folder: not watched.`);
+    const e = { scheme: job.scheme, slot: job.slot, repo, at: this.now() };
+    this.slots[`${repo}/${job.slot}`] = e;
+    this.report(e, 'started');
+    this.save();
+    void this.flush();
+  }
+
+  run(op, extra = {}) {
+    return this.jobs.run(jobCommand({ op, ...extra }, this.jobs.dir, this.jobs.appUrl, undefined, this.jobs.os), { ...process.env, CC_MACHINE_TOKEN: this.jobs.token });
+  }
+
+  /** One look at every slot: took, ended, the 2-minute stop, then the copy's update when it's due and no slot runs. */
+  async tick() {
+    if (this.ticking) return;
+    // Nothing to watch and no update due: no script runs.
+    if (!Object.keys(this.slots).length && this.now() - this.copied <= COPY_EVERY_MS) return this.flush();
+    this.ticking = true;
+    try {
+      const asked = this.now();
+      const r = await this.run('state');
+      if (r.code !== 0) return this.log(`The slots' state didn't read (exit ${r.code}): ${redact(r.output).slice(-300)}`);
+      const states = slotStates(r.output);
+      for (const [key, e] of Object.entries(this.slots)) {
+        // Started while the state op ran: its line may be from before its start.
+        if (e.at >= asked) continue;
+        const s = states.find((x) => x.repo === e.repo && x.slot === e.slot);
+        if (s?.job && !e.took) {
+          e.took = s.job;
+          this.report(e, 'took', { job: s.job });
+        }
+        if (!s?.running) {
+          delete this.slots[key];
+          this.report(e, 'ended', s?.exit === undefined ? {} : { code: s.exit });
+          continue;
+        }
+        if (!e.took && this.now() - e.at > SLOT_IDLE_MS) {
+          const stop = await this.run('stop', { scheme: e.scheme, slot: e.slot });
+          if (stop.code !== 0) {
+            this.log(`Couldn't stop idle slot ${e.slot} of ${e.repo}: ${redact(stop.output).slice(-300)}`);
+            continue;
+          }
+          this.log(`Stopped slot ${e.slot} of ${e.repo}: no job in ${SLOT_IDLE_MS / 60_000} minutes.`);
+          delete this.slots[key];
+          this.report(e, 'stopped');
+        }
+      }
+      // shortcut: a slot running that slots.json lost (the agent died between its start and the save) isn't watched; its
+      // runner ends after a job or idles on GitHub until removed. Upgrade if it shows up: a stop by repo in the script.
+      this.save();
+      await this.flush();
+      if (!Object.keys(this.slots).length && !states.some((s) => s.running) && this.now() - this.copied > COPY_EVERY_MS) await this.update();
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  /** The runner copy at GitHub's newest release, under the job lock; tried again in 10 minutes if it fails. */
+  async update() {
+    if (this.jobs.busy) return;
+    this.jobs.busy = 'updating the runner copy';
+    try {
+      const r = await this.run('update');
+      this.log(`Runner copy: ${redact(r.output).split('\n').slice(-2).join(' ')} (exit ${r.code})`);
+      this.copied = r.code === 0 ? this.now() : this.now() - COPY_EVERY_MS + COPY_RETRY_MS;
+      this.save();
+    } finally {
+      this.jobs.busy = null;
+    }
+  }
+
+  /** Reports go in order; one Citadel didn't take waits for the next tick. */
+  async flush() {
+    if (this.flushing) return;
+    this.flushing = true;
+    try {
+      while (this.outbox.length) {
+        if (!(await this.post(this.outbox[0]))) return;
+        this.outbox.shift();
+        this.save();
+      }
+    } finally {
+      this.flushing = false;
     }
   }
 }
@@ -818,6 +999,23 @@ async function main() {
 
   // Load samples (#534) go out on their own clock, whatever the stream to Citadel is doing; a failure is said once
   // until one gets through, and never touches a job.
+  // One-job runner slots (P2): reports go to Citadel in order; one it refused for good (a scheme gone) is dropped.
+  const slots = new SlotWatch({
+    jobs,
+    log,
+    post: async (body) => {
+      try {
+        const res = await fetch(new URL('/api/machines/runner-slot', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (res.ok) return true;
+        log(`Citadel didn't take slot ${body.slot}'s ${body.event} report: ${res.status}`);
+        return res.status === 400 || res.status === 404;
+      } catch (err) {
+        log(`Couldn't send slot ${body.slot}'s ${body.event} report: ${err.message}`);
+        return false;
+      }
+    },
+  });
+  setInterval(() => slots.tick().catch((err) => log(`Slot watch failed: ${err.message}`)), SLOT_TICK_MS);
   const sampler = new Sampler({ os, dir: jobs.dir });
   // Runners awake (M6b): while Citadel's plan is held the squeeze is off, and the plan's runners stay up.
   const wake = new RunnerWake({ os, dir: jobs.dir, log, windowsProcs: () => sampler.lastProcs });

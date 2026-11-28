@@ -88,6 +88,10 @@ $files = [ordered]@{
   'sample-load.ps1'   = "$url/ci-runner/sample-load.ps1"
   # Cap and yield (#552): the agent keeps it running, holding every runner at below-normal priority under a CPU cap.
   'keep-runners.ps1'  = "$url/ci-runner/keep-runners.ps1"
+  # One-job runners (runner pool P2, #2269): the agent's start op runs runner-slot.ps1, which copies launch-slot.ps1
+  # into the pool for the slot's NETWORK SERVICE task.
+  'runner-slot.ps1'   = "$url/ci-runner/runner-slot.ps1"
+  'launch-slot.ps1'   = "$url/ci-runner/launch-slot.ps1"
   # Not the agent's: add-runner.ps1 -Session, run by hand from this folder, copies it into a session runner (#370).
   'start-runner.ps1'  = "$url/ci-runner/start-runner.ps1"
 }

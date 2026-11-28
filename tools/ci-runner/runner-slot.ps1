@@ -14,7 +14,8 @@
              from Citadel with the one-time id and starts the runner: so the task's stored arguments hold only the id.
     Stop     stops that slot's task and ends every NETWORK SERVICE process of it (the launcher's tree, anything running
              from the slot folder), then deletes the registration files a runner stopped before its job leaves behind.
-    State    prints one JSON line per slot task: repo, slot, whether it is running.
+    State    prints one JSON line per slot task: repo, slot, whether it is running, the job its runner took (job) and
+             the launcher's exit code once it ended (exit).
 
   SYSTEM never writes inside a slot folder, which a job can write: the launcher, running as NETWORK SERVICE, links the
   slot to the runner copy and wipes the last runner's files itself. Stop's deletes remove links, never what they name.
@@ -60,10 +61,26 @@ function Get-SlotTask {
   @(Get-ScheduledTask -TaskPath $TaskPath -ErrorAction SilentlyContinue)
 }
 
+# The last line of one of a slot's logs that matches, or $null. SYSTEM may read a slot's files: NETWORK SERVICE can't make
+# a symbolic link (that needs an administrator) or a hard link to a file it can't write.
+function Find-SlotLine([string]$Dir, [string]$File, [string]$Pattern) {
+  $p = Join-Path $Dir $File
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $null }
+  $hit = Select-String -LiteralPath $p -Pattern $Pattern | Select-Object -Last 1
+  if ($hit) { $hit.Matches[0].Groups[1].Value } else { $null }
+}
+
 if ($Op -eq 'State') {
   foreach ($t in Get-SlotTask) {
     if ($t.TaskName -notmatch '^(.+) slot (\d+)$') { continue }
-    @{ repo = $Matches[1]; slot = [int]$Matches[2]; running = ($t.State -eq 'Running') } | ConvertTo-Json -Compress
+    $s = [ordered]@{ repo = $Matches[1]; slot = [int]$Matches[2]; running = ($t.State -eq 'Running') }
+    $dir = Join-Path $Pool "$($s.repo)\slot-$($s.slot)"
+    # The job this run's runner took, and the launcher's exit: both logs start afresh at each start.
+    $job = Find-SlotLine $dir 'runner-console.log' 'Running job: (.+)$'
+    if ($job) { $s.job = $job.Trim() }
+    $code = Find-SlotLine $dir 'slot.log' 'runner exited (-?\d+)'
+    if ($null -ne $code) { $s.exit = [int]$code }
+    $s | ConvertTo-Json -Compress
   }
   exit 0
 }
@@ -203,6 +220,7 @@ for ($i = 0; $i -lt 40; $i++) {
   if ($err) { Stop-With "$name's launcher failed: $($err -replace '^\S+ ', '')" }
   if ($tail -match 'starting the runner') {
     Write-Host "started $name (runner v$version)"
+    Write-Host "slot: $dir"
     exit 0
   }
 }

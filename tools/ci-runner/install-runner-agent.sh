@@ -14,7 +14,7 @@
 #      and turns systemd-timesyncd off where WSL itself keeps the clock, because two keepers skew it (#542);
 #   2. installs what the agent and the runners need from the distro's archive (Node, git, curl, the runner's libicu);
 #      on a Linux without apt it names what to install and stops;
-#   3. downloads runner-agent.mjs, add-runner.sh, list-runners.sh and remove-runner.sh from Citadel into
+#   3. downloads runner-agent.mjs, add-runner.sh, list-runners.sh, remove-runner.sh, runner-slot.sh and launch-slot.sh from Citadel into
 #      /opt/citadel-runner-agent, root's alone (the agent never downloads code itself), and prints their SHA-256;
 #   4. keeps the machine token in a file there;
 #   5. installs the systemd service citadel-runner-agent (restarted if it ever stops) and waits until it connects.
@@ -113,7 +113,7 @@ fi
 # 3. The agent and its scripts, as Citadel serves them now, in a folder only root can read or change.
 systemctl stop citadel-runner-agent 2>/dev/null || true
 install -d -m 700 -o root -g root "$dir"
-for f in runner-agent.mjs ci-runner/add-runner.sh ci-runner/list-runners.sh ci-runner/remove-runner.sh; do
+for f in runner-agent.mjs ci-runner/add-runner.sh ci-runner/list-runners.sh ci-runner/remove-runner.sh ci-runner/runner-slot.sh ci-runner/launch-slot.sh; do
   to=$dir/${f#ci-runner/}
   curl -fsSL -o "$to" "$url/$f" || die "Couldn't download $url/$f"
   chmod 600 "$to"

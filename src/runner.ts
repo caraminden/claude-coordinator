@@ -2814,14 +2814,15 @@ export class Runner {
     }
     if (!need && !at) return null;
     const project = this.store.getProject(ticket.project_id);
-    const home = need === 0 || (need && need !== at) || !project || this.turnAtHome(ticket, project, person);
-    const on = home ? null : this.pools?.launch(at, ticket, person, this.runsOn.get(ticket.id)?.name);
+    const away = need === 0 || (need && need !== at) || !project;
+    const here = away ? null : this.turnAtHome(ticket, project, person);
+    const on = away || here ? null : this.pools?.launch(at, ticket, person, this.runsOn.get(ticket.id)?.name);
     if (on && 'id' in on) return on;
     if (need) {
       this.turnLine.join(ticket.id, via);
       return 'wait';
     }
-    if (at && on) this.emit(ticket.id, 'note', { text: `This turn runs at perigee: ${this.pools?.nameOf(at) ?? 'its computer'} could not take it as it started (${on.why}).` });
+    if (at && (on ?? here)) this.emit(ticket.id, 'note', { text: `This turn runs at perigee: ${this.pools?.nameOf(at) ?? 'its computer'} could not take it as it started (${(on ?? here)?.why}).` });
     this.turnLine.comeHome(ticket.id);
     return null;
   }

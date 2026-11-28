@@ -202,12 +202,13 @@ function line(saved: Record<string, unknown> = {}, pools?: MachineHost, asks: (i
   const busy = new Set<number>();
   const started: number[] = [];
   const stopped: number[] = [];
+  const forcing = new Set<number>();
   const turns: TurnLine = new TurnLine({
     store: { getSetting: <T>(k: string) => saved[k] as T, setSetting: (k: string, v: unknown) => void (saved[k] = v), deleteSetting: (k: string) => void delete saved[k], addHealthEvent: () => {} },
     exempt: () => false,
     busy: (id) => busy.has(id),
     asks,
-    forced: () => null,
+    forced: (id) => (forcing.has(id) ? { user: 1, by: 'Cara' } : null),
     start: (e) => {
       started.push(e.ticket);
       turns.enter(e.ticket, e.via);
@@ -219,7 +220,7 @@ function line(saved: Record<string, unknown> = {}, pools?: MachineHost, asks: (i
     detached: false,
     pools,
   });
-  return { turns, busy, started, stopped, saved };
+  return { turns, busy, started, stopped, saved, forcing };
 }
 
 test('a paused turn resumed before it ended joins the line and leaks no worker', async () => {
@@ -587,6 +588,39 @@ test('a quick lane turn that took a worker back for its answered card counts as 
   p.turns.setLent(4, true);
   p.turns.setLent(4, false);
   assert.deepEqual(p.turns.summary().over, { by: 1, lane: 0, forced: 0, card: 1, restart: 0, home: 0 });
+  p.turns.stop();
+});
+
+test('a card answered long ago is not blamed for a later shrink: back within its size, no turn is past it', async () => {
+  const p = places({ 'turn-pool': { size: 6, at: 0 } });
+  p.turns.setSize(null, 'Cara');
+  for (const id of [1, 2, 3, 4, 5, 6]) p.turns.enter(id);
+  void p.turns.hold(1, () => new Promise(() => {}));
+  p.turns.setLent(1, true);
+  p.turns.enter(7);
+  p.turns.setLent(1, false);
+  assert.deepEqual(p.turns.summary().over, { by: 1, lane: 0, forced: 0, card: 1, restart: 0, home: 0 });
+  await p.turns.hold(7, () => {});
+  const now = Date.now();
+  for (const s of [1, 2, 3, 4, 5]) p.turns.tick(starved, [], now + s * 31_000, ok);
+  assert.deepEqual(p.turns.summary().over, { by: 2, lane: 0, forced: 0, card: 0, restart: 0, home: 0 }, 'all of it from the shrink');
+  p.turns.stop();
+});
+
+test('a turn started now inside the size is not blamed for a later shrink; one started past it is', () => {
+  const p = places({ 'turn-pool': { size: 6, at: 0 } });
+  p.turns.setSize(null, 'Cara');
+  p.forcing.add(8);
+  for (const id of [8, 1, 2, 3, 4, 5]) p.turns.enter(id);
+  const now = Date.now();
+  for (const s of [1, 2, 3, 4, 5]) p.turns.tick(starved, [], now + s * 31_000, ok);
+  assert.deepEqual([p.turns.used(), p.turns.size()], [6, L.min]);
+  assert.deepEqual(p.turns.summary().over, { by: 2, lane: 0, forced: 0, card: 0, restart: 0, home: 0 }, 'the shrink, not the one started now');
+  p.forcing.add(10);
+  p.never.add(10);
+  p.turns.enter(10);
+  assert.deepEqual([p.turns.used(), p.at(10)], [7, 0], 'started now runs at perigee, past its size');
+  assert.deepEqual(p.turns.summary().over, { by: 3, lane: 0, forced: 1, card: 0, restart: 0, home: 0 });
   p.turns.stop();
 });
 

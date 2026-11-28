@@ -199,9 +199,9 @@ export function workersPanel(page) {
   };
   /**
    * Why perigee runs past its size (#2316; Cara, 2026-11-28: "perigee at 12/9?"): what took a worker past it, and Auto's shrink under the rest.
-   * @param {WorkersTile['over']} o @param {WorkersTile['pool']} pool
+   * @param {WorkersTile['over']} o @param {WorkersTile['pool']} pool @param {number} size
    */
-  const overLine = (o, pool) => {
+  const overLine = (o, pool, size) => {
     if (!o) return '';
     const why = [
       o.card && `${plural(o.card, 'turn')} took a worker back as its card was answered`,
@@ -210,8 +210,9 @@ export function workersPanel(page) {
       o.lane && `${plural(o.lane, 'turn')} from the quick lane now counted in the pool`,
       o.forced && `${plural(o.forced, 'turn')} started now by a person`,
     ].filter(Boolean);
-    if (o.by > o.card + o.home + o.restart + o.lane + o.forced) why.push(`${pool.fixed ? `${pool.fixed.by} set the size` : 'Auto shrank the size'} under ${why.length ? 'the rest' : 'running turns'}, and stops none of them`);
-    return `${o.by} over its size: ${why.join('; ')}`;
+    const rest = o.by - o.card - o.home - o.restart - o.lane - o.forced;
+    if (rest > 0) why.push(`${rest} ${rest === 1 ? 'was' : 'were'} running when ${pool.fixed ? `${pool.fixed.by} set` : 'Auto lowered'} it`);
+    return `${o.by} over its size of ${size}: ${why.join('; ')}. None is stopped: they finish, and new turns wait.`;
   };
   /** @param {WorkerMachine} m */
   const autoLine = (m) => autoNow(m, m.min, m.max, m.reading, m.pressed, m.name);
@@ -248,7 +249,12 @@ export function workersPanel(page) {
       ? h(
           'div',
           { class: 'hue-rows st-places' },
-          placeRow(home, null, [[auto], ...(w.over ? [[overLine(w.over, pool)]] : []), ['Takes turns first. While it is full, or someone with no computer connected waits for it, those with their own use that']], [h('label', { class: 'small' }, 'Turns at once', sizePick(home)), limits]),
+          placeRow(
+            home,
+            w.over && toneChip('warn', `${w.over.by} over`),
+            [...(w.over ? [[overLine(w.over, pool, w.size)]] : []), [auto], ['Takes turns first. While it is full, or someone with no computer connected waits for it, those with their own use that']],
+            [h('label', { class: 'small' }, 'Turns at once', sizePick(home)), limits],
+          ),
           ...w.machines.map(machineRow),
         )
       : null;
@@ -257,7 +263,7 @@ export function workersPanel(page) {
       h('b', { class: 'st-value' }, value),
       w.paused ? h('div', {}, toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`)) : '',
       h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : places ? 'Taskmasters always run' : h('span', { title: Array.isArray(auto) ? auto[1] : '' }, `${size} · Taskmasters always run`)),
-      !places && w.over ? h('div', { class: 'st-sub muted' }, overLine(w.over, pool)) : '',
+      !places && w.over ? h('div', { class: 'st-sub' }, toneChip('warn', `${w.over.by} over`), ' ', overLine(w.over, pool, w.size)) : '',
       h('div', { class: 'st-sub muted' }, quickLane(w.lane)),
       h('div', { class: 'st-sub muted' }, waitsLine(w.waits), tooCold(w.waits) ? ' ' : '', tooCold(w.waits) ? toneChip('warn', 'over 10% cold') : ''),
       places ?? '',

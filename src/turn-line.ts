@@ -57,7 +57,7 @@ export const POOL = {
 };
 
 /** Why a turn took a perigee worker past the size (#2316). */
-type Over = 'card' | 'restart' | 'home';
+type Over = 'card' | 'restart' | 'home' | 'forced' | 'lane';
 
 const LINE = 'turn-line';
 const SIZE = 'turn-pool';
@@ -291,6 +291,7 @@ export class TurnLine {
     if (lent) {
       held.lent = true;
       if (held.lane) held.lane.moved = true;
+      this.settle();
     } else {
       if (this.used() >= this.size()) held.over = 'card';
       delete held.lent;
@@ -506,14 +507,19 @@ export class TurnLine {
     const by = this.used() - this.size();
     if (by <= 0) return null;
     // One reason a turn, and no more of them than the excess: marks outlive the moment they were past it.
-    const why = [...this.granted.values()].filter((g) => !g.place && !g.lent && !inLane(g)).map((g) => (g.forced !== undefined ? 'forced' : (g.over ?? (g.lane?.moved ? 'lane' : null))));
+    const why = [...this.granted.values()].filter((g) => !g.place && !g.lent && !inLane(g)).map((g) => g.over);
     let left = by;
-    const n = (k: Over | 'lane' | 'forced') => {
+    const n = (k: Over) => {
       const took = Math.min(left, why.filter((w) => w === k).length);
       left -= took;
       return took;
     };
     return { by, forced: n('forced'), card: n('card'), home: n('home'), restart: n('restart'), lane: n('lane') };
+  }
+
+  /** Back within its size, no turn is past it: a later shrink is Auto's, not an old card's or a Start now inside the size. */
+  private settle() {
+    if (this.used() <= this.size()) for (const g of this.granted.values()) delete g.over;
   }
 
   /** The quick lane for the tile: `moved` counts the turns that started there and take a pool worker now. */
@@ -563,6 +569,7 @@ export class TurnLine {
 
   /** A person's number, or null for Auto. */
   setSize(size: number | null, by: string, place = 0) {
+    if (!place) this.settle();
     const { fixed: _, ...p } = this.pool(place);
     this.host.store.setSetting(keyOf(SIZE, place), size === null ? p : { ...p, fixed: { size, by } });
     this.pump();
@@ -574,7 +581,12 @@ export class TurnLine {
     if (this.paused()?.stop) this.stopRunning();
     this.level = box.level;
     const own = [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length;
-    for (const g of this.granted.values()) if (inLane(g) && now - g.lane!.since >= POOL.laneMs && this.used() - own < this.size() + POOL.laneOver) g.lane!.moved = true;
+    for (const g of this.granted.values())
+      if (inLane(g) && now - g.lane!.since >= POOL.laneMs && this.used() - own < this.size() + POOL.laneOver) {
+        if (this.used() >= this.size()) g.over = 'lane';
+        g.lane!.moved = true;
+      }
+    this.settle();
     const p = this.pool();
     this.starved = starvedBy(reading, box, this.limits());
     this.seen = { cpu: reading.cpu, mem: reading.mem, at: now, pressed: this.starved ? starveWhy(reading, box, this.limits()) : null };
@@ -876,7 +888,8 @@ export class TurnLine {
       held.steps++;
       delete held.lent;
     } else {
-      this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced: place ? undefined : (this.forcedFor(ticketId) ?? undefined), ...(lane && !place ? { lane: { since: Date.now() } } : {}) });
+      const forced = place ? undefined : (this.forcedFor(ticketId) ?? undefined);
+      this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced, ...(lane && !place ? { lane: { since: Date.now() } } : {}), ...(forced !== undefined && !lane && this.used() >= this.size() ? { over: 'forced' as const } : {}) });
       if (place > 0) this.warm.set(ticketId, place);
       else this.warm.delete(ticketId);
     }
@@ -888,6 +901,7 @@ export class TurnLine {
     const held = this.granted.get(ticketId);
     if (!held || --held.steps > 0) return;
     this.granted.delete(ticketId);
+    this.settle();
     // Once its lane is idle too, so what it has queued stands in the line with the rest.
     this.pumpIn(0);
   }

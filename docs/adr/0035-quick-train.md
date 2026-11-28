@@ -22,6 +22,14 @@ Status: accepted, 2026-11-24; the gap train built and off, 2026-11-27 (#2243). M
   ships switched off, and with it off the line ships exactly as before (`test/land-quick-train.test.ts`). A person turns
   it on after that recount, on perigee: `touch "$(git -C ~/claude-coordinator rev-parse --absolute-git-dir)/cc-deploy/quick-train-on"`;
   removing that file turns it off again, and `LAND_QUICK=0` turns it off for one ship. The plan pairs each quick train
-  with a full run on main behind it (piece 4, not built): turned on before that, the only full suite over a quick top is
-  the next full train's, so at most one quick train ships between full ones. Whether to turn it on before piece 4 is
-  part of that go.
+  with a full run on main behind it (piece 4, below); before it, the only full suite over a quick top was the next full
+  train's, so at most one quick train ships between full ones.
+- **The run behind, piece 4 (#2244, `tools/land/behind.sh`, `src/fast-mode.ts`'s quick scheme):** each quick train
+  shipped writes a line in `<state>/quick-behind` (its base, top, and each ship's top with its #N). The next full train's
+  CI run counts: green over the top clears the line; red on a file that also fails alone on main's tip (`train_main_red`,
+  which still ships through it, #2212) marks it. Else, with no ship waiting in line (30 minutes at most), the server runs
+  `tools/land.sh --verify` on the top: the full suite on CI, out of line. A red's real files (not passed alone, not a
+  known flake) run alone, twice, on the base and each ship's top, oldest first: the first ship one fails on is its
+  culprit, whose minion is told with the failing files, tagged urgent so its fix goes first, and the Taskmaster hears
+  after 30 minutes. Red on the base is main's own: the Taskmaster's. Passing alone everywhere blames nobody. Reuses fast
+  mode's pin, ledger and escalation (ADR 0011), not a second hold. Off, no line is written and nothing runs.

@@ -38,6 +38,7 @@ test('gap train: the qualifying ships waiting behind a full train ship right aft
     ["quick train · ticket/5-x · planned onto ticket/2-x's train sha · riders: ticket/6-x", 'quick train · ticket/5-x · green · riders: sha', 'quick train shipped · ticket/5-x · 2 ships, no CI run · sha'],
   );
   assert.ok(!existsSync(join(l.state, 'quick-untested')), "the full train after it cleared the quick top's mark");
+  assert.ok(!existsSync(join(l.state, 'quick-behind')), "the full train's green run over the quick top counted for its run behind (#2244)");
   assert.ok(!existsSync(join(l.state, 'quick-train')) && !existsSync(join(l.state, 'quick-stacked')));
   l.done();
 });
@@ -63,7 +64,8 @@ test('gap train: off by default, the same line ships as it did before it existed
     retro(l.r.dir, 'quick train').filter((x) => !/^quick train · ticket\/\d-x · (would qualify|not: .*)$/.test(x)),
     [],
   );
-  for (const f of ['quick', 'quick-train', 'quick-stacked', 'quick-untested', 'quick-verdict']) assert.ok(!existsSync(join(l.state, f)), f);
+  // Nor any full run owed behind a quick train (#2244): src/fast-mode.ts has nothing to run.
+  for (const f of ['quick', 'quick-train', 'quick-stacked', 'quick-untested', 'quick-verdict', 'quick-behind']) assert.ok(!existsSync(join(l.state, f)), f);
   l.done();
 });
 

@@ -31,8 +31,7 @@
 # CI over since (a full ship clears it). With it, no quick train forms on main.
 # Empty line (quick_alone): a qualifying front with no waiter that doesn't qualify and no early run of its own takes the
 # qualifying waiters as a quick train at once, checked here.
-# Behind it (piece 4, #2244, tools/land/behind.sh): each quick train shipped owes the full suite one verdict on its top, kept
-# in <state>/quick-behind for the server to run, or the next full train's own run counts.
+# Behind it (#2244, tools/land/behind.sh): the full suite's verdict each quick top owes, in <state>/quick-behind.
 
 QUICK_SIDE_LABEL=citadel-ci-linux-side
 

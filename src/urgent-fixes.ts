@@ -15,14 +15,15 @@ export interface RedFix {
   what: string;
 }
 
-/** Each scheme's red workflows with the open minion CI health names as the fix, and a fast-mode red's: the minion whose change it was pinned on. */
-export function redFixes(store: Pick<Store, 'listProjects' | 'getSetting' | 'getTicketByNumber'>, fixTicket: (p: Project, mark: RedMark) => Ticket | null, fast: (projectId: number) => { ids: string[]; sha: string; n: number | null; at: number }[]): RedFix[] {
+/** Each scheme's red workflows with the open minion CI health names as the fix, and a fast-mode red's: the minion whose change it was pinned on.
+ * `quick`: a scheme whose reds behind a quick train are pinned the same way (#2244), whatever its land mode. */
+export function redFixes(store: Pick<Store, 'listProjects' | 'getSetting' | 'getTicketByNumber'>, fixTicket: (p: Project, mark: RedMark) => Ticket | null, fast: (projectId: number) => { ids: string[]; sha: string; n: number | null; at: number }[], quick: (projectId: number) => boolean = () => false): RedFix[] {
   const open = (t: Ticket | null | undefined, rest: Omit<RedFix, 'ticket'>) => (t && t.status !== 'closed' ? [{ ...rest, ticket: t.id }] : []);
   return store
     .listProjects()
     .flatMap((p) => [
       ...Object.entries(store.getSetting<Record<string, RedMark>>(`ci-health:red:${p.id}`) ?? {}).flatMap(([workflow, mark]) => open(fixTicket(p, mark), { key: `${p.id}:${workflow}`, run: String(mark.runs?.at(-1) ?? mark.run), what: `${mark.file ?? 'a workflow'} is red` })),
-      ...(p.land_mode === 'fast' ? fast(p.id) : []).flatMap((r) => open(r.n === null ? null : store.getTicketByNumber(p.id, r.n), { key: `${p.id}:${r.sha}`, run: String(r.at), what: `${r.ids[0] ?? 'the suite'} is red` })),
+      ...(p.land_mode === 'fast' || quick(p.id) ? fast(p.id) : []).flatMap((r) => open(r.n === null ? null : store.getTicketByNumber(p.id, r.n), { key: `${p.id}:${r.sha}`, run: String(r.at), what: `${r.ids[0] ?? 'the suite'} is red` })),
     ]);
 }
 

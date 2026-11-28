@@ -6,8 +6,14 @@
 // failure ("Reopen that minion"); after 30 minutes unfixed, the scheme's Taskmaster gets it. Each failing id is kept
 // in the scheme's known-red ledger until it passes on main: later lands and runs that fail only on those ids blame
 // nobody, and land.sh lets them through (LAND_KNOWN_RED).
+// The quick scheme (#2244, quick train piece 4; tools/land/behind.sh): Citadel's own lands are never fast, but a quick train
+// ships on its quick check alone and owes the full suite one verdict on its top. land.sh lists those in its state folder's
+// quick-behind file; the run behind starts once the line is empty (else the next full train's own run counts, and land.sh
+// marks its red there), and a red is pinned on [the quick train's base, each of its ships' tops]: a red on the base was
+// main's before it (the Taskmaster's), and a file that passes alone everywhere blames nobody. The file holds nothing while
+// the gap train is off, so nothing runs and nothing is written.
 import { execFile } from 'node:child_process';
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { moveAside, type HostJobs } from './host-job.ts';
@@ -41,6 +47,14 @@ interface Pinning {
   /** When the red was seen (the 30 minutes start then), and its run's output, for the ids left on `head`. */
   at?: number;
   output?: string;
+  /** The quick scheme's pin: shas are [the quick train's base, its ships' tops]; `owners` each top's #N. */
+  quick?: QuickRun;
+}
+
+/** A quick train's line in land.sh's quick-behind file: the full train's top it went on, and each ship's top with its #N. */
+interface QuickRun {
+  base: string;
+  owners: Record<string, number | null>;
 }
 
 export interface FastState {
@@ -49,16 +63,18 @@ export interface FastState {
   /** The commit the suite last gave no verdict on (CI never answered, land.sh crashed): not retried until main moves. */
   stuck?: string;
   /** What runs now. */
-  running?: { sha: string; at: number; stale?: boolean };
+  running?: { sha: string; at: number; stale?: boolean; quick?: QuickRun };
   pin?: Pinning;
   reds: KnownRed[];
   /** A landing's commit on main, to the minion that landed it (newest 200). */
   landed: Record<string, number>;
+  /** The quick scheme: the quick tops with a verdict (newest 50). */
+  done?: string[];
 }
 
 export interface FastModeDeps {
-  /** The schemes in fast mode, with their clones. */
-  schemes: () => { id: number; repo: string }[];
+  /** The schemes in fast mode, with their clones; `quick`, for a scheme whose land.sh ships quick trains, its land state folder (cc-deploy). */
+  schemes: () => { id: number; repo: string; quick?: string }[];
   get: (key: string) => FastState | undefined;
   set: (key: string, value: FastState) => void;
   jobs: Pick<HostJobs, 'start' | 'look'>;
@@ -86,6 +102,8 @@ const key = (projectId: number) => `fast-mode:${projectId}`;
 export const ESCALATE_MS = 30 * 60_000;
 /** The most commits a red's range is pinned through; a longer one goes to the Taskmaster unpinned. */
 export const PIN_MAX = 8;
+/** A quick top waits this long for the next full train's run to count before it gets one of its own, the line busy or not. */
+export const QUICK_WAIT_MS = 30 * 60_000;
 // shortcut: every scheme's branch is main, as land.sh's BRANCH default; read land.local.sh's BRANCH if one moves.
 const BRANCH = 'main';
 /** The ids land.sh --verify gives a failure it can't name: a red only on one of these says nothing of the other ids. */
@@ -162,11 +180,27 @@ export class FastMode {
   /** A clean land on main (src/land.ts): who landed `commit`, and a run now if nothing runs. */
   landed(projectId: number, ticketId: number, commit: string): Promise<void> {
     const s = this.state(projectId);
+    if (this.quickDir(projectId) !== undefined) {
+      // The quick scheme: a culprit's next ship went through the full gate or a quick check, so its red counts as fixed; a
+      // quick train's tops are in land.sh's line, so no landing is kept.
+      const left = s.reds.filter((e) => e.ticket !== ticketId);
+      if (left.length !== s.reds.length) this.d.set(key(projectId), { ...s, reds: left });
+      return this.tick();
+    }
     s.landed[commit] = ticketId;
     const keys = Object.keys(s.landed);
     for (const k of keys.slice(0, Math.max(0, keys.length - 200))) delete s.landed[k];
     this.d.set(key(projectId), s);
     return this.tick();
+  }
+
+  /** Whether the scheme is the quick scheme: its ships tell landed(), whatever its land mode. */
+  quick(projectId: number): boolean {
+    return this.quickDir(projectId) !== undefined;
+  }
+
+  private quickDir(projectId: number): string | undefined {
+    return this.d.schemes().find((p) => p.id === projectId)?.quick;
   }
 
   /** Every ~30 s and on each land: read finished runs, escalate old reds, start the next run. */
@@ -183,7 +217,7 @@ export class FastMode {
       this.again = false;
       for (const p of this.d.schemes()) {
         try {
-          await this.step(p.id, p.repo);
+          await this.step(p.id, p.repo, p.quick);
           if (this.said.delete(p.id)) console.log(`Fast mode for scheme ${p.id} works again.`);
         } catch (err) {
           const msg = String(thrown(err).stderr || thrown(err).message || err).trim();
@@ -194,8 +228,10 @@ export class FastMode {
     } while (this.again);
   }
 
-  private async step(projectId: number, repo: string) {
+  private async step(projectId: number, repo: string, quick?: string) {
     const s = this.state(projectId);
+    // The quick scheme with nothing owed, going or red: nothing runs and nothing is written (the gap train off, most often).
+    if (quick !== undefined && !s.running && !s.pin && !s.reds.length && !(await this.owedLines(quick)).length) return;
     const jobDir = join(this.d.dir(projectId), 'job');
     this.resetMidPass.delete(projectId);
     // land() writes `landed` while this awaits git: save with the newest map, not the one read here. A reset meanwhile
@@ -211,20 +247,24 @@ export class FastMode {
         this.escalate(projectId, s);
         return save();
       }
-      const { sha, stale } = s.running;
+      const { sha, stale, quick: q } = s.running;
       delete s.running;
       if (!stale && job) this.d.flakes?.(projectId, sha, job.output);
-      if (!stale) await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '');
+      if (!stale) await this.read(projectId, repo, s, sha, job ? verifyResult(job.output) : { verdict: 'none' }, job?.output ?? '', q);
     }
     this.escalate(projectId, s);
     // Saved before more git: a throw from here on mustn't leave the finished run in `running`, read (and told) again (2R3).
     save();
+    if (quick !== undefined) {
+      await this.quickNext(projectId, repo, quick, s);
+      return save();
+    }
     const next = s.pin ? s.pin.shas[s.pin.next] : await this.git(repo, 'rev-parse', `refs/heads/${BRANCH}`);
     if (next && (s.pin || (next !== s.verified && next !== s.stuck))) await this.start(projectId, repo, s, next);
     save();
   }
 
-  private async start(projectId: number, repo: string, s: FastState, sha: string) {
+  private async start(projectId: number, repo: string, s: FastState, sha: string, quick?: QuickRun) {
     const wt = join(this.d.dir(projectId), 'wt');
     await mkdir(this.d.dir(projectId), { recursive: true, mode: 0o700 });
     const linked = () =>
@@ -251,9 +291,65 @@ export class FastMode {
       await this.git(repo, 'worktree', 'add', '-q', '--detach', '--lock', '--reason', 'Citadel fast mode', wt, sha);
     } else await this.git(wt, 'checkout', '-q', '-f', '--detach', sha);
     // A pinning run checks only the ids it is pinning (land.sh reruns just their files when it can).
-    const env = { ...this.d.env(projectId, this.owner(s, sha)), LAND_KNOWN_RED: '', LAND_FAST: '', LAND_VERIFY_IDS: s.pin ? s.pin.ids.join('\n') : '' };
+    const q = quick ?? s.pin?.quick;
+    const n = q?.owners[sha];
+    const who = q ? (n ? this.d.ticketOf(projectId, n) : null) : this.owner(s, sha);
+    const env = { ...this.d.env(projectId, who), LAND_KNOWN_RED: '', LAND_FAST: '', LAND_VERIFY_IDS: s.pin ? s.pin.ids.join('\n') : '', ...(q ? { LAND_VERIFY_BASE: q.base } : {}) };
     this.d.jobs.start({ dir: join(this.d.dir(projectId), 'job'), cwd: wt, argv: ['bash', 'tools/land.sh', '--verify'], env, unit: `citadel-fast-verify-${projectId}-${Date.now()}`, description: `tools/land.sh --verify ${sha.slice(0, 9)} (fast mode)`, ticketId: 0 });
-    s.running = { sha, at: this.now() };
+    s.running = { sha, at: this.now(), ...(quick ? { quick } : {}) };
+  }
+
+  /** land.sh's quick-behind lines: "<epoch> <base> <top> <ship top>:<#N, or -> ... [red=<file>,...]" (tools/land/behind.sh). */
+  private async owedLines(dir: string) {
+    const text = await readFile(join(dir, 'quick-behind'), 'utf8').catch(() => '');
+    return text
+      .split('\n')
+      .map((l) => l.trim().split(/\s+/))
+      .filter((w) => w.length >= 4 && /^\d+$/.test(w[0]) && /^[0-9a-f]{40}$/.test(w[1]) && /^[0-9a-f]{40}$/.test(w[2]))
+      .map((w) => {
+        const red = w.find((x) => x.startsWith('red='));
+        const ships = w.slice(3).filter((x) => /^[0-9a-f]{40}:(\d+|-)$/.test(x));
+        const owners: Record<string, number | null> = {};
+        for (const x of ships) owners[x.slice(0, 40)] = x.endsWith(':-') ? null : Number(x.slice(41));
+        return { at: Number(w[0]) * 1000, base: w[1], top: w[2], tops: ships.map((x) => x.slice(0, 40)), owners, red: red ? red.slice(4).split(',').filter(Boolean) : null };
+      });
+  }
+
+  /** The quick scheme's next run: the pin's next commit, else the oldest quick top on main still owed a verdict. */
+  private async quickNext(projectId: number, repo: string, dir: string, s: FastState) {
+    if (s.running) return;
+    if (s.pin) return this.start(projectId, repo, s, s.pin.shas[s.pin.next]);
+    const main = await this.git(repo, 'rev-parse', `refs/heads/${BRANCH}`);
+    for (const l of await this.owedLines(dir)) {
+      if (s.done?.includes(l.top)) continue;
+      const onMain = await this.git(repo, 'merge-base', '--is-ancestor', l.top, main).then(
+        () => true,
+        () => false,
+      );
+      if (!onMain) continue; // rolled back: nothing of it is live to verify
+      const quick: QuickRun = { base: l.base, owners: l.owners };
+      if (l.red) {
+        // The next full train's run was red on these, and they fail alone on main's tip, this top: pinned with no run of its own.
+        this.markDone(s, l.top);
+        const known = new Set(s.reds.flatMap((e) => e.ids));
+        const fresh = l.red.filter((id) => !known.has(id));
+        if (!fresh.length) continue;
+        s.pin = { head: l.top, shas: [l.base, ...l.tops], next: 0, ids: fresh, at: this.now(), output: `${fresh.join(', ')} failed in the next full train's CI run and alone on ${l.top.slice(0, 12)}, the quick train's top.`, quick };
+        return this.start(projectId, repo, s, l.base);
+      }
+      // The next full train's own run counts: while ships wait in line, one will run CI over this top (QUICK_WAIT_MS at most).
+      if (this.now() - l.at < QUICK_WAIT_MS && (await this.lineBusy(dir))) return;
+      return this.start(projectId, repo, s, l.top, quick);
+    }
+  }
+
+  private markDone(s: FastState, top: string) {
+    s.done = [...(s.done ?? []).filter((t) => t !== top), top].slice(-50);
+  }
+
+  /** Whether a ship waits or lands in the deploy line (tools/deploy-queue.sh's <state>/queue/<ticket> files). */
+  private async lineBusy(dir: string) {
+    return (await readdir(join(dir, 'queue')).catch(() => [] as string[])).some((f) => /^\d+$/.test(f));
   }
 
   /** The minion that landed `sha`: the landing whose commit is `sha` or the nearest after it on main. */
@@ -267,15 +363,17 @@ export class FastMode {
     return null;
   }
 
-  private async read(projectId: number, repo: string, s: FastState, sha: string, r: ReturnType<typeof verifyResult>, output: string) {
+  private async read(projectId: number, repo: string, s: FastState, sha: string, r: ReturnType<typeof verifyResult>, output: string, quick?: QuickRun) {
     if (s.pin) {
       // Each id is blamed on the first commit failing it; the rest go on to the next commit, and what's left at the
-      // end is the head's own commit's.
+      // end is the head's own commit's (the quick scheme's: nobody's, as its head is run too).
       const pin = s.pin;
+      const q = pin.quick;
       const hit = r.verdict === 'red' ? pin.ids.filter((id) => r.ids.includes(id)) : [];
       if (hit.length) {
         pin.ids = pin.ids.filter((id) => !hit.includes(id));
-        await this.open(projectId, repo, s, sha, hit, output, undefined, pin.at);
+        if (q && sha === q.base) await this.open(projectId, repo, s, sha, hit, output, `on ${sha.slice(0, 12)}, the full train's top the quick train went on, so it was main's red before the quick train and no ship of it is to blame`, pin.at, q);
+        else await this.open(projectId, repo, s, sha, hit, output, undefined, pin.at, q);
       }
       // No verdict, or red on a failure it couldn't name (which may have kept the rest from running): the ids left
       // neither passed nor failed on this commit, so they are run again once, then the pin stops rather than blame a
@@ -286,8 +384,8 @@ export class FastMode {
           return;
         }
         delete s.pin;
-        s.verified = pin.head;
-        return this.open(projectId, repo, s, pin.head, pin.ids, pin.output ?? '', `on ${pin.head.slice(0, 12)}; pinning it on ${sha.slice(0, 12)} gave no verdict twice, so no culprit was found`, pin.at);
+        if (!q) s.verified = pin.head;
+        return this.open(projectId, repo, s, pin.head, pin.ids, pin.output ?? '', `on ${pin.head.slice(0, 12)}; pinning it on ${sha.slice(0, 12)} gave no verdict twice, so no culprit was found`, pin.at, q);
       }
       if (pin.ids.length && pin.next + 1 < pin.shas.length) {
         pin.next++;
@@ -295,10 +393,16 @@ export class FastMode {
         return;
       }
       delete s.pin;
+      if (q) {
+        // Passed alone on the base and every ship's top, the quick top too: a flake, which blames nobody (the spec).
+        if (pin.ids.length) console.log(`Quick train behind ${pin.head.slice(0, 12)} in scheme ${projectId}: ${pin.ids.join(', ')} passed alone on every ship, so nobody is blamed.`);
+        return;
+      }
       s.verified = pin.head;
       if (pin.ids.length) await this.open(projectId, repo, s, pin.head, pin.ids, pin.output ?? '', undefined, pin.at);
       return;
     }
+    if (quick) return this.readQuick(projectId, repo, s, sha, r, output, quick);
     if (r.verdict === 'none') {
       s.stuck = sha;
       return;
@@ -325,12 +429,41 @@ export class FastMode {
     s.pin = { head: sha, shas: range.slice(0, -1), next: 0, ids: fresh, at: this.now(), output: tailOf(output) };
   }
 
+  /** The quick scheme's full run on a quick top: the ledger as for a fast run; a new red pinned on the quick train's base
+   * and each of its ships' tops. */
+  private async readQuick(projectId: number, repo: string, s: FastState, sha: string, r: ReturnType<typeof verifyResult>, output: string, quick: QuickRun) {
+    this.markDone(s, sha);
+    if (r.verdict === 'none') {
+      // shortcut: no verdict isn't retried; the next full train's CI run covers this top anyway. Retry once if CI often gives none.
+      console.log(`Quick train behind ${sha.slice(0, 12)} in scheme ${projectId}: its full run gave no verdict.`);
+      return;
+    }
+    const failing = r.verdict === 'red' ? r.ids : [];
+    for (const e of s.reds) e.ids = e.ids.filter((id) => failing.includes(id));
+    s.reds = s.reds.filter((e) => e.ids.length);
+    if (r.verdict === 'green') return this.d.green(projectId, sha);
+    const known = new Set(s.reds.flatMap((e) => e.ids));
+    const fresh = failing.filter((id) => !known.has(id));
+    if (!fresh.length) return; // red only on known ids: blame nobody
+    const named = fresh.filter((id) => !UNNAMED.includes(id));
+    if (!named.length) return this.open(projectId, repo, s, sha, fresh, output, `on ${sha.slice(0, 12)}, a quick train's top, with no test file to name`, undefined, quick);
+    const tops = Object.keys(quick.owners);
+    s.pin = { head: sha, shas: [quick.base, ...(tops.includes(sha) ? tops : [...tops, sha])], next: 0, ids: named, at: this.now(), output: tailOf(output), quick };
+  }
+
   /** A new red: its ledger entry, and its culprit's minion told (the Taskmaster when there is none, or it wasn't pinned). */
   /** `unpinned`: why no commit could be blamed (the Taskmaster gets it at once). */
-  private async open(projectId: number, repo: string, s: FastState, sha: string, ids: string[], output: string, unpinned?: string, at = this.now()) {
+  /** `quick`: a quick train's red, its owners by ship top. */
+  private async open(projectId: number, repo: string, s: FastState, sha: string, ids: string[], output: string, unpinned?: string, at = this.now(), quick?: QuickRun) {
     const pinned = !unpinned;
-    const after = (await this.git(repo, 'rev-list', '--reverse', '--first-parent', '--ancestry-path', `${sha}..refs/heads/${BRANCH}`).catch(() => '')).split('\n').filter(Boolean);
-    let ticket = pinned ? this.owner(s, sha, after) : null;
+    let ticket: number | null = null;
+    if (pinned && quick) {
+      const n = quick.owners[sha];
+      ticket = n ? this.d.ticketOf(projectId, n) : null;
+    } else if (pinned) {
+      const after = (await this.git(repo, 'rev-list', '--reverse', '--first-parent', '--ancestry-path', `${sha}..refs/heads/${BRANCH}`).catch(() => '')).split('\n').filter(Boolean);
+      ticket = this.owner(s, sha, after);
+    }
     if (pinned && ticket == null) {
       const n = Number(/#(\d+)/.exec(await this.git(repo, 'log', '-1', '--format=%s', sha).catch(() => ''))?.[1]);
       ticket = n ? this.d.ticketOf(projectId, n) : null;
@@ -341,11 +474,14 @@ export class FastMode {
     s.reds.push(entry);
     const list = ids.map((id) => `- ${id}`).join('\n');
     const tail = tailOf(output);
-    const what = `The full suite went red on ${BRANCH} behind fast-mode ships, ${unpinned ?? `on ${sha.slice(0, 12)}, the first commit it fails on`}. New failing ids:\n${list}`;
+    const behind = quick ? 'a quick train' : 'fast-mode ships';
+    const what = `The full suite went red on ${BRANCH} behind ${behind}, ${unpinned ?? `on ${sha.slice(0, 12)}, the first ${quick ? "ship's top" : 'commit'} it fails on`}. New failing ${quick ? 'test files' : 'ids'}:\n${list}`;
     if (ticket != null) {
       this.d.tell(
         ticket,
-        `${what}\n\nIt's yours to fix: your change is the culprit. Each id is in the scheme's known-red ledger, so other ships that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`,
+        quick
+          ? `${what}\n\nIt's yours to fix: each file failed alone, twice, on your ship's top and passed on the ship before it. Your fix goes first: Citadel tags you urgent, which puts it at the front of the line. Meanwhile ships that fail only on it go through main's red. Fix it on your branch and hand it off with hand_off_land; it counts as fixed once your next ship lands. If you're sure it isn't yours, tell the Taskmaster why with message_coordinator. Unfixed in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`
+          : `${what}\n\nIt's yours to fix: your change is the culprit. Each id is in the scheme's known-red ledger, so other ships that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`,
       );
       return;
     }
@@ -361,7 +497,7 @@ export class FastMode {
     for (const e of s.reds) {
       if (e.escalated || this.now() - e.at < ESCALATE_MS) continue;
       e.escalated = true;
-      this.d.taskmaster(projectId, `A fast-mode red on ${BRANCH} has gone 30 minutes unfixed: ${e.ids.join(', ')}, from ${e.sha.slice(0, 12)}${e.n ? `, given to #${e.n}` : ''}. Take it on: chase that minion, or start a fix.`);
+      this.d.taskmaster(projectId, `A ${this.quick(projectId) ? 'red behind a quick train' : 'fast-mode red'} on ${BRANCH} has gone 30 minutes unfixed: ${e.ids.join(', ')}, from ${e.sha.slice(0, 12)}${e.n ? `, given to #${e.n}` : ''}. Take it on: chase that minion, or start a fix.`);
     }
   }
 }

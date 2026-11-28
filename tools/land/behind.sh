@@ -50,18 +50,18 @@ behind_landed() {
 # <files>...: they failed in a full train's CI run and fail alone on main's tip ($old) too (train_main_red). With a quick
 # train's top at main's tip and no verdict on it yet, they are that quick train's red: its line gets red=<files>.
 behind_red() {
-  local at base top rest f files=''
+  local at base top rest f files='' hit=''
   [ -s "$state/quick-behind" ] && [ $# -gt 0 ] || return 0
   for f in "$@"; do files+="${files:+,}$f"; done
   while read -r at base top rest; do
     [ -n "$top" ] || continue
-    if [ "$top" = "$old" ] && [[ " $rest" != *' red='* ]]; then
-      say "quick train: ${files//,/, } fails on $(git rev-parse --short "$top"), the quick train's top, so Citadel finds which of its ships broke it"
-      retro_log "quick train red behind · $(git rev-parse --short "$top") · $files · found by $branch's train"
-      rest+=" red=$files"
-    fi
+    if [ "$top" = "$old" ] && [[ " $rest" != *' red='* ]]; then rest+=" red=$files" hit=1; fi
     echo "$at $base $top $rest"
-  done <"$state/quick-behind" >"$state/quick-behind.$$" 2>/dev/null && mv -f "$state/quick-behind.$$" "$state/quick-behind" || rm -f "$state/quick-behind.$$"
+  done <"$state/quick-behind" >"$state/quick-behind.$$" 2>/dev/null || { rm -f "$state/quick-behind.$$"; return 0; }
+  mv -f "$state/quick-behind.$$" "$state/quick-behind"
+  [ -n "$hit" ] || return 0
+  say "quick train: ${files//,/, } fails on $(git rev-parse --short "$old"), the quick train's top, so Citadel finds which of its ships broke it"
+  retro_log "quick train red behind · $(git rev-parse --short "$old") · $files · found by $branch's train"
   return 0
 }
 
@@ -78,8 +78,10 @@ behind_verify() {
   local want=${LAND_VERIFY_IDS:-} f r r2 ids=() none='' n=0 real flakes
   here=$(git rev-parse --show-toplevel) && cd "$here" || { echo "verify: no verdict"; exit 75; }
   state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
+  mkdir -p -m 700 "$state"
+  queue_phase() { :; } # out of line: no lock held and nobody waiting on it (ci_gate calls it)
   tip=$(git rev-parse HEAD) short=$(git rev-parse --short HEAD)
-  old=$(git rev-parse -q --verify "${LAND_VERIFY_BASE:-HEAD^}^{commit}" 2>/dev/null) || old=$(git rev-parse HEAD^)
+  old=$(git rev-parse -q --verify "${LAND_VERIFY_BASE:-HEAD^}^{commit}" 2>/dev/null) || old=$(git rev-parse -q --verify HEAD^) || old=$tip
   own=$tip branch=behind
   say "verify: $short"
   if [ -n "$want" ]; then

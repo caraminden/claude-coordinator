@@ -211,6 +211,10 @@ test("the reds read are each scheme's red workflows and, in fast mode, the chang
   assert.deepEqual(redFixes(store, fixTicket, fast), [{ key, run: '101', what: 'tests.yml is red', ticket: a }], 'no fix minion, or not in fast mode: nothing');
   store.setProjectSettings(peek.id, { land_mode: 'fast' });
   assert.deepEqual(redFixes(store, fixTicket, fast).slice(1), [{ key: `${peek.id}:s${b}`, run: '3', what: 'x.test.ts is red', ticket: b }]);
+  // #2244: a red behind a quick train, in the quick scheme whatever its land mode, puts its culprit first too.
+  store.setProjectSettings(peek.id, { land_mode: 'off' });
+  assert.deepEqual(redFixes(store, fixTicket, fast, (id) => id === peek.id).slice(1), [{ key: `${peek.id}:s${b}`, run: '3', what: 'x.test.ts is red', ticket: b }]);
+  assert.deepEqual(redFixes(store, fixTicket, fast, () => false).slice(1), [], 'not the quick scheme: nothing');
 });
 
 test('a failed deploy tags the minion that ran it, and the next good one takes it off', () => {

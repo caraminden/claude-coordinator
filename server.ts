@@ -1549,6 +1549,7 @@ const urgentFixes = new UrgentFixes({
       store,
       (p, mark) => ciHealth.fixTicket(p, mark),
       (id) => fastMode.view(id).reds,
+      (id) => fastMode.quick(id),
     ),
 });
 services.onDeploy = (view) => {
@@ -1988,11 +1989,14 @@ const recordFlakes = (projectId: number, ticketId: number | null, commit: string
 };
 const fastMode = new FastMode({
   flakes: (id, sha, output) => recordFlakes(id, null, sha, output),
-  schemes: () =>
-    store
+  // And Citadel's own scheme, whose quick trains (tools/land/quick.sh) owe the full suite a run behind them (#2244): its land state is this checkout's.
+  schemes: () => {
+    const own = deployState ? ownScheme()?.id : undefined;
+    return store
       .listProjects()
-      .filter((p) => p.land_mode === 'fast' && p.repo_dir)
-      .map((p) => ({ id: p.id, repo: p.repo_dir! })),
+      .filter((p) => (p.land_mode === 'fast' || p.id === own) && p.repo_dir)
+      .map((p) => ({ id: p.id, repo: p.repo_dir!, ...(p.land_mode !== 'fast' && deployState ? { quick: deployState } : {}) }));
+  },
   get: (k) => store.getSetting<FastState>(k) ?? undefined,
   set: (k, v) => store.setSetting(k, v),
   jobs: new HostJobs(() => runner.units),
@@ -2126,7 +2130,7 @@ const landHandoffs = new LandHandoffs({
       .then(async (other) => (other && (await shipApps.apps(id)).length ? null : passLiveClaims()))
       .catch((err) => console.error('Passing on the claims of a ship failed:', err));
     const t = store.getTicket(id);
-    if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
+    if (t && (store.getProject(t.project_id)?.land_mode === 'fast' || fastMode.quick(t.project_id))) void fastMode.landed(t.project_id, id, commit);
   },
   learned: (id, h) => {
     const t = store.getTicket(id);

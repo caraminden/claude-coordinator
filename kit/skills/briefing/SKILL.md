@@ -25,6 +25,11 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    would start before the fix. Its brief says to send you those faults as it hands off
    (`message_coordinator`, need: start), which brings you back. With twelve slices at once behind a
    day-old counter, two or three of them found each of its faults separately (Peek, 2026-11-26).
+   **A batch from one review or plan compares mechanisms first.** Before any create_ticket, list each
+   brief's mechanism in one line (a function, rule or flow, not a file). Two briefs on one mechanism
+   become one minion, or a `start_after` chain naming which ships second. A mechanism a person is
+   still deciding waits for that pick. `who-touches` can't see siblings made in the same turn: nine
+   minions started in an hour, and #1899 was replaced by #1918 within it (Nov 24).
 2. **Their words**: the person's own words that asked for it, in quotation marks, with who and the
    date: `Josh, 2026-11-19: "Go on A1"`. Quote the ask itself, not your summary of it, and each
    person who shaped it. When no person started it (a schedule, a CI alert), say what did, in one line.

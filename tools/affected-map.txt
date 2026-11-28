@@ -17,7 +17,7 @@
 @inheritmax 10
 # Pinning tests too slow for tools/always-tests.txt (#2037, Josh 2026-11-25 "Run when their code changes"): the narrow pick
 # (citadel-test --affected) and land.sh's smoke run these when a rule below picks them, though they skip other rules' tests.
-@pinned test/access-matrix.test.ts test/list-reads.test.ts test/boot-check.test.ts
+@pinned test/access-matrix.test.ts test/list-reads.test.ts test/boot-check.test.ts test/exit-with-parent.test.ts test/ci-leftovers.test.ts
 
 # The database: its schema, its secrets list, and the first-run commit budget.
 src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts
@@ -62,6 +62,8 @@ src/db.ts: test/list-reads.test.ts
 src/db/*.ts: test/list-reads.test.ts
 src/routes/projects.ts: test/list-reads.test.ts
 server.ts: test/boot-check.test.ts
+# A booted server's stderr is pinned there (effort retro #2254: #2210's ship refused at CI on a watch error at boot).
+server.ts: test/exit-with-parent.test.ts
 src/mcp.ts: test/boot-check.test.ts
 src/mcp-minions.ts: test/boot-check.test.ts
 src/routes/files.ts: test/boot-check.test.ts
@@ -138,6 +140,8 @@ test/format-own.test.ts: test/fmt.test.ts
 **/*.ps1: test/ps1-lint.test.ts
 tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/runner-linux-scripts.test.ts test/runner-agent.test.ts
 .github/workflows/tests.yml: test/ci-runner-choice.test.ts
+# test/ci-leftovers.test.ts reads tests.yml's step order (effort retro #2254: #2209's step order was caught only on GitHub).
+.github/workflows/tests.yml: test/ci-leftovers.test.ts
 .github/workflows/flake-proof.yml: test/ci-runner-choice.test.ts
 tools/own-check.sh: test/land-train-early.test.ts test/land-train-early-2.test.ts test/ci-runner-choice.test.ts
 tools/light-check.sh: test/land-train-early.test.ts test/land-train-early-2.test.ts

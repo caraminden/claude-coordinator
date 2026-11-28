@@ -1141,6 +1141,11 @@ outsideSpend.onCap = (projectId, total, cap) => {
   notify(coordinator.id, { kind: 'state', state: 'blocked', note: text });
 };
 runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'error', text, eventId });
+// A failed turn's one retry failed too (#2258): its owner's Taskmaster is woken. A Taskmaster's own failure has only its people's push.
+runner.onRetryFailed = (ticketId, text) => {
+  const ticket = store.getTicket(ticketId);
+  if (ticket && ticket.kind !== 'coordinator') tellTaskmaster(app, ticket, text, false, true, 'ask', true).catch((e) => console.error(`[fail-retry] minion ${ticketId}:`, e));
+};
 runner.onSpendAlert = (ticketId, text, eventId, person) => notify(ticketId, { kind: 'spend', text, eventId, also: person ? store.getUser(person)?.name : undefined });
 
 // Chained minions (create_ticket's start_after): one starts with its held brief once its leader's work is in (src/wake.ts startChained).

@@ -91,8 +91,14 @@ test('a failed turn is retried once, telling the minion why, and nobody is pushe
   assert.match(lastPrompt(), /Your last turn failed[\s\S]*API Error: 500 Internal server error[\s\S]*check the state of your work/);
   assert.equal(runner.failWait(id), null);
   assert.equal(store.getTicket(id)!.note, null);
-  assert.deepEqual(pushes.filter((p) => p.ticket === id), []);
-  assert.deepEqual(alerts.filter((a) => a.ticket === id), []);
+  assert.deepEqual(
+    pushes.filter((p) => p.ticket === id),
+    [],
+  );
+  assert.deepEqual(
+    alerts.filter((a) => a.ticket === id),
+    [],
+  );
 });
 
 test("a second failure in a row stops, stays in error and wakes the owner's Taskmaster once", async () => {
@@ -147,12 +153,15 @@ test('a stop during the wait ends it', async () => {
 });
 
 test('the wait outlives a restart', async () => {
+  // Long enough that the restart below comes first; the new server keeps the saved time.
+  runner.detachAll();
+  runner = makeRunner(2000);
   const id = minion();
   setRelease(BOOM);
   const before = turnsRun();
   runner.send(id, 'Cara', 'go');
   await until('the failed turn', () => turnsRun() === before + 1 && !runner.isRunning(id) && !!runner.failWait(id));
-  // A new server on the same database, with a short wait this time.
+  // A new server on the same database.
   runner.detachAll();
   runner = makeRunner();
   setRelease('ok');

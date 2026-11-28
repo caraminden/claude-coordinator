@@ -158,6 +158,7 @@ export class Closing {
     this.d.resumes.cancelLimitWait(ticketId);
     this.d.resumes.cancelNetWait(ticketId);
     this.d.resumes.cancelKillWait(ticketId);
+    this.d.resumes.cancelFailWait(ticketId);
     this.d.dropCard(ticketId, 'The minion was dismissed while this waited.');
     this.d.store.deleteSetting(closeCancelledKey(ticketId));
     // Nor wait on its start card (#1674): a person's reopen is its start.

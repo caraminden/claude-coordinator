@@ -33,7 +33,7 @@ export type Kind = 'ok' | 'stopped' | 'paused' | 'away' | 'card' | 'closing' | '
 export type FollowUp = 'cleared' | 'close' | 'fresh' | 'keepalive' | 'deploy-note' | 'rerun';
 
 /** The ways the server carries a turn on by itself, each counted in a row. */
-export type RetryKind = 'restart' | 'kill' | 'limit' | 'net' | 'switch';
+export type RetryKind = 'restart' | 'kill' | 'limit' | 'net' | 'switch' | 'fail';
 /** Auto-resumes in a row that led to a turn, by kind; empty for a turn people or GitHub started. */
 export type Retries = Partial<Record<RetryKind, number>>;
 
@@ -52,6 +52,9 @@ export const RETRIES: Record<RetryKind, { cap: number; keeps: RetryKind[] }> = {
   // Onto another of its person's Claude accounts (#779): bounded only by a ready account until #1379. Three is one
   // turn round the most accounts a person links (MAX_ACCOUNTS) and back; past it, it waits as if none were ready.
   switch: { cap: 3, keeps: ['limit'] },
+  // Any other failure (#2258). Cara, 2026-11-27, "Retry once, then alert": retried once a little later; a second
+  // failure in a row tells the owner's Taskmaster. The kill and restart counts ride along, so a fail and a kill in turn end.
+  fail: { cap: 1, keeps: ['restart', 'kill'] },
 };
 
 /** The counts a `kind` resume of a turn with `r` starts with. */
@@ -205,6 +208,8 @@ export function outcome(end: TurnEnd): Outcome {
   if (gone && turn && !turn.codex && !turn.keepalive && !turn.fresh) return { kind: 'no-session', ...failed, noSession: gone[1] };
   // Claude's own result words decide when it has them; its last stderr lines only when it has none.
   if (isNetworkFailure(reason || end.stderr.slice(-10).join('\n'))) return { kind: 'net', ...failed, ...retry(r, 'net') };
+  // Retried once (#2258), unless a person must act (a lost sign-in), it ran on Codex, was a warm-up, a fresh-start step or set to close.
+  if (turn && !authFailed && !turn.codex && !turn.keepalive && !turn.fresh && turn.closing === undefined) return { kind: 'failed', ...failed, ...retry(r, 'fail') };
   return { kind: 'failed', ...failed };
 }
 

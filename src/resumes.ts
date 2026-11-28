@@ -1,4 +1,5 @@
-// The auto-resume waits a minion can sit in after a turn ends: the usage limit, a network outage and a kill from outside.
+// The auto-resume waits a minion can sit in after a turn ends: the usage limit, a network outage, a kill from outside
+// and the one retry of a turn that failed otherwise (#2258).
 // Each is a list in the settings table, so the wait outlives a restart. Moved out of runner.ts, which keeps the public
 // wrappers (netWait, killWait, limitWait, cancelLimitWait) and the tunables tests set on it; this takes what it needs
 // through ResumeHost, not the whole Runner.
@@ -100,6 +101,26 @@ export function nextLimitResume(list: LimitResume[], lastResume: number, gap: nu
   return best;
 }
 
+/** A minion whose last turn failed for no reason of the other waits, waiting for its one retry (#2258). */
+export interface FailResume {
+  ticket: number;
+  /** When it retries (ms). */
+  at: number;
+  /** The counts its retry's turn starts with. */
+  retries: Retries;
+  /** The failure's words, for the retry's prompt. */
+  error: string;
+}
+
+/** A turn that failed for any other reason is retried once (#2258); a second failure in a row tells its owner's Taskmaster. */
+export const FAIL_NOTE = 'Failed: retries by itself shortly';
+/** The retry's prompt: the failure's words, cut to a few lines. */
+export const retryFailPrompt = (error: string) =>
+  `Your last turn failed with this error, and Citadel retried it by itself once:\n\n${error.length > 600 ? error.slice(0, 599) + '…' : error}\n\nA command may have half-run when it failed (a ship, a push, a deploy, a test run), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
+
+/** What the owner's Taskmaster is told when the retry is spent: what happened, and the error. */
+export const retryFailedText = (what: string, error: string) => `This minion's turn failed and ${what}, so it is left in error with nothing to carry it on. Look at its chat and get it going again, or tell its person. The error:\n${error.length > 1500 ? error.slice(0, 1499) + '…' : error}`;
+
 /** The settings key of the usage-limit waits. */
 export const LIMIT_RESUMES = 'limit-resumes';
 /** How long the kill line waits for the last resume it started to take its wait before the next goes anyway. */
@@ -119,6 +140,8 @@ export interface ResumeHost {
   readonly netProbeMaxMs: number;
   readonly killStarved: () => Promise<{ starved: boolean; why: string }>;
   readonly killHoldMaxMs: number;
+  /** How long after a failed turn its retry starts. */
+  readonly failRetryMs: number;
   /** Set once detachAll hands the turns to the next server: this one starts no more kill resumes. */
   readonly detached: boolean;
   /** Limit waits whose resume is under way here, each with a token for that one resume (Runner.limitStarting). */
@@ -130,6 +153,8 @@ export interface ResumeHost {
   resume(ticketId: number, via: RetryKind, retries: Retries, onCodex?: boolean): Promise<void> | undefined;
   /** A kill resume's start threw and left its wait (already removed): tell the chat and run what was queued behind it. */
   killResumeFailed(ticketId: number): void;
+  /** A failed turn's retry didn't start (and its wait is gone): it stops with an error, and its Taskmaster hears. */
+  failRetryLost(ticketId: number, error: string): void;
   /** It waits for a worker (src/turn-line.ts): its start is neither over nor failed. */
   lined(ticketId: number): boolean;
 }
@@ -138,9 +163,13 @@ export class Resumes {
   readonly net: WaitList<NetResume>;
   readonly kill: WaitList<KillResume>;
   readonly limit: WaitList<LimitResume>;
+  readonly fail: WaitList<FailResume>;
   netTimer?: NodeJS.Timeout;
   killTimer?: NodeJS.Timeout;
   limitTimer?: NodeJS.Timeout;
+  failTimer?: NodeJS.Timeout;
+  /** Fail waits whose retry this server has started: each fires once here, and again only after a restart. */
+  private failStarted = new Set<number>();
   /** The wait before the next probe; null for netProbeMs, a fresh outage's first. */
   netDelay: number | null = null;
   private lastLimitResume = 0;
@@ -154,12 +183,14 @@ export class Resumes {
     this.net = new WaitList(host.store, 'net-resumes');
     this.kill = new WaitList(host.store, 'kill-resumes');
     this.limit = new WaitList(host.store, LIMIT_RESUMES);
+    this.fail = new WaitList(host.store, 'fail-resumes');
   }
 
   /** Stop the timers, for a server shutting down: the next server probes and resumes from what is saved. */
   stop() {
     clearTimeout(this.netTimer);
     clearTimeout(this.killTimer);
+    clearTimeout(this.failTimer);
   }
 
   netWait(ticketId: number): NetResume | null {
@@ -353,6 +384,61 @@ export class Resumes {
     this.host.limitStarting.set(w.ticket, {});
     this.armLimitTimer();
     this.host.resume(w.ticket, 'limit', { limit: w.tries }, !!w.codex);
+    return true;
+  }
+
+  failWait(ticketId: number): FailResume | null {
+    return this.fail.get(ticketId);
+  }
+
+  /** Wait failRetryMs, then retry the failed turn once. Its wait stays saved until the retry's turn takes it (takeQueue), so a restart still retries. */
+  waitForRetry(ticketId: number, retries: Retries, error: string) {
+    this.failStarted.delete(ticketId);
+    this.fail.put({ ticket: ticketId, at: Date.now() + this.host.failRetryMs, retries, error });
+    this.armFailTimer();
+  }
+
+  /** End the minion's retry wait (its retry's turn, a person's message, a stop, a dismissal); returns the wait it had. */
+  cancelFailWait(ticketId: number): FailResume | null {
+    this.failStarted.delete(ticketId);
+    return this.fail.take(ticketId);
+  }
+
+  /** Time the earliest retry not yet started here. */
+  armFailTimer() {
+    clearTimeout(this.failTimer);
+    this.failTimer = undefined;
+    if (this.host.detached) return;
+    const list = this.fail.all().filter((w) => !this.failStarted.has(w.ticket));
+    if (!list.length) return;
+    this.failTimer = setTimeout(() => this.failRetryNext(), Math.max(0, Math.min(...list.map((w) => w.at)) - Date.now()));
+    this.failTimer.unref();
+  }
+
+  private failRetryNext() {
+    this.failTimer = undefined;
+    if (this.host.detached) return;
+    for (const w of this.fail.all()) if (!this.failStarted.has(w.ticket) && w.at <= Date.now()) this.startFail(w.ticket);
+    this.armFailTimer();
+  }
+
+  /** Start the minion's retry, if it waits for one; false if not. A start that took no turn and left the wait ends it (failRetryLost). */
+  startFail(ticketId: number): boolean {
+    const h = this.host;
+    const w = this.fail.get(ticketId);
+    if (!w) return false;
+    this.failStarted.add(ticketId);
+    let ran: Promise<void> | undefined;
+    try {
+      ran = h.resume(ticketId, 'fail', w.retries);
+    } catch (err) {
+      console.error(`[fail-retry] minion ${ticketId}: its retry failed to start: ${thrown(err).message ?? err}`);
+    }
+    void Promise.resolve(ran).then(() => {
+      if (!this.failStarted.has(ticketId) || h.isRunning(ticketId) || h.lined(ticketId)) return;
+      const gone = this.cancelFailWait(ticketId);
+      if (gone) h.failRetryLost(ticketId, gone.error);
+    });
     return true;
   }
 }

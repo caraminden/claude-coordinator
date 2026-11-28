@@ -83,7 +83,7 @@ import { clockTime, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
-import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
+import { FAIL_NOTE, KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, retryFailedText, retryFailPrompt, type FailResume, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
 import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, type OnAccount } from './line-place.ts';
 import { runningTurn, runningTurnOff, START_GRACE_MS, wrapperAlive, wrapperAliveOff, wrapperInProc, type TurnAt } from './running-turn.ts';
@@ -393,6 +393,8 @@ export class Runner {
    */
   killStarved: () => Promise<{ starved: boolean; why: string }> = async () => ({ starved: false, why: '' });
   killHoldMaxMs = KILL_HOLD_MAX_MS;
+  /** How long after a failed turn its one retry starts (#2258). */
+  failRetryMs = 60_000;
   /** Kill waits whose resume this server has started: the line moves past them; the wait goes once their turn takes it. */
   private killStarted = new Map<number, number>();
   /** Set once detachAll hands the turns to the next server: this one starts no more resumes. */
@@ -636,6 +638,8 @@ export class Runner {
   }
   /** Called when a turn fails (not when someone stops it), with the error shown in the chat and its event, if it has one. */
   onTurnError: (ticketId: number, text: string, eventId?: number) => void = () => {};
+  /** A failed turn's retry failed too, or couldn't start (#2258): the server wakes the owner's Taskmaster with `text`. */
+  onRetryFailed: (ticketId: number, text: string) => void = () => {};
   /** A running turn passed a spend stage (#723): push it to the usual people and the turn's person. */
   onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
   private killWaves: KillWaves;
@@ -675,6 +679,9 @@ export class Runner {
       get netProbeMaxMs() {
         return self.netProbeMaxMs;
       },
+      get failRetryMs() {
+        return self.failRetryMs;
+      },
       get killStarved() {
         return self.killStarved;
       },
@@ -689,6 +696,7 @@ export class Runner {
       isRunning: (id) => self.isRunning(id),
       resume: (id, via, retries, onCodex) => self.resume(id, via, retries, onCodex),
       killResumeFailed: (id) => self.killResumeFailed(id),
+      failRetryLost: (id, error) => self.failRetryLost(id, error),
       lined: (id) => self.turnLine.has(id),
     });
     this.broadcast = broadcast;
@@ -1021,7 +1029,7 @@ export class Runner {
 
   /** Whether a turn of its runs, or one is owed: messages or a worker it waits for, or a cut-off turn to carry on, after its approval card too (#1930). */
   busy(ticketId: number): boolean {
-    const waits = this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId) || cardHeld(this.store, ticketId);
+    const waits = this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId) || this.failWait(ticketId) || cardHeld(this.store, ticketId);
     return !!waits || this.isRunning(ticketId) || this.strayWaits.has(ticketId) || this.turnLine.has(ticketId) || this.queue.size(ticketId) > 0 || !!this.queue.get(ticketId).owed;
   }
 
@@ -1620,6 +1628,8 @@ export class Runner {
     this.resumes.armNetProbe();
     // Killed turns waiting for their resume take their turns in the line again (#1364).
     this.resumes.armKillResumes();
+    // Failed turns waiting for their one retry get it (#2258).
+    this.resumes.armFailTimer();
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
@@ -1746,6 +1756,7 @@ export class Runner {
    */
   private resume(ticketId: number, via: RetryKind, retries: Retries, onCodex = false): Promise<void> | undefined {
     const killLine = via === 'kill';
+    const failLine = via === 'fail';
     const paused = !!this.queue.owed(ticketId)?.paused;
     const resumed = awayResume(this.queue.owed(ticketId)?.away, { note: 'Resumed after a server restart', prompt: RESUME_PROMPT });
     // One limitResumeNext started: its wait stays saved until the turn takes it (startTurn), or this ends it below.
@@ -1767,33 +1778,45 @@ export class Runner {
             const project = ticket && this.store.getProject(ticket.project_id);
             if (!ticket || !project || ticket.status === 'closed') {
               if (killLine) this.resumes.cancelKillWait(ticketId);
+              if (failLine) this.resumes.cancelFailWait(ticketId);
               return this.queue.owe(ticketId, null);
             }
             // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
             if (via === 'net' && !this.netWait(ticketId)) return;
             // So does one from the kill line (#1364).
             if (killLine && !this.killWait(ticketId)) return;
+            // And a failed turn's retry (#2258).
+            const failed = failLine ? this.failWait(ticketId) : null;
+            if (failLine && !failed) return;
             // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
             if (token && !ours()) return;
             this.dropDisabled(ticketId);
             const person = this.turnPerson(ticket, project, this.waiting(ticketId), true);
             if (this.refused(ticketId, person)) {
               // Nothing it would have carried is dropped: the queue and held mail wait for the next turn (#468 S03-6).
-              // A kill wait ends here, as the turn that would have taken it.
+              // A kill wait ends here, as the turn that would have taken it; a retry's too, which tells its Taskmaster (failRetryLost).
               if (killLine) this.resumes.cancelKillWait(ticketId);
               this.queue.owe(ticketId, null);
               return;
             }
             if (this.startPlace(ticket, person, via) === 'wait') return;
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
-            if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : resumed.note });
+            if (via !== 'switch' && !killLine)
+              this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : failed ? 'Retried after the failed turn' : paused ? 'Resumed after the pause' : resumed.note });
             const carriesOn = !this.queue.wakes(ticketId);
             // It carries on the interrupted turn, so it runs for that turn's person.
             return this.ranTurn(
               this.startTurn(
                 project,
                 ticket,
-                [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : paused ? RESUME_PAUSE_PROMPT : resumed.prompt, images: [] }, ...this.takeQueue(ticketId)],
+                [
+                  {
+                    author: 'System',
+                    text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : failed ? retryFailPrompt(failed.error) : paused ? RESUME_PAUSE_PROMPT : resumed.prompt,
+                    images: [],
+                  },
+                  ...this.takeQueue(ticketId),
+                ],
                 person,
                 retries,
                 carriesOn,
@@ -1883,6 +1906,7 @@ export class Runner {
     this.wakeNow.delete(ticketId);
     this.resumes.cancelNetWait(ticketId);
     this.resumes.cancelKillWait(ticketId);
+    this.resumes.cancelFailWait(ticketId);
     this.carryIn(ticketId, { from: this.cardWaits.get(ticketId)?.from });
     return this.queue.take(ticketId);
   }
@@ -1890,6 +1914,22 @@ export class Runner {
   /** The thread's network wait, if it has one. */
   netWait(ticketId: number): NetResume | null {
     return this.resumes.netWait(ticketId);
+  }
+
+  /** The minion's wait for its failed turn's one retry (#2258), if it has one. */
+  failWait(ticketId: number): FailResume | null {
+    return this.resumes.failWait(ticketId);
+  }
+
+  /** A failed turn's retry started no turn and its wait is gone (refused, or its start threw): it stops, and its Taskmaster hears. */
+  private failRetryLost(ticketId: number, error: string) {
+    const held = this.queue.size(ticketId);
+    const text = `Its retry after the failed turn didn't start, so it stopped: ${held ? 'the messages queued behind it run next.' : 'send a message to carry on.'}`;
+    const event = this.emit(ticketId, 'error', { text });
+    this.setFailNote(ticketId, { note: 'Retry failed to start: Taskmaster told' });
+    this.onTurnError(ticketId, text, event.id);
+    this.onRetryFailed(ticketId, retryFailedText("it was to be retried once, but the retry didn't start", error));
+    if (held) this.next(ticketId);
   }
 
   /** The minion's wait for its resume after a kill (#1364), if it has one. */
@@ -2385,6 +2425,7 @@ export class Runner {
       this.resumes.cancelKillWait(ticketId);
       this.resumes.cancelNetWait(ticketId);
       this.resumes.cancelLimitWait(ticketId);
+      this.resumes.cancelFailWait(ticketId);
       this.queue.drop(ticketId);
       this.wakeNow.delete(ticketId);
       this.emit(ticketId, 'note', { text: 'Stopped by user.' });
@@ -2400,6 +2441,15 @@ export class Runner {
         this.wakeNow.delete(ticketId);
         this.setFailNote(ticketId, { note: 'Killed: stopped, send a message to carry on' });
         this.emit(ticketId, 'note', { text: "Stopped by user: it won't resume by itself." });
+        this.broadcastTicket(ticketId);
+        return true;
+      }
+      // Waiting for a failed turn's retry (#2258): a stop ends it.
+      if (this.resumes.cancelFailWait(ticketId)) {
+        this.queue.drop(ticketId);
+        this.wakeNow.delete(ticketId);
+        this.setFailNote(ticketId, { note: 'Failed: stopped, send a message to carry on' });
+        this.emit(ticketId, 'note', { text: "Stopped by user: it won't retry by itself." });
         this.broadcastTicket(ticketId);
         return true;
       }
@@ -2796,6 +2846,7 @@ export class Runner {
     if (via === 'kill' && this.resumes.startKill(ticket)) return;
     if (via === 'limit' && this.resumes.startLimit(ticket)) return;
     if (via === 'net' && this.netWait(ticket)) return this.resumes.netResume(ticket);
+    if (via === 'fail' && this.resumes.startFail(ticket)) return;
     if (via && owed) return void this.resume(ticket, via, owedRetries(owed));
     this.next(ticket, true);
   }
@@ -3279,7 +3330,7 @@ export class Runner {
         this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
       this.resumes.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
-      if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE) this.store.updateTicket(ticket.id, { note: null });
+      if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE || ticket.note === FAIL_NOTE) this.store.updateTicket(ticket.id, { note: null });
       // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
       else if (ticket.kind === 'coordinator' && ticket.note) this.store.updateTicket(ticket.id, { note: null });
       // One-tap replies answer the turn that offered them; a new turn makes them stale.
@@ -3898,10 +3949,21 @@ export class Runner {
       this.store.updateTicket(ticketId, { note: NET_NOTE });
       return;
     }
+    // Any other failure is retried once a minute later (#2258), with no push: one that fixes itself needs nobody.
+    if (out.kind === 'failed' && out.retry) {
+      this.resumes.waitForRetry(ticketId, out.retry.retries, why || exited);
+      this.emit(ticketId, 'note', { text: `${text}\nCitadel retries it by itself once in about a minute; if that fails too, its Taskmaster is told. A message now runs instead of the retry.` });
+      if (!keepState) this.store.updateTicket(ticketId, { note: FAIL_NOTE });
+      return;
+    }
     const netTries = out.kind === 'net' ? out.spent!.tries : 0;
-    const event = this.emit(ticketId, 'error', { text: netTries ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : text });
-    this.setFailNote(ticketId, { note: netTries ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
+    const twice = out.spent?.via === 'fail';
+    const event = this.emit(ticketId, 'error', {
+      text: netTries ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : twice ? `${text}\nIt was already retried once after a failed turn, so it stopped, and its Taskmaster was told: send a message to carry on.` : text,
+    });
+    this.setFailNote(ticketId, { note: netTries ? `Network: stopped retrying after ${netTries} resumes` : twice ? 'Failed twice: its Taskmaster was told' : short(first) });
     this.onTurnError(ticketId, text, event.id);
+    if (twice) this.onRetryFailed(ticketId, retryFailedText('it was retried once a minute later, and the retry failed too', text));
   }
 
   /** When a turn's usage limit resets: the windows it hit, else the time Claude's words give, else a while from now. */

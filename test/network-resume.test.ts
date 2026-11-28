@@ -187,8 +187,11 @@ test('one probe serves every waiting thread, and each resumes', async () => {
 test('other failures never wait on the network', async () => {
   const id = minion();
   const t = await turn(id, 'API Error: 529 Overloaded');
-  assert.equal(t.note, 'API Error: 529 Overloaded');
+  // A failed turn's one retry instead (#2258): fail-retry.test.ts.
+  assert.equal(t.note, 'Failed: retries by itself shortly');
   assert.equal(runner.netWait(id), null);
+  assert.ok(runner.failWait(id));
+  runner.stop(id);
   pushes.length = 0;
 });
 
@@ -203,8 +206,10 @@ test('a turn that ends well clears the failure note a failed turn left, and only
     return store.getTicket(id)!;
   };
   assert.equal((await turn(id, 'ok')).note, 'before', "a note the agent set stays through a turn that doesn't touch it");
-  assert.equal((await turn(id, 'API Error: 529 Overloaded')).note, 'API Error: 529 Overloaded');
+  // A failed turn waits for its one retry (#2258); a person's message runs first, in its place.
+  assert.equal((await turn(id, 'API Error: 529 Overloaded')).note, 'Failed: retries by itself shortly');
   assert.equal((await turn(id, 'ok', 'again')).note, null, 'the next good turn clears it');
+  assert.equal(runner.failWait(id), null);
   // A note set after the failure (the agent's set_thread_status, a person's update_ticket) is not the server's to clear.
   await turn(id, 'API Error: 529 Overloaded');
   store.updateTicket(id, { note: 'waiting on Josh' });

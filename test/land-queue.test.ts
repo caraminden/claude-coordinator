@@ -6,10 +6,12 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { root, env, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
 import { until } from './wait.ts';
+import { queueCases } from './queue-cases.ts';
 
 // The line for the deploy lock (tools/deploy-queue.sh, #502). The kernel grants a flock in no order, so ten
 // landings waiting on it at once (2026-11-10) meant some lost every round and timed out.
 
+// Twin of the template's in scheme-setup-land.test.ts, outside the table (test/queue-cases.ts): both run whole landings, and this side's run deploy.sh's fake through land-fixture.ts.
 test('ten landings started together land in the order they arrived, each told its place in line', async () => {
   const r = setup();
   const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
@@ -57,6 +59,7 @@ test('ten landings started together land in the order they arrived, each told it
   assert.equal(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status, 0, 'the deploy lock is free');
 });
 
+// Twin of the template's too, outside the table for the same reason: whole landings, through deploy.sh's fake.
 test('a landing waiting in line rechecks each time main moves, and leaves the line at once when it would conflict (#770)', async () => {
   const r = setup();
   const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
@@ -98,14 +101,17 @@ const queueLib = join(import.meta.dirname, '..', 'tools', 'deploy-queue.sh');
 // `old`: a landing from a branch before #1002, whose queue_lock waits for every lower ticket and ignores .order.
 const before1002 = `queue_order() { QUEUE_RANK=() QUEUE_ORDER_BY=""; }; queue_write() { printf '%s\\n' "$2" "$3" "$4" "$5" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"; }; `;
 // `pre`: shell run before the lib loads (a trace, a stub). queue_lock's own exit code passes through.
+// It notes its label in <state>/order once it holds the lock, and in <state>/done once it has left the line.
+const waiterScript = (old = false, pre = '') => `${pre}. "$0"; ${old ? before1002 : ''}queue_lock "$1" "$2" || exit $?; echo "$2" >>"$1/order"; eval "$3"; queue_done ok; echo "$2" >>"$1/done"`;
 function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}, old = false, pre = '') {
-  const child = spawn('bash', ['-c', `${pre}. "$0"; ${old ? before1002 : ''}queue_lock "$1" "$2" || exit $?; echo "$2" >>"$1/order"; eval "$3"; queue_done ok`, queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
+  const child = spawn('bash', ['-c', waiterScript(old, pre), queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const exit = new Promise<number | null>((ok) => child.on('close', ok));
   return { child, exit, stderr: () => stderr };
 }
-const order = (state: string) => (existsSync(join(state, 'order')) ? readFileSync(join(state, 'order'), 'utf8').trim().split('\n') : []);
+const lines = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n') : []);
+const order = (state: string) => lines(join(state, 'order'));
 let n = 0; // queueState's own count; setup() keeps its own in land-fixture.ts
 const queueState = () => {
   const state = join(root, `queue-${++n}`);
@@ -113,86 +119,39 @@ const queueState = () => {
   return state;
 };
 
-test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {
-  const state = queueState();
-  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
-  let c: ReturnType<typeof waiter> | undefined;
-  try {
-    await until('a to hold the lock', () => order(state).length === 1);
-    const b = waiter(state, 'b', 'true');
-    await until("b's ticket", () => issued(state) === 2);
-    c = waiter(state, 'c', 'true');
-    const cs = c.stderr;
-    await until('c to see its place', () => /3rd in line/.test(cs()));
-    const [ta, , tc] = tickets(state);
-    assert.ok(tc, 'three tickets in line');
-    b.child.kill('SIGKILL');
-    await b.exit;
-    // Not counted right after the kill: c may already have removed it by then.
-    await until('c to move up past the dead ticket', () => /2nd in line/.test(cs()));
-    assert.deepEqual(tickets(state), [ta, tc], "the waiter behind it removed the killed waiter's ticket");
-    writeFileSync(join(state, 'go'), '');
-    assert.equal(await a.exit, 0);
-    assert.equal(await c.exit, 0, c.stderr());
-    assert.deepEqual(order(state), ['a', 'c']);
-  } finally {
-    writeFileSync(join(state, 'go'), ''); // a failed check must not leave a and c waiting, which hangs the file
-    c?.child.kill('SIGKILL');
-  }
+// The cases the kit template's line has too (test/queue-cases.ts): a party's work waits for its gate file.
+const labels = ['a', 'b', 'c'];
+queueCases({
+  name: 'deploy-queue.sh',
+  line: () => {
+    const state = queueState();
+    const gate = join(state, 'go');
+    return {
+      lock: join(state, 'lock'),
+      queue: join(state, 'queue'),
+      dir: state,
+      gate,
+      argv: (i, o = {}) => ({ args: ['-c', waiterScript(), queueLib, state, labels[i - 1], `until [ -e '${o.gate ?? gate}' ]; do sleep 0.05; done${o.hold ? `; sleep ${o.hold}` : ''}`], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...o.env } }),
+      holds: (i) => order(state).includes(labels[i - 1]),
+      served: () => lines(join(state, 'done')).map((l) => labels.indexOf(l) + 1),
+      tickets: () => tickets(state),
+      issued: () => issued(state),
+    };
+  },
+  lock: 'deploy lock',
+  label: (i) => labels[i - 1],
+  holding: 'starting',
+  outside: 'outside the line, the lock is open in pid \\d+ \\(sleep 600\\)\\)',
+  stall: { DEPLOY_QUEUE_STALL: '2' },
+  stalled: '0 min', // whole minutes, rounded down
+  nothing: 'nothing landed or deployed',
+  notTaking: (pid) => `pid ${pid}, which is first in line and is not taking the lock`,
+  quietOpen: false,
+  cgroup: 'DEPLOY_QUEUE_CGROUP',
+  ticket: (pid, start, label) => `${pid} ${start}\n0\n${label}\nwaiting\n`,
 });
 
-// A zombie: b's parent starts it, then becomes a sleep that never waits on it, so once b is killed its
-// /proc entry stays, start time and all, until the parent goes.
-const isZombie = (pid: number) => {
-  try {
-    return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
-  } catch {
-    return false;
-  }
-};
-
-test('a killed waiter whose parent never reaps it leaves the line too', async () => {
-  const state = queueState();
-  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
-  let c: ReturnType<typeof waiter> | undefined;
-  let parent: ReturnType<typeof spawn> | undefined;
-  try {
-    await until('a to hold the lock', () => order(state).length === 1);
-    parent = spawn('bash', ['-c', 'bash -c \'. "$0"; queue_lock "$1" b\' "$0" "$1" & echo $! >"$1/b.pid"; exec sleep 600', queueLib, state], { stdio: 'ignore', env: { ...env, DEPLOY_QUEUE_POLL: '0.05' } });
-    await until("b's ticket", () => issued(state) === 2);
-    c = waiter(state, 'c', 'true');
-    const cs = c.stderr;
-    await until('c to see its place', () => /3rd in line/.test(cs()));
-    const [ta, , tc] = tickets(state);
-    assert.ok(tc, 'three tickets in line');
-    const b = Number(readFileSync(join(state, 'b.pid'), 'utf8'));
-    process.kill(b, 'SIGKILL');
-    await until('b to be a zombie', () => isZombie(b));
-    await until('c to move up past the zombie', () => /2nd in line/.test(cs()));
-    assert.deepEqual(tickets(state), [ta, tc], "the zombie's ticket was removed");
-    assert.ok(isZombie(b), 'b was still a zombie when c moved up');
-    writeFileSync(join(state, 'go'), '');
-    assert.equal(await a.exit, 0);
-    assert.equal(await c.exit, 0, c.stderr());
-    assert.deepEqual(order(state), ['a', 'c']);
-  } finally {
-    writeFileSync(join(state, 'go'), '');
-    c?.child.kill('SIGKILL');
-    parent?.kill('SIGKILL');
-  }
-});
-
-test('a holder that is killed leaves the line too, and its lock goes with it', async () => {
-  const state = queueState();
-  const a = waiter(state, 'a', 'exec sleep 600');
-  await until('a to hold the lock', () => order(state).length === 1);
-  const b = waiter(state, 'b', 'true');
-  await until('b to wait', () => /2nd in line/.test(b.stderr()));
-  a.child.kill('SIGKILL');
-  assert.equal(await b.exit, 0, b.stderr());
-  assert.deepEqual(order(state), ['a', 'b']);
-});
-
+// Citadel's only: a holder's queue_phase steps are progress (the template's holder moves through no phases a test can step).
 test('waiters outlast the stall limit while the holder moves on, and give up once nothing moves', async () => {
   const state = queueState();
   // Three seconds of work in phases, against a two-second limit on no progress (bash counts whole seconds, so it can be a second short).
@@ -212,119 +171,9 @@ test('waiters outlast the stall limit while the holder moves on, and give up onc
   }
 });
 
-test('the head of the line waits for a lock held outside it (the queued restart), and the estimate comes from past landings', async () => {
-  const state = queueState();
-  mkdirSync(join(state, 'queue'));
-  writeFileSync(join(state, 'queue', '.took'), '100\n140\n');
-  const restart = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 600', join(state, 'lock')], { stdio: 'ignore' }); // one process, so killing it frees the lock
-  try {
-    await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
-    const a = waiter(state, 'a', 'sleep 1.2');
-    await until('a to say it waits', () => /next in line for the deploy lock \(ahead: outside the line, the lock is open in pid \d+ \(sleep 600\)\)/.test(a.stderr()));
-    const b = waiter(state, 'b', 'true');
-    await until('b to say its place', () => /2nd in line for the deploy lock, about 2 min \(ahead: a, waiting\)/.test(b.stderr()));
-    assert.deepEqual(order(state), []);
-    restart.kill('SIGKILL');
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.equal(await b.exit, 0, b.stderr());
-    assert.deepEqual(order(state), ['a', 'b']);
-    // Each noted how long it held the lock; a held it for a second or two.
-    const took = readFileSync(join(state, 'queue', '.took'), 'utf8')
-      .trim()
-      .split('\n')
-      .map(Number);
-    assert.equal(took.length, 4);
-    assert.ok(took[2] >= 1 && took[2] <= 30, `a's time: ${took[2]}`);
-  } finally {
-    restart.kill('SIGKILL');
-  }
-});
-
-// The pipeline failure drill's F3 (#553): a SIGSTOP stops a waiter (state T). It holds nothing, yet everyone behind it
-// waited on it with the lock free, and gave up. A frozen cgroup is below.
-test('a waiter that is frozen is passed over: the one behind it takes the lock, and it goes when it wakes', { timeout: 60_000 }, async () => {
-  const state = queueState();
-  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
-  let b: ReturnType<typeof waiter> | undefined;
-  let c: ReturnType<typeof waiter> | undefined;
-  try {
-    // a first: started together, b can take the first ticket under load and never be 2nd (#564).
-    await until('a to hold the lock', () => order(state).length === 1);
-    b = waiter(state, 'b', 'true');
-    const bs = b.stderr;
-    await until('b to say its place', () => /2nd in line/.test(bs()));
-    process.kill(b.child.pid!, 'SIGSTOP');
-    c = waiter(state, 'c', `until [ -e '${state}/go2' ]; do sleep 0.05; done`, { DEPLOY_QUEUE_STALL: '3' });
-    const cs = c.stderr;
-    await until('c to say its place', () => /in line/.test(cs()));
-    writeFileSync(join(state, 'go'), '');
-    await until('c to take the lock', () => order(state).length === 2);
-    assert.deepEqual(order(state), ['a', 'c']);
-    // Awake again while the one that passed it has the lock: that is a landing in line, not something outside it, and
-    // like any holder it is ahead of every waiter (#1002).
-    process.kill(b.child.pid!, 'SIGCONT');
-    await until('b to say what it waits for now', () => /2nd in line for the deploy lock, about \d+ min \(ahead: c, starting\)/.test(b.stderr()));
-    assert.doesNotMatch(b.stderr(), /outside the line/);
-    writeFileSync(join(state, 'go2'), '');
-    assert.equal(await c.exit, 0, cs());
-    assert.equal(await b.exit, 0, b.stderr());
-    assert.deepEqual(order(state), ['a', 'c', 'b']);
-  } finally {
-    for (const w of [a, b, c]) w?.child.kill('SIGKILL');
-  }
-});
-
-// A waiter frozen with `systemctl freeze` (the cgroup freezer, #585) shows state S, not T. Its cgroup's cgroup.events
-// says "frozen 1": that counts as stopped too. A fake cgroup root stands in for /sys/fs/cgroup, so nothing real is frozen.
-function frozenWaiter(state: string, label: string) {
-  const sleeper = spawn('sleep', ['60'], { stdio: 'ignore' });
-  const pid = sleeper.pid!;
-  const start = readFileSync(`/proc/${pid}/stat`, 'utf8')
-    .replace(/^.*\) /s, '')
-    .split(' ')[19];
-  const cg = readFileSync(`/proc/${pid}/cgroup`, 'utf8').match(/^0::(.*)$/m)![1];
-  const fake = join(state, 'cgroup');
-  mkdirSync(join(fake, cg), { recursive: true });
-  writeFileSync(join(fake, cg, 'cgroup.events'), 'populated 1\nfrozen 1\n');
-  mkdirSync(join(state, 'queue'), { recursive: true });
-  writeFileSync(join(state, 'queue', '0000000001'), `${pid} ${start}\n0\n${label}\nwaiting\n`);
-  writeFileSync(join(state, 'queue', '.seq'), '1\n');
-  return { sleeper, cgroupRoot: fake };
-}
-
-test('a waiter whose cgroup is frozen (state S) is passed over like a stopped one: the one behind it takes the free lock', { timeout: 60_000 }, async () => {
-  const state = queueState();
-  const f = frozenWaiter(state, 'frozen');
-  let c: ReturnType<typeof waiter> | undefined;
-  try {
-    await until('the frozen one to be in state S, as a frozen cgroup leaves it', () => /\) S /.test(readFileSync(`/proc/${f.sleeper.pid}/stat`, 'utf8')));
-    c = waiter(state, 'c', 'true', { DEPLOY_QUEUE_STALL: '3', DEPLOY_QUEUE_CGROUP: f.cgroupRoot });
-    assert.equal(await c.exit, 0, c.stderr());
-    assert.deepEqual(order(state), ['c']);
-    assert.ok(existsSync(join(state, 'queue', '0000000001')), 'the frozen one keeps its place, to go when it thaws');
-  } finally {
-    f.sleeper.kill('SIGKILL');
-    c?.child.kill('SIGKILL');
-  }
-});
-
-test('giving up names the process at the head of the line, its state and whether the lock is held', { timeout: 60_000 }, async () => {
-  const state = queueState();
-  const a = waiter(state, 'a', 'exec sleep 60'); // exec: the same pid, so killing it leaves nothing behind
-  let b: ReturnType<typeof waiter> | undefined;
-  try {
-    await until('a to hold the lock', () => order(state).length === 1);
-    process.kill(a.child.pid!, 'SIGSTOP'); // the holder itself is frozen: nobody can pass it
-    b = waiter(state, 'b', 'true', { DEPLOY_QUEUE_STALL: '2' });
-    assert.equal(await b.exit, 1, b.stderr());
-    assert.match(b.stderr(), new RegExp(`nothing has moved for 0 min \\(ahead: a, starting; pid ${a.child.pid}, stopped; the lock is held\\), so this gave up`));
-  } finally {
-    for (const w of [a, b]) w?.child.kill('SIGKILL');
-  }
-});
-
 // F8: an orphan of a killed landing (its test run, its boot check) keeps the lock with no ticket, and the waiters
 // were told "a queued restart, or a landing started from a branch older than the line", which it never was.
+// Citadel's only: the template names a lock held outside the line as an older land.sh, never by its process.
 test('a waiter behind a lock held from outside the line names the process that holds it, and not the waiters behind or their children', { timeout: 60_000 }, async () => {
   const state = queueState();
   const outside = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 41', join(state, 'lock')], { stdio: 'ignore' }); // one process, the lock on its fd 9
@@ -350,6 +199,7 @@ test('a waiter behind a lock held from outside the line names the process that h
 
 // A waiter's poll sleep has the lock file open and may end while queue_outside looks at it: it held nothing, so it
 // isn't named (#564: CI named one with no command line, and before the fix this script did in most polls).
+// Citadel's only, like the one above: the template has no queue_outside.
 test('a child of a waiter that ends while the holder is looked up is not named as the holder', { timeout: 60_000 }, () => {
   const state = queueState();
   mkdirSync(join(state, 'queue'));
@@ -376,6 +226,7 @@ test('a child of a waiter that ends while the holder is looked up is not named a
 
 // F4: the queued restart takes no ticket, so the waiters saw nothing move through it and gave up. It now says what
 // it is doing in <state>/restart ("<pid>" and its phase), and each new phase is progress.
+// Citadel's only: the template has no queued restart.
 test("the queued restart's phases show to the waiters and count as progress", { timeout: 60_000 }, async () => {
   const state = queueState();
   const restart = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 42', join(state, 'lock')], { stdio: 'ignore' }); // one process, the lock on its fd 9
@@ -407,6 +258,7 @@ test("the queued restart's phases show to the waiters and count as progress", { 
 
 // #790: the stall was timed with $SECONDS, which ticks whole seconds, so a 3 s stall gave up 2.0-3.0 s after the last
 // change, and the test above failed whenever its 2 s gaps ran a little long on a loaded box.
+// Citadel's only: the template still times its stall with $SECONDS.
 test('the stall is timed in real seconds: a 1 s stall gives up no sooner than 1 s after the last change', async () => {
   const state = queueState();
   const holder = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 42', join(state, 'lock')], { stdio: 'ignore' });
@@ -423,19 +275,8 @@ test('the stall is timed in real seconds: a 1 s stall gives up no sooner than 1 
   }
 });
 
-// F12b: a lock file that can't be opened printed "flock: 9: Bad file descriptor" about once a second for the whole
-// 15 min stall, then blamed a holder.
-test("a deploy lock that can't be opened gives up at once and says so, not a flock error a second", async () => {
-  const state = queueState();
-  writeFileSync(join(state, 'lock'), '', { mode: 0o444 });
-  const a = waiter(state, 'a', 'true', { DEPLOY_QUEUE_STALL: '3' });
-  assert.equal(await a.exit, 1, a.stderr());
-  assert.match(a.stderr(), /queue: can't open the deploy lock \S+\/lock for writing, so nothing landed or deployed: a person needs to look at it/);
-  assert.doesNotMatch(a.stderr(), /Bad file descriptor|nothing has moved/);
-  assert.deepEqual(tickets(state), []);
-});
-
 // The same for the restart lock (#566 put it beside the deploy lock): it waited out DEPLOY_RESTART_WAIT on a bad fd, then blamed a restart.
+// Citadel's only: the template has no restart lock.
 test("a restart lock that can't be opened gives up at once and says so", () => {
   const state = queueState();
   writeFileSync(join(state, 'restart.lock'), '', { mode: 0o444 });
@@ -445,37 +286,10 @@ test("a restart lock that can't be opened gives up at once and says so", () => {
   assert.doesNotMatch(res.stderr, /Bad file descriptor|has not been let go/);
 });
 
-// F12c: junk in queue/.seq made a landing go live and still exit 1, and every later one too, until a person deleted
-// it, and nothing named .seq.
-test('a queue/.seq that holds no number is named, and the next ticket still goes behind the ones in line', async () => {
-  const state = queueState();
-  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
-  let b: ReturnType<typeof waiter> | undefined;
-  try {
-    await until('a to hold the lock', () => order(state).length === 1);
-    writeFileSync(join(state, 'queue', '.seq'), 'junk\n');
-    b = waiter(state, 'b', 'true');
-    const bs = b.stderr;
-    await until('b to wait', () => /2nd in line/.test(bs()));
-    assert.match(bs(), /queue: \S+\/queue\/\.seq held no ticket number \("junk"\); numbering goes on from the newest ticket, 1/);
-    writeFileSync(join(state, 'go'), '');
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.equal(await b.exit, 0, bs());
-    assert.deepEqual(order(state), ['a', 'b']);
-    assert.equal(issued(state), 2);
-    assert.deepEqual(
-      readdirSync(join(state, 'queue')).filter((f) => f.includes('.tmp')),
-      [],
-      'no half-written tickets left',
-    );
-  } finally {
-    for (const w of [a, b]) w?.child.kill('SIGKILL');
-  }
-});
-
 // #1002 (Cara, 2026-11-18: "I should be able to drag the order and choose which one gets released next"): the Releases
 // page writes queue/.order, the waiting tickets in the order people set. The holder keeps the lock; the waiters take it
 // in that order, and one that joins later, or that .order doesn't name, goes behind them in arrival order.
+// The template's .order cases run whole landings (scheme-setup-land.test.ts), so they stay outside the table.
 test('the waiters take the lock in the order .order sets, a later one goes to the back, and each says who reordered', { timeout: 60_000 }, async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
@@ -508,6 +322,7 @@ test('the waiters take the lock in the order .order sets, a later one goes to th
 // Waiters two or more back look every DEPLOY_QUEUE_NAP s, not every DEPLOY_QUEUE_POLL (#1545): twelve of them looking
 // every second, with a few processes per ticket each look, cost most of a core.
 // A 1 s nap: the test counts naps, never seconds, so a longer one proves nothing more (it was 4 s before #1615).
+// Citadel's only: the template's waiters don't nap.
 const napper = (state: string, label: string, pre = '', extra: Record<string, string> = {}) => waiter(state, label, '', { DEPLOY_QUEUE_NAP: '1', ...extra }, false, pre);
 test('a waiter further back naps between looks and runs no subshell in a look, yet still acts on a reorder, a dead ticket and its wait check within a nap, and the next in line takes its turn at once (#1545)', { timeout: 60_000 }, async () => {
   const state = queueState();
@@ -596,6 +411,7 @@ test('a waiter further back still gives up on time when nothing moves (#1545)', 
 
 // The Releases page's server lists in .order only the tickets marked "order" (src/waits.ts setOrder): a landing from an
 // older branch waits for every lower ticket, so ranking it ahead of one would leave the two waiting on each other.
+// Citadel's only.
 test('a landing from a branch before .order keeps its arrival order, and nobody waits on it forever', { timeout: 60_000 }, async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
@@ -624,6 +440,7 @@ test('a landing from a branch before .order keeps its arrival order, and nobody 
 
 // The other way round (The Trans Agenda #76): the old one arrived first. It waits only for the lower tickets, so a
 // later one ranked by .order must not count itself ahead of it too: both would take the lock when the holder left.
+// The template's twin runs whole landings, an old land.sh among them, so it stays outside the table.
 test('a landing that .order ranks stays behind a waiter from a branch before .order that arrived first', { timeout: 60_000 }, async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
@@ -652,6 +469,7 @@ test('a landing that .order ranks stays behind a waiter from a branch before .or
 });
 
 // deploy_unchecked_back: the next holder after a deploy killed outright between its reset and its checks.
+// Citadel's only: deploys.
 test('a killed deploy is put back, a pull or a roll back alike, unless its restart came up healthy on it (#1016)', () => {
   const live = join(root, `unchecked-${++n}`);
   mkdirSync(live);

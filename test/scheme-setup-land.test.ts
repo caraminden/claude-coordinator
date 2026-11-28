@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { root, env, git, n, setup, landLockFree, until, queueSetup, sleep, timingLines } from './scheme-setup-land-fixture.ts';
+import { queueCases } from './queue-cases.ts';
 
 // The day's land.md in the retro log (#1320): Citadel's timing fields, the ones the kit's landings have.
 const timings = (shared: string) => timingLines(join(shared, 'retro-log'));
@@ -345,6 +346,7 @@ test('numbered things: a line that does not parse refuses and names it; "none" c
   assert.equal(ok.status, 0, ok.stderr);
 });
 
+// The queue cases outside the table (test/queue-cases.ts), down to the .order ones: whole landings here, and Citadel's twins run deploy.sh's fake.
 test('ten landings started together land in the order they arrived, each told its place in line', async () => {
   const q = queueSetup(10);
   const lands: ReturnType<typeof q.land>[] = [];
@@ -473,87 +475,42 @@ test('a waiter .order ranks stays behind one from a land.sh before .order that a
   assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
 });
 
-test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {
-  const q = queueSetup(3);
-  const a = q.land(1);
-  try {
-    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
-    const b = q.land(2);
-    await until("b's ticket", () => q.issued() === 2);
-    const c = q.land(3);
-    await until('c to see its place', () => /3rd in line/.test(c.stderr()));
-    b.child.kill('SIGKILL');
-    await b.exit;
-    await until('c to move up past the dead ticket', () => /2nd in line/.test(c.stderr()));
-    assert.equal(q.tickets().length, 2, 'the waiter behind it removed it');
-    q.open();
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.equal(await c.exit, 0, c.stderr());
-    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f3.txt: 3']);
-  } finally {
-    q.open();
-  }
+// The cases Citadel's deploy-queue.sh has too (test/queue-cases.ts): every landing's check waits for its gate file.
+queueCases({
+  name: 'the template',
+  line: (parties) => {
+    const q = queueSetup(parties, 'until [ -e "$GATE" ]; do sleep 0.05; done; [ -z "$HOLD" ] || sleep "$HOLD"');
+    const gate = join(q.dir, 'gate');
+    return {
+      lock: join(q.state, 'land.lock'),
+      queue: join(q.state, 'land-queue'),
+      dir: q.dir,
+      gate,
+      argv: (i, o = {}) => ({ args: [join(q.wts[i - 1], 'tools', 'land.sh')], cwd: q.wts[i - 1], env: { ...env, GATE: o.gate ?? gate, LAND_QUEUE_POLL: '0.05', ...(o.hold ? { HOLD: String(o.hold) } : {}), ...o.env } }),
+      holds: (i) =>
+        q.tickets().some((t) => {
+          const [, , who, phase] = readFileSync(join(q.state, 'land-queue', t), 'utf8').split('\n');
+          return who === `ticket/${i}-x` && /running the check/.test(phase ?? '');
+        }),
+      served: () => q.landed().map((s) => Number(s.split(': ')[1])),
+      tickets: q.tickets,
+      issued: q.issued,
+    };
+  },
+  lock: 'land lock',
+  label: (i) => `ticket/${i}-x`,
+  holding: 'running the check since \\d\\d:\\d\\d',
+  outside: 'a landing started from a branch whose land\\.sh is older',
+  stall: { LAND_CHECK_TIMEOUT: '1', LAND_QUEUE_SLACK: '1' }, // the stall is the check's limit and the slack
+  stalled: '1 min', // whole minutes, rounded up
+  nothing: 'nothing landed',
+  notTaking: (pid) => `pid ${pid}, which is first in line and is not taking the lock,`,
+  quietOpen: true,
+  cgroup: 'LAND_QUEUE_CGROUP',
+  ticket: (pid, start, label) => `${pid} ${start}\n0\n${label}\nwaiting\n-\n`,
 });
 
-// A zombie: b's parent starts it, then becomes a sleep that never waits on it, so once b is killed its
-// /proc entry stays, start time and all, until the parent goes.
-const isZombie = (pid: number) => {
-  try {
-    return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
-  } catch {
-    return false;
-  }
-};
-
-test('a killed waiter whose parent never reaps it leaves the line too', async () => {
-  const q = queueSetup(3);
-  const a = q.land(1);
-  const pidFile = join(q.dir, 'b.pid');
-  let c: ReturnType<typeof q.land> | undefined;
-  let parent: ReturnType<typeof spawn> | undefined;
-  try {
-    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
-    parent = spawn('bash', ['-c', 'bash "$0" & echo $! >"$1"; exec sleep 600', join(q.wts[1], 'tools', 'land.sh'), pidFile], { cwd: q.wts[1], stdio: 'ignore', env: { ...env, GATE: join(q.dir, 'gate'), LAND_QUEUE_POLL: '0.05' } });
-    await until("b's ticket", () => q.issued() === 2);
-    c = q.land(3);
-    const cs = c.stderr;
-    await until('c to see its place', () => /3rd in line/.test(cs()));
-    const [ta, , tc] = q.tickets();
-    assert.ok(tc, 'three tickets in line');
-    const b = Number(readFileSync(pidFile, 'utf8'));
-    process.kill(b, 'SIGKILL');
-    await until('b to be a zombie', () => isZombie(b));
-    await until('c to move up past the zombie', () => /2nd in line/.test(cs()));
-    assert.deepEqual(q.tickets(), [ta, tc], "the zombie's ticket was removed");
-    assert.ok(isZombie(b), 'b was still a zombie when c moved up');
-    q.open();
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.equal(await c.exit, 0, c.stderr());
-    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f3.txt: 3']);
-  } finally {
-    q.open();
-    c?.child.kill('SIGKILL'); // with nothing ahead it would wait out the stall limit
-    parent?.kill('SIGKILL');
-  }
-});
-
-test('a holder that is killed leaves the line too, and its lock goes with it', async () => {
-  const q = queueSetup(2);
-  const a = q.land(1);
-  try {
-    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
-    const b = q.land(2);
-    await until('b to wait', () => /2nd in line/.test(b.stderr()));
-    a.child.kill('SIGKILL'); // its check runs on without the lock, until the gate opens below
-    await until('b to get the lock', () => /got the land lock/.test(b.stderr()));
-    q.open();
-    assert.equal(await b.exit, 0, b.stderr());
-    assert.deepEqual(q.landed(), ['f2.txt: 2']);
-  } finally {
-    q.open();
-  }
-});
-
+// The template's only: its stall comes from the check's limit (Citadel's has a knob of its own, DEPLOY_QUEUE_STALL).
 test('a waiter gives up once nothing has moved for the stall limit, with nothing landed', async () => {
   const q = queueSetup(2);
   const a = q.land(1);
@@ -585,172 +542,6 @@ test('the stall limit is longer than the check limit, so a waiter outlasts a che
   assert.match(b.stderr(), /2nd in line/);
   assert.deepEqual(q.landed(), ['f2.txt: 2']);
   assert.equal(spawnSync('bash', [join(q.wt, 'tools', 'land.sh')], { cwd: q.wt, encoding: 'utf8', env: { ...env, LAND_CHECK_TIMEOUT: '30m' } }).stderr.trim(), 'land: LAND_CHECK_TIMEOUT is in whole seconds, not "30m"');
-});
-
-test('the head of the line waits for a lock held outside it (an older land.sh), and the estimate comes from past landings', async () => {
-  const q = queueSetup(2, 'true');
-  mkdirSync(join(q.state, 'land-queue'));
-  writeFileSync(join(q.state, 'land-queue', '.took'), '100\n140\n');
-  const older = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 600', join(q.state, 'land.lock')], { stdio: 'ignore' }); // one process, so killing it frees the lock
-  try {
-    await until('the lock to be held', () => !landLockFree(q));
-    const a = q.land(1);
-    await until('a to say it waits', () => /next in line for the land lock \(ahead: a landing started from a branch whose land.sh is older/.test(a.stderr()));
-    const b = q.land(2);
-    await until('b to say its place', () => /2nd in line for the land lock, about 2 min \(ahead: ticket\/1-x, waiting\)/.test(b.stderr()));
-    assert.deepEqual(q.landed(), []);
-    older.kill('SIGKILL');
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.equal(await b.exit, 0, b.stderr());
-    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2']);
-    assert.equal(
-      readFileSync(join(q.state, 'land-queue', '.took'), 'utf8')
-        .trim()
-        .split('\n').length,
-      4,
-      'each noted how long it held the lock',
-    );
-  } finally {
-    older.kill('SIGKILL');
-  }
-});
-
-// Citadel's pipeline failure drill, F3 (#553), in the template's own line: a waiter stopped by a SIGSTOP (state T) holds
-// no land lock, yet everyone behind it waited on it with the lock free. A frozen cgroup is below.
-test('a waiter that is stopped (SIGSTOP) is passed over: the one behind it takes the lock and lands, and it goes when it wakes', async () => {
-  const q = queueSetup(3);
-  const gate = { a: join(q.dir, 'gate-a'), c: join(q.dir, 'gate-c') };
-  q.open(); // b's check
-  const a = q.land(1, { GATE: gate.a });
-  let b: ReturnType<typeof q.land> | undefined;
-  let c: ReturnType<typeof q.land> | undefined;
-  try {
-    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
-    b = q.land(2);
-    const bs = b.stderr;
-    await until('b to say its place', () => /2nd in line/.test(bs()));
-    process.kill(b.child.pid!, 'SIGSTOP');
-    c = q.land(3, { GATE: gate.c });
-    const cs = c.stderr;
-    await until('c to say its place', () => /in line for the land lock/.test(cs()));
-    writeFileSync(gate.a, '');
-    assert.equal(await a.exit, 0, a.stderr());
-    await until('c to take the lock past the stopped b', () => /got the land lock/.test(cs()), 15_000);
-    // Awake again while the one that passed it has the lock: that is a landing in line, not one older than the line, and
-    // as the holder it is ahead of every waiter (#1007).
-    process.kill(b.child.pid!, 'SIGCONT');
-    await until('b to say what it waits for now', () => /2nd in line for the land lock, about \d+ min \(ahead: ticket\/3-x, running the check since/.test(bs()));
-    assert.doesNotMatch(bs(), /older than the line/);
-    writeFileSync(gate.c, '');
-    assert.equal(await c.exit, 0, cs());
-    assert.equal(await b.exit, 0, bs());
-    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f3.txt: 3', 'f2.txt: 2']);
-  } finally {
-    for (const g of Object.values(gate)) writeFileSync(g, '');
-    if (b) {
-      b.child.kill('SIGCONT');
-      b.child.kill('SIGKILL');
-    }
-    c?.child.kill('SIGKILL');
-  }
-});
-
-// The same for a waiter frozen with `systemctl freeze` (the cgroup freezer, #585): state S, and "frozen 1" in its cgroup's
-// cgroup.events. A fake cgroup root stands in for /sys/fs/cgroup, so nothing real is frozen.
-test('a waiter whose cgroup is frozen (state S) is passed over like a stopped one: the one behind it takes the free lock and lands', async () => {
-  const q = queueSetup(1);
-  const sleeper = spawn('sleep', ['60'], { stdio: 'ignore' });
-  try {
-    const pid = sleeper.pid!;
-    await until('the frozen one to be in state S, as a frozen cgroup leaves it', () => /\) S /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')));
-    const start = readFileSync(`/proc/${pid}/stat`, 'utf8')
-      .replace(/^.*\) /s, '')
-      .split(' ')[19];
-    const cg = readFileSync(`/proc/${pid}/cgroup`, 'utf8').match(/^0::(.*)$/m)![1];
-    const fake = join(q.dir, 'cgroup');
-    mkdirSync(join(fake, cg), { recursive: true });
-    writeFileSync(join(fake, cg, 'cgroup.events'), 'populated 1\nfrozen 1\n');
-    mkdirSync(join(q.state, 'land-queue'), { recursive: true });
-    writeFileSync(join(q.state, 'land-queue', '0000000001'), `${pid} ${start}\n0\nticket/9-frozen\nwaiting\n-\n`);
-    writeFileSync(join(q.state, 'land-queue', '.seq'), '1\n');
-    q.open();
-    const a = q.land(1, { LAND_CHECK_TIMEOUT: '1', LAND_QUEUE_SLACK: '1', LAND_QUEUE_CGROUP: fake });
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.deepEqual(q.landed(), ['f1.txt: 1']);
-    assert.deepEqual(q.tickets(), ['0000000001'], 'the frozen one keeps its place, to go when it thaws');
-  } finally {
-    sleeper.kill('SIGKILL');
-  }
-});
-
-test('giving up names the process at the head of the line, its state and whether the lock is held or free', async () => {
-  const q = queueSetup(3);
-  const a = q.land(1);
-  const stall = { LAND_CHECK_TIMEOUT: '1', LAND_QUEUE_SLACK: '1' };
-  let stuck: ReturnType<typeof spawn> | undefined;
-  try {
-    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
-    process.kill(a.child.pid!, 'SIGSTOP'); // the holder itself is stopped: nobody can pass it
-    const b = q.land(2, stall);
-    assert.equal(await b.exit, 1, b.stderr());
-    assert.match(b.stderr(), new RegExp(`nothing has moved for 1 min \\(ahead: ticket/1-x, running the check since \\d\\d:\\d\\d; pid ${a.child.pid}, stopped; the lock is held\\), so this gave up`));
-    a.child.kill('SIGKILL');
-    q.open(); // its check's subshell outlives it, holding its stderr open until the check ends
-    await a.exit;
-    // First in line, awake, and not taking the free lock.
-    stuck = spawn('sleep', ['60'], { stdio: 'ignore' });
-    const pid = stuck.pid!;
-    await until('the stuck process to run', () => existsSync(`/proc/${pid}/stat`));
-    const started = readFileSync(`/proc/${pid}/stat`, 'utf8')
-      .replace(/^.*\) /s, '')
-      .split(' ')[19];
-    const seq = Number(readFileSync(join(q.state, 'land-queue', '.seq'), 'utf8')) + 1;
-    writeFileSync(join(q.state, 'land-queue', String(seq).padStart(10, '0')), `${pid} ${started}\n0\nstuck\nwaiting\n-\n`);
-    writeFileSync(join(q.state, 'land-queue', '.seq'), `${seq}\n`);
-    const c = q.land(3, stall);
-    assert.equal(await c.exit, 1, c.stderr());
-    assert.match(c.stderr(), new RegExp(`nothing has moved for 1 min \\(ahead: stuck, waiting; pid ${pid}, state S; the lock is free\\), so this gave up and nothing landed\\. A person needs to look at pid ${pid}, which is first in line and is not taking the lock, before anyone tries again`));
-  } finally {
-    q.open();
-    a.child.kill('SIGKILL');
-    stuck?.kill('SIGKILL');
-  }
-});
-
-// Citadel's drill, F12b (#577): a lock file that can't be opened is named, not left to a shell or flock error.
-test("a land lock that can't be opened gives up at once and says so", async () => {
-  const q = queueSetup(1, 'true');
-  writeFileSync(join(q.state, 'land.lock'), '', { mode: 0o444 });
-  const a = q.land(1);
-  assert.equal(await a.exit, 1, a.stderr());
-  assert.match(a.stderr(), /queue: can't open the land lock \S+\/land\.lock for writing, so nothing landed: a person needs to look at it/);
-  assert.doesNotMatch(a.stderr(), /Bad file descriptor|Permission denied|nothing has moved/);
-  assert.deepEqual(q.tickets(), []);
-  assert.deepEqual(q.landed(), []);
-});
-
-// F12c: junk in land-queue/.seq gave the next landing ticket 1 again, in place of the holder's, and nothing named it.
-test('a land-queue/.seq that holds no number is named, and the next ticket still goes behind the ones in line', async () => {
-  const q = queueSetup(2);
-  const a = q.land(1);
-  let b: ReturnType<typeof q.land> | undefined;
-  try {
-    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
-    writeFileSync(join(q.state, 'land-queue', '.seq'), 'junk\n');
-    b = q.land(2);
-    const bs = b.stderr;
-    await until('b to wait', () => /2nd in line/.test(bs()));
-    assert.match(bs(), /queue: \S+\/land-queue\/\.seq held no ticket number \("junk"\); numbering goes on from the newest ticket, 1/);
-    assert.deepEqual(q.tickets(), ['0000000001', '0000000002']);
-    q.open();
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.equal(await b.exit, 0, bs());
-    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2']);
-    assert.equal(q.issued(), 2);
-  } finally {
-    q.open();
-    b?.child.kill('SIGKILL');
-  }
 });
 
 // merge-tree reads .gitattributes from the worktree it runs in, but the rebase sees main's: a union file main gained

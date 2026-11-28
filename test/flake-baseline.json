@@ -329,10 +329,6 @@
   "sleep": {
    "n": 3,
    "ok": 0
-  },
-  "elapsed": {
-   "n": 1,
-   "ok": 0
   }
  },
  "land-recover-fixture.ts": {
@@ -775,10 +771,6 @@
    "ok": 0
   },
   "sleep": {
-   "n": 1,
-   "ok": 0
-  },
-  "shortUntil": {
    "n": 1,
    "ok": 0
   }

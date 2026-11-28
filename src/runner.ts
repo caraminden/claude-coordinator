@@ -2821,6 +2821,7 @@ export class Runner {
       this.turnLine.join(ticket.id, via);
       return 'wait';
     }
+    if (at && on) this.emit(ticket.id, 'note', { text: `This turn runs at perigee: ${this.pools?.nameOf(at) ?? 'its computer'} could not take it as it started (${on.why}).` });
     this.turnLine.comeHome(ticket.id);
     return null;
   }

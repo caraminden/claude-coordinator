@@ -536,6 +536,42 @@ test("a turn re-attached on a machine holds that machine's worker, and one that 
   assert.deepEqual([p.turns.used(), p.turns.used(DESK)], [1, 0]);
 });
 
+// #2316. Cara, 2026-11-28: "0 pressure, but 1 worker with perigee at 12/9?" Auto shrank perigee under its running turns.
+test('perigee shrunk under its running turns: the next turn takes the free machine worker, and the tile says why perigee is over', () => {
+  const p = places({ 'turn-pool': { size: 6, at: 0 } });
+  p.turns.setSize(null, 'Cara');
+  for (const id of [1, 2, 3, 4, 5, 6]) p.turns.enter(id);
+  assert.deepEqual([p.turns.used(), p.turns.used(DESK)], [6, 0], 'perigee had room for all six');
+  const now = Date.now();
+  for (const s of [1, 2, 3]) p.turns.tick(starved, [], now + s * 31_000, ok);
+  assert.deepEqual([p.turns.used(), p.turns.size()], [6, L.min], 'none stopped, the size at its fewest');
+  assert.deepEqual(p.turns.summary().over, { by: 2, lane: 0, forced: 0, card: 0, restart: 0, home: 0 }, 'all of it from the shrink');
+  assert.deepEqual([p.turns.enter(7), p.at(7)], [true, DESK], 'the machine, not perigee');
+  p.turns.stop();
+});
+
+test('the tile names what put perigee over its size: a card answered, a restart, a turn its machine could not take', () => {
+  const p = places();
+  p.turns.enter(1);
+  void p.turns.hold(1, () => new Promise(() => {}));
+  p.turns.setLent(1, true);
+  p.turns.enter(2);
+  p.turns.setLent(1, false);
+  void p.turns.reattach(3, () => new Promise(() => {}));
+  p.turns.enter(4);
+  assert.equal(p.at(4), DESK);
+  p.turns.comeHome(4);
+  assert.deepEqual(p.turns.summary().over, { by: 3, lane: 0, forced: 0, card: 1, restart: 1, home: 1 });
+  p.turns.stop();
+});
+
+test('within its size, the tile has no over', () => {
+  const p = places();
+  p.turns.enter(1);
+  assert.equal(p.turns.summary().over, null);
+  p.turns.stop();
+});
+
 test("a machine's turns are not in its person's share at perigee", () => {
   const p = places();
   p.turns.reattach(1, () => new Promise(() => {}), DESK);

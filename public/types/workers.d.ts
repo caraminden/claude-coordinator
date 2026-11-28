@@ -22,6 +22,8 @@ export interface WorkersTile {
   running: number;
   forced: number;
   lane: { used: number; size: number; moved: number };
+  /** How far perigee runs past its size, and how many turns took a worker past it by why; the rest is Auto's shrink under running turns (#2316). Null within it. */
+  over: { by: number; lane: number; forced: number; card: number; restart: number; home: number } | null;
   size: number;
   pool: { size: number; at: number; why?: string; fixed?: { size: number; by: string } };
   paused: { by: string; stop?: true; at: number } | null;

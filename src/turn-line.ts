@@ -56,6 +56,9 @@ export const POOL = {
   laneOver: 2,
 };
 
+/** Why a turn took a perigee worker past the size (#2316). */
+type Over = 'card' | 'restart' | 'home';
+
 const LINE = 'turn-line';
 const SIZE = 'turn-pool';
 const PAUSE = 'turns-paused';
@@ -209,9 +212,10 @@ export class TurnLine {
    * Turns that run: the minion, how many of its lane's steps count on it (an account switch queues its resume in its turn's end), and whose
    * share. A `lent` one only waits on an approval card, so its worker is back in the pool until the answer (#1916); a `forced` one
    * started on a worker of its own (#1957), that person's. `place`: whose pool the worker is of. `lane`: it started in
-   * perigee's quick lane, and `moved` once it counts in the pool.
+   * perigee's quick lane, and `moved` once it counts in the pool. `over`: it took a perigee worker past the size (#2316): its card was answered,
+   * it ran on through a restart, or its machine could not take it after all.
    */
-  private granted = new Map<number, { steps: number; person: number; place: number; lent?: true; forced?: number; lane?: { since: number; moved?: true } }>();
+  private granted = new Map<number, { steps: number; person: number; place: number; lent?: true; forced?: number; lane?: { since: number; moved?: true }; over?: Over }>();
   private admitting: { ticket: number; place: number; lane: boolean } | null = null;
   /** The box's memory level at the last tick, which sizes the quick lane. */
   private level: PoolBox['level'] = 'ok';
@@ -250,7 +254,9 @@ export class TurnLine {
   /** Its machine can't take the turn it was given a worker for there: unless marked for it, it runs at perigee, over the size if need be. */
   comeHome(ticketId: number) {
     const held = this.granted.get(ticketId);
-    if (held) held.place = 0;
+    if (!held?.place) return;
+    held.place = 0;
+    if (this.used() > this.size()) held.over = 'home';
   }
 
   private laneUsed(): number {
@@ -285,7 +291,10 @@ export class TurnLine {
     if (lent) {
       held.lent = true;
       if (held.lane) held.lane.moved = true;
-    } else delete held.lent;
+    } else {
+      if (this.used() >= this.size()) held.over = 'card';
+      delete held.lent;
+    }
     this.ordered = null;
     if (lent) this.pumpIn(0);
   }
@@ -479,6 +488,7 @@ export class TurnLine {
       running: this.granted.size,
       forced: [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length,
       lane: this.lane(),
+      over: this.over(),
       size: this.size(),
       pool: this.pool(),
       paused: this.paused(),
@@ -489,6 +499,15 @@ export class TurnLine {
       reading: this.seen && Date.now() - this.seen.at < POOL.loadStaleMs ? { cpu: this.seen.cpu, mem: this.seen.mem } : null,
       pressed: this.seen && Date.now() - this.seen.at < POOL.loadStaleMs ? this.seen.pressed : null,
     };
+  }
+
+  /** How far perigee's running turns are past its size, and how many of them took their worker past it, by why; the rest are Auto's shrink under them. */
+  private over() {
+    const by = this.used() - this.size();
+    if (by <= 0) return null;
+    const home = [...this.granted.values()].filter((g) => !g.place && !g.lent && !inLane(g));
+    const n = (why: Over) => home.filter((g) => g.over === why).length;
+    return { by, lane: home.filter((g) => g.lane?.moved).length, forced: home.filter((g) => g.forced !== undefined).length, card: n('card'), restart: n('restart'), home: n('home') };
   }
 
   /** The quick lane for the tile: `moved` counts the turns that started there and take a pool worker now. */
@@ -772,7 +791,9 @@ export class TurnLine {
   /** A turn the last server left running holds its worker, over the size if need be. */
   reattach(ticketId: number, step: () => unknown, place = 0): unknown {
     if (this.host.exempt(ticketId)) return step();
+    const over = !place && this.used() >= this.size();
     this.grant(ticketId, undefined, place);
+    if (over) this.granted.get(ticketId)!.over = 'restart';
     return this.hold(ticketId, step);
   }
 

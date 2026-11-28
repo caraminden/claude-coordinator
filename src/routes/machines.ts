@@ -634,23 +634,6 @@ export const machineRoutes: Route[] = [
       return json(ctx.res, 202, await ctx.app.runnerJobs.start(ctx.project, askerOf(ctx), ask));
     },
   },
-  // Start one one-job runner by hand (runner pool P2, #2269): {host, os, slot, labels}. The pool starts them by itself (P1);
-  // this is for trying a machine's slots. host names the PC (its machine name or hostname), and it must run CI for the scheme.
-  {
-    method: 'POST',
-    path: '/api/projects/:project/ci-runners/slot',
-    ...runnerAskers,
-    async handler({ req, res, app, project }) {
-      const body = await readJson(req, 10_000);
-      const os = body.os ?? 'windows';
-      if (os !== 'windows' && os !== 'linux') throw new HttpError(400, 'os must be windows or linux');
-      if (typeof body.host !== 'string' || !body.host) throw new HttpError(400, 'host must name the PC');
-      const host = body.host.toLowerCase();
-      const machine = app.machines.runnerMachines(os).find((m) => m.name.toLowerCase() === host || app.machines.runnerHost(m.id, os)?.toLowerCase() === host);
-      if (!machine) throw new HttpError(409, `No ${os} runner agent named ${body.host} is connected`);
-      return json(res, 202, await app.runnerSlots.start(project, machine, { os, slot: body.slot as number, labels: body.labels as string[] }));
-    },
-  },
   {
     // ?wait=<seconds, up to 50> holds the answer until a running job ends.
     method: 'GET',

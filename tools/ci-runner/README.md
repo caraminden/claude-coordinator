@@ -574,7 +574,9 @@ left as they are.
 
 - **Start.** Citadel mints the runner's config with the scheme owner's GitHub login. It does so only for a machine whose
   CI role is on and lent to that scheme (`lendsCi`, `src/ci-runner.ts`). It holds the config under a one-time id for
-  2 minutes (`src/runner-slots.ts`) and sends the agent `{op: 'start', scheme, slot, once}`. The agent runs
+  2 minutes (`src/runner-slots.ts`) and sends the agent `{op: 'start', scheme, slot, once, name}`, `name` being the
+  runner's pool name. A job whose labels end in `-desktop` is refused: it needs a person's session, which a slot's
+  task isn't. The agent runs
   `runner-slot.ps1 -Op Start` (or `runner-slot.sh start`) as SYSTEM or root. That makes the slot folder
   `C:\citadel-pool\<repo>\slot-<n>` (Linux: `/opt/citadel-pool/<repo>/slot-<n>`) and starts the slot's task or unit
   as the low-rights account: NETWORK SERVICE on Windows, the scheme's `ci-<repo>-<hash>` user on Linux. The launcher
@@ -585,15 +587,19 @@ left as they are.
   Windows slots link `bin` and `externals` to it with junctions and copy its root files. Linux slots get `cp -al` hard
   links, made in a root-only folder and renamed in. SYSTEM and root never run or read a job-writable file as
   themselves. The config turns the runner's own self-update off; the agent updates the copy instead, a day apart and
-  only while no slot runs.
+  only while no slot runs. A copy whose last good update is 25 days old holds the agent's job lock, so no new slot
+  starts, until the running ones end and it updates.
 - **Watch.** Every 15 seconds the agent reads the state op for the slots it started (`slots.json` beside it). It tells
   Citadel when a runner took a job, ended (with the launcher's exit code) or was stopped: a runner with no job after
-  2 minutes is stopped and its `.runner`, `.credentials` and `.credentials_rsaparams` wiped. The launcher wipes them
-  again before every start.
-- **Leftovers.** GitHub keeps a one-job runner that never ran a job. After an end or a stop, Citadel removes the
-  slot's runners (named `pool-m<machine>-<w|l><slot>-…`) that were minted by then and aren't busy. It tries again
-  for one GitHub still calls busy. An agent killed mid-job picks the slot up again from `slots.json` at its next start,
-  and reports the end when the runner ends.
+  2 minutes is stopped and its `.runner`, `.credentials` and `.credentials_rsaparams` wiped. A stop goes by the slot
+  folder's repo name (`-Op Stop -Repo <name> -Slot <n>`, `stop <name> <n>`), so it asks Citadel nothing and still
+  works after the scheme stopped borrowing the machine. The launcher wipes the files again before every start.
+- **Leftovers.** GitHub keeps a one-job runner that never ran a job. Every report names its runner
+  (`pool-m<machine>-<w|l><slot>-<j<job>|tag>`, checked against the reporting machine and slot). After an end or a stop,
+  or a start the agent refused, Citadel removes that one runner, never the slot's next one. It tries up to 3 times, a
+  minute apart, for one GitHub still calls busy or a list that failed. An agent killed mid-job picks the slot up again
+  from `slots.json` at its next start and reports the end when the runner ends; a start it was running when it died
+  is saved before it runs and reported ended, so that runner goes too.
 - **Proven** on Windows 11 (as SYSTEM, the runner as NETWORK SERVICE) and on Fedora with systemd (as root, the runner as
   the scheme's user). Two jobs ran in a row in one slot, and the second found the first's build folder.
 

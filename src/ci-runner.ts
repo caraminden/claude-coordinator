@@ -87,7 +87,7 @@ export function mayFetch(store: Store, machine: Machine, project: Project, remov
   return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
 }
 
-/** Whether this machine runs CI for the scheme now: its CI role on and lent there (a one-job runner's config needs it, #2269). */
+/** A PC lends CI to the scheme: its CI role is on and the scheme ticked (and, for a person's own, they're in it). A one-job runner's config needs it (#2269). */
 export function lendsCi(store: Store, machine: Machine, project: Project): boolean {
   return (store.machineRoles(machine.id).find((r) => r.role === 'ci')?.on ?? false) && lendsRole(store, machine, 'ci', project);
 }

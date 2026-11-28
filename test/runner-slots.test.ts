@@ -80,18 +80,22 @@ test('a one-time id hands its config out once, to the first who holds it, and la
   assert.equal(once.take(lapsing), null);
 });
 
-test("an agent's slot report is checked field by field, and a job's name is kept short and printable", () => {
+test("an agent's slot report is checked field by field, names one of its own slot's runners, and a job's name is kept short and printable", () => {
   const m = { id: 4 } as Machine;
-  const r = slotReport(m, { scheme: 2, slot: 3, os: 'linux', event: 'took', job: `build\u0007\n${'x'.repeat(300)}`, code: 'no' }, 99);
-  assert.deepEqual({ ...r, job: r.job?.slice(0, 7) }, { machineId: 4, scheme: 2, slot: 3, os: 'linux', event: 'took', job: 'build  ', at: 99 });
+  const r = slotReport(m, { scheme: 2, slot: 3, os: 'linux', event: 'took', runner: 'pool-m4-l3-j77', job: `build\u0007\n${'x'.repeat(300)}`, code: 'no' }, 99);
+  assert.deepEqual({ ...r, job: r.job?.slice(0, 7) }, { machineId: 4, scheme: 2, slot: 3, os: 'linux', event: 'took', runner: 'pool-m4-l3-j77', job: 'build  ', at: 99 });
   assert.equal(r.job?.length, 200);
-  for (const bad of [{ scheme: 0 }, { slot: 17 }, { slot: 1.5 }, { os: 'mac' }, { event: 'exploded' }]) {
-    assert.throws(() => slotReport(m, { scheme: 2, slot: 3, os: 'windows', event: 'ended', ...bad }), { status: 400 }, JSON.stringify(bad));
+  const ok = { scheme: 2, slot: 3, os: 'windows', event: 'ended', runner: 'pool-m4-w3-a1b2c3' };
+  slotReport(m, ok);
+  // Another machine's, another slot's or OS's runner, a standing runner, or none: a report can only end its own.
+  const others = [{ runner: 'pool-m5-w3-a1b2c3' }, { runner: 'pool-m4-w2-a1b2c3' }, { runner: 'pool-m4-l3-a1b2c3' }, { runner: 'DESK-peek-auras' }, { runner: undefined }, { runner: 'pool-m4-w3-' }];
+  for (const bad of [{ scheme: 0 }, { slot: 17 }, { slot: 1.5 }, { os: 'mac' }, { event: 'exploded' }, ...others]) {
+    assert.throws(() => slotReport(m, { ...ok, ...bad }), { status: 400 }, JSON.stringify(bad));
   }
 });
 
 /** RunnerSlots over a faked GitHub list and a faked agent. */
-function slots(agentOk = true) {
+function slots() {
   const store = new Store(':memory:');
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const project = store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras.git', cara.id);
@@ -108,6 +112,10 @@ function slots(agentOk = true) {
       return 'THE-CONFIG';
     },
     listed: async () => {
+      if (w.listFails > 0) {
+        w.listFails--;
+        throw new Error('GitHub is away');
+      }
       const now = listed.map((x) => ({ ...x }));
       w.afterList();
       return now;
@@ -123,11 +131,11 @@ function slots(agentOk = true) {
   const relay = {
     runnerJob: async (_id: number, job: RunnerJob) => {
       sent.push(job);
-      return { ok: agentOk, output: agentOk ? 'started' : 'refused' };
+      return { ok: w.agentOk, output: w.agentOk ? 'started' : 'refused' };
     },
   };
   const rs = new RunnerSlots(store, tokens, relay, 0);
-  const w = { store, project, machine, listed, removed, sent, rs, lists: 0, afterList: () => {} };
+  const w = { store, project, machine, listed, removed, sent, rs, lists: 0, listFails: 0, agentOk: true, afterList: () => {} };
   return w;
 }
 
@@ -138,62 +146,83 @@ test('a start mints for the slot, sends the agent only the one-time id, and the 
   assert.equal(w.sent.length, 1);
   const job = w.sent[0];
   assert.ok(job.op === 'start');
-  assert.deepEqual(Object.keys(job).sort(), ['once', 'op', 'scheme', 'slot']);
+  assert.deepEqual(Object.keys(job).sort(), ['name', 'once', 'op', 'scheme', 'slot']);
+  assert.equal(job.name, r.name);
   assert.ok(!JSON.stringify(job).includes('THE-CONFIG'), 'the config never goes to the agent');
   assert.equal(w.rs.once.take(job.once), 'THE-CONFIG');
   assert.equal(w.rs.once.take(job.once), null);
-  for (const bad of [{ slot: 0 }, { slot: 17 }, { labels: [] }, { labels: ['a b'] }, { job: -1 }]) {
+  // A desktop job needs a person's session, which a slot's task isn't (P6).
+  for (const bad of [{ slot: 0 }, { slot: 17 }, { labels: [] }, { labels: ['a b'] }, { job: -1 }, { labels: ['peek-auras-desktop'] }]) {
     await assert.rejects(w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'], ...bad }), { status: 400 }, JSON.stringify(bad));
   }
 });
 
-test('a start the agent refuses drops its id and takes the runner it minted off GitHub', async () => {
-  const w = slots(false);
+test('a start the agent refuses drops its id and takes off the runner it minted, and only that one', async () => {
+  const w = slots();
+  // Slot 1's runner is up and waiting for its job; a second start in that slot is refused (its script: still running).
+  const first = await w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'] });
+  w.agentOk = false;
   const r = await w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'] });
   assert.equal(r.ok, false);
-  const job = w.sent[0];
+  const job = w.sent[1];
   assert.ok(job.op === 'start');
   assert.equal(w.rs.once.take(job.once), null);
-  await until('the minted runner is gone', () => w.listed.length === 0);
-  assert.equal(w.removed.length, 1);
+  await until('the refused runner is gone', () => w.listed.length === 1);
+  assert.deepEqual(
+    w.listed.map((x) => x.name),
+    [first.name],
+  );
 });
 
-test("an end takes off only that slot's idle runners minted before it, and waits out one GitHub still calls busy", async () => {
+test('an end takes off only the runner it names, and waits out one GitHub still calls busy or a list that failed', async () => {
   const w = slots();
-  await w.rs.start(w.project, w.machine, { os: 'windows', slot: 1, labels: ['x'] });
+  const one = await w.rs.start(w.project, w.machine, { os: 'windows', slot: 1, labels: ['x'] });
   await w.rs.start(w.project, w.machine, { os: 'windows', slot: 2, labels: ['x'] });
-  await w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'] });
   // Another machine's runner and a standing runner share the repo: never touched.
   w.listed.push({ id: 1, name: poolName(w.machine.id + 1, 'windows', 1, 7), status: 'online', busy: false, labels: [] }, { id: 2, name: 'DESK-peek-auras', status: 'online', busy: false, labels: [] });
   const slot1 = w.listed[0];
   slot1.busy = true;
-  // GitHub sees the killed runner go only on its next look.
+  // The first list fails; GitHub sees the killed runner go only on the look after.
+  w.listFails = 1;
   w.afterList = () => {
     w.lists++;
     slot1.busy = false;
   };
-  assert.equal(await w.rs.cleanUp(w.project, w.machine.id, 'windows', 1, Date.now() + 1), 1);
+  assert.equal(await w.rs.cleanUp(w.project, one.name), true);
   assert.equal(w.lists, 2);
-  const prefixes = w.listed.map((x) => x.name.replace(/[^-]+$/, ''));
-  assert.deepEqual(prefixes, [`pool-m${w.machine.id}-w2-`, `pool-m${w.machine.id}-l1-`, `pool-m${w.machine.id + 1}-w1-`, 'DESK-peek-']);
-
-  // A runner minted after the end it cleans up for stays: it is the slot's next one.
-  await w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'] });
-  assert.equal(await w.rs.cleanUp(w.project, w.machine.id, 'linux', 1, Date.now() - 60_000), 0);
+  assert.deepEqual(
+    w.listed.map((x) => x.name.replace(/[^-]+$/, '')),
+    [`pool-m${w.machine.id}-w2-`, `pool-m${w.machine.id + 1}-w1-`, 'DESK-peek-'],
+  );
+  // Gone already (a one-job runner that ran its job): nothing to do.
+  assert.equal(await w.rs.cleanUp(w.project, one.name), true);
 });
 
-test("an agent's ended report cleans up the slot; one for a scheme that's gone is refused", async () => {
+test("a late end report takes off only its own runner, never the slot's next one", async () => {
+  const w = slots();
+  const old = await w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'] });
+  // The agent's ended report for the old runner waits in its outbox while the slot's next runner starts.
+  const next = await w.rs.start(w.project, w.machine, { os: 'linux', slot: 1, labels: ['x'] });
+  w.rs.report(w.machine, { scheme: w.project.id, slot: 1, os: 'linux', event: 'ended', runner: old.name });
+  await until('the old runner is gone', () => !w.listed.some((x) => x.name === old.name));
+  assert.deepEqual(
+    w.listed.map((x) => x.name),
+    [next.name],
+  );
+});
+
+test("an agent's ended report cleans up its runner; one for a scheme that's gone is refused", async () => {
   const w = slots();
   const seen: string[] = [];
   w.rs.onReport = (r) => seen.push(`${r.event}${r.code ?? ''}`);
-  await w.rs.start(w.project, w.machine, { os: 'windows', slot: 3, labels: ['x'] });
-  w.rs.report(w.machine, { scheme: w.project.id, slot: 3, os: 'windows', event: 'took', job: 'test' });
+  const { name } = await w.rs.start(w.project, w.machine, { os: 'windows', slot: 3, labels: ['x'] });
+  w.rs.report(w.machine, { scheme: w.project.id, slot: 3, os: 'windows', event: 'took', runner: name, job: 'test' });
   assert.equal(w.listed.length, 1);
-  w.rs.report(w.machine, { scheme: w.project.id, slot: 3, os: 'windows', event: 'ended', code: 0 });
+  w.rs.report(w.machine, { scheme: w.project.id, slot: 3, os: 'windows', event: 'ended', runner: name, code: 0 });
   await until('the ended runner is gone', () => w.listed.length === 0);
   assert.deepEqual(seen, ['took', 'ended0']);
-  assert.throws(() => w.rs.report(w.machine, { scheme: 999, slot: 3, os: 'windows', event: 'ended' }), { status: 404 });
+  assert.throws(() => w.rs.report(w.machine, { scheme: 999, slot: 3, os: 'windows', event: 'ended', runner: name }), { status: 404 });
   // A machine that hosts no CI can't make Citadel list a scheme's runners.
   const laptop = w.store.createMachine('laptop', 'x', 'Cara', w.store.getProject(w.project.id)!.owner_id!);
-  assert.throws(() => w.rs.report(laptop, { scheme: w.project.id, slot: 3, os: 'windows', event: 'ended' }), { status: 404 });
+  assert.throws(() => w.rs.report(laptop, { scheme: w.project.id, slot: 3, os: 'windows', event: 'ended', runner: poolName(laptop.id, 'windows', 3) }), { status: 404 });
 });

@@ -11,8 +11,7 @@
 // (#2220). `ci_runners` stays for odd cases.
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { lendsRole } from './access.ts';
-import { type RunnerAsk, RunnerBusy, runnerLabel } from './ci-runner.ts';
+import { lendsCi, type RunnerAsk, RunnerBusy, runnerLabel } from './ci-runner.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { CardQuestion } from './ci-armed.ts';
 import { rank } from './machine-balancer.ts';
@@ -78,11 +77,6 @@ export interface CiAutoDeps {
   workflows?: (project: Project) => Promise<string[]>;
   now?: () => number;
   log?: (line: string) => void;
-}
-
-/** A PC lends CI to the scheme: its CI role is on and the scheme ticked (and, for a person's own, they're in it). */
-export function lendsCi(store: Store, m: Machine, project: Project): boolean {
-  return !!store.machineRoles(m.id).find((r) => r.role === 'ci')?.on && lendsRole(store, m, 'ci', project);
 }
 
 export class CiAuto {

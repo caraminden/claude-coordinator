@@ -4,7 +4,8 @@
 #
 #   runner-slot.sh update                                keep /opt/citadel-pool/runner/<version> at GitHub's newest release
 #   runner-slot.sh start <scheme id> <slot> <once> <url>  start slot <n>'s one-job runner
-#   runner-slot.sh stop <scheme id> <slot> <url>          stop it, and wipe what a runner stopped before its job leaves
+#   runner-slot.sh stop <repo name> <slot>                stop it, and wipe what a runner stopped before its job leaves
+#                                                        (by the slot folder's name: nothing from Citadel)
 #   runner-slot.sh state                                  one JSON line per slot: repo, slot, running, job, exit
 #
 # A slot is /opt/citadel-pool/<repo>/slot-<n>, owned by the scheme's user (add-runner.sh's ci-<repo>-<hash>, so one scheme's
@@ -78,20 +79,31 @@ update)
   exit 0
   ;;
 start | stop) ;;
-*) die 'usage: runner-slot.sh update | state | start <scheme> <slot> <once> <url> | stop <scheme> <slot> <url>' ;;
+*) die 'usage: runner-slot.sh update | state | start <scheme> <slot> <once> <url> | stop <repo name> <slot>' ;;
 esac
 
-scheme=${2:-}
 slot=${3:-}
-if [[ $op == start ]]; then
-  once=${4:-}
-  url=${5:-}
-else
-  url=${4:-}
+[[ $slot =~ ^([1-9]|1[0-6])$ ]] || die 'slot must be 1 to 16'
+
+if [[ $op == stop ]]; then
+  # By the slot folder's own name, which the agent kept from its start: works after the scheme stopped borrowing here.
+  repo_name=${2:-}
+  [[ $repo_name =~ ^[A-Za-z0-9_.-]{1,100}$ && ! $repo_name =~ ^\.+$ ]] || die "repo must be the slot folder's repo name"
+  dir=$pool/$repo_name/slot-$slot
+  unit=citadel-slot-$repo_name-$slot.service
+  # Stopping the unit ends its whole cgroup: the launcher, the runner and anything a job left running.
+  systemctl stop "$unit" 2>/dev/null || true
+  # rm takes a link off, never what it names.
+  [[ -d $dir && ! -L $dir ]] && rm -f "$dir/.runner" "$dir/.credentials" "$dir/.credentials_rsaparams"
+  echo "stopped $unit"
+  exit 0
 fi
+
+scheme=${2:-}
+once=${4:-}
+url=${5:-}
 url=${url%/}
 [[ $scheme =~ ^[0-9]{1,9}$ ]] || die 'scheme must be a scheme id'
-[[ $slot =~ ^([1-9]|1[0-6])$ ]] || die 'slot must be 1 to 16'
 [[ $url =~ ^https?://[^[:space:]\"\'\`]+$ ]] || die 'url must be an http(s) address'
 [[ -n ${CC_MACHINE_TOKEN:-} ]] || die 'No machine token: set CC_MACHINE_TOKEN (the agent does).'
 
@@ -115,15 +127,6 @@ repo_name=${repo#*/}
 user=ci-$(tr -c 'a-z0-9\n' '-' <<< "${repo_name,,}" | cut -c1-20)-$(printf %s "$repo" | sha256sum | cut -c1-6)
 dir=$pool/$repo_name/slot-$slot
 unit=citadel-slot-$repo_name-$slot.service
-
-if [[ $op == stop ]]; then
-  # Stopping the unit ends its whole cgroup: the launcher, the runner and anything a job left running.
-  systemctl stop "$unit" 2>/dev/null || true
-  # rm takes a link off, never what it names.
-  [[ -d $dir && ! -L $dir ]] && rm -f "$dir/.runner" "$dir/.credentials" "$dir/.credentials_rsaparams"
-  echo "stopped $unit"
-  exit 0
-fi
 
 [[ $once =~ ^[0-9a-f]{48}$ ]] || die 'once must be the 48-character one-time id Citadel sent'
 if systemctl is-active --quiet "$unit"; then die "$unit is still running a runner; stop it first."; fi

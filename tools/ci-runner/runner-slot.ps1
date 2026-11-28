@@ -12,7 +12,7 @@
              Administrators, plus modify for NETWORK SERVICE), registers that slot's task "\Citadel runner pool\<repo>
              slot <n>" as NETWORK SERVICE, and starts it. The task runs launch-slot.ps1, which fetches the runner's config
              from Citadel with the one-time id and starts the runner: so the task's stored arguments hold only the id.
-    Stop     stops that slot's task and ends every NETWORK SERVICE process of it (the launcher's tree, anything running
+    Stop     (-Repo <the slot folder's repo name> -Slot <n>, nothing from Citadel) stops that slot's task and ends every NETWORK SERVICE process of it (the launcher's tree, anything running
              from the slot folder), then deletes the registration files a runner stopped before its job leaves behind.
     State    prints one JSON line per slot task: repo, slot, whether it is running, the job its runner took (job) and
              the launcher's exit code once it ended (exit).
@@ -23,11 +23,15 @@
 
 .EXAMPLE
   .\runner-slot.ps1 -Op Start -Scheme 2 -Slot 1 -Once 0123... -CitadelUrl 'http://perigee.tail59477f.ts.net:8574'
+.EXAMPLE
+  .\runner-slot.ps1 -Op Stop -Repo claude-coordinator -Slot 1
 #>
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)][ValidateSet('Update', 'Start', 'Stop', 'State')][string]$Op,
   [string]$Scheme,
+  # Stop only: the slot folder's repo name, as Start printed it.
+  [string]$Repo,
   [int]$Slot,
   [string]$Once,
   [string]$CitadelUrl,
@@ -123,22 +127,30 @@ if ($Op -eq 'Update') {
 }
 
 # Start and Stop: one slot of one scheme.
-if (-not $Scheme -or $Scheme -notmatch '^\d{1,9}$') { Stop-With 'Scheme must be a scheme id.' }
 if ($Slot -lt 1 -or $Slot -gt 16) { Stop-With 'Slot must be 1 to 16.' }
-if (-not $CitadelUrl -or $CitadelUrl -notmatch '^https?://[^\s"''`]+$') { Stop-With 'CitadelUrl must be an http(s) address.' }
-if (-not $MachineToken) { Stop-With 'No machine token: set CC_MACHINE_TOKEN (the agent does).' }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Stop-With 'Run this elevated (the agent runs as SYSTEM): it registers a task for NETWORK SERVICE.' }
+function Test-RepoName([string]$Name) { $Name -match '^[A-Za-z0-9_.-]{1,100}$' -and $Name -notmatch '^\.+$' }
 
-# Which repo the scheme has, from Citadel (no token): the folder is named after it, so it comes from Citadel, not the ask.
-try {
-  $names = Invoke-RestMethod -Method Post -Uri ($CitadelUrl.TrimEnd('/') + '/api/machines/runner-token') -Body (@{ scheme = $Scheme; mint = $false } | ConvertTo-Json) -ContentType 'application/json' -Headers @{ Authorization = "Bearer $MachineToken" } -UseBasicParsing
-} catch {
-  $why = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
-  Stop-With "Citadel wouldn't say which repo scheme $Scheme has: $why"
+if ($Op -eq 'Stop') {
+  # By the slot's own folder name, which the agent kept from its start: a stop needs nothing from Citadel, so it works
+  # after the scheme stopped borrowing this PC too.
+  if (-not (Test-RepoName $Repo)) { Stop-With 'Repo must be the slot folder''s repo name.' }
+  $repo = $Repo
+} else {
+  if (-not $Scheme -or $Scheme -notmatch '^\d{1,9}$') { Stop-With 'Scheme must be a scheme id.' }
+  if (-not $CitadelUrl -or $CitadelUrl -notmatch '^https?://[^\s"''`]+$') { Stop-With 'CitadelUrl must be an http(s) address.' }
+  if (-not $MachineToken) { Stop-With 'No machine token: set CC_MACHINE_TOKEN (the agent does).' }
+  # Which repo the scheme has, from Citadel (no token): the folder is named after it, so it comes from Citadel, not the ask.
+  try {
+    $names = Invoke-RestMethod -Method Post -Uri ($CitadelUrl.TrimEnd('/') + '/api/machines/runner-token') -Body (@{ scheme = $Scheme; mint = $false } | ConvertTo-Json) -ContentType 'application/json' -Headers @{ Authorization = "Bearer $MachineToken" } -UseBasicParsing
+  } catch {
+    $why = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+    Stop-With "Citadel wouldn't say which repo scheme $Scheme has: $why"
+  }
+  $repo = ([string]$names.repo -split '/')[-1]
+  if (-not (Test-RepoName $repo)) { Stop-With "Citadel named a repo this script won't make a folder for: $($names.repo)" }
 }
-$repo = ([string]$names.repo -split '/')[-1]
-if ($repo -notmatch '^[A-Za-z0-9_.-]{1,100}$' -or $repo -match '^\.+$') { Stop-With "Citadel named a repo this script won't make a folder for: $($names.repo)" }
 $dir = Join-Path (Join-Path $Pool $repo) "slot-$Slot"
 $name = "$repo slot $Slot"
 $task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $name -ErrorAction SilentlyContinue

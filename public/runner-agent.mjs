@@ -34,6 +34,10 @@ const LINUX_SCRIPTS = { add: 'add-runner.sh', list: 'list-runners.sh', remove: '
 const SLOT_SCRIPT = { windows: 'runner-slot.ps1', linux: 'runner-slot.sh' };
 const SLOT_OPS = new Set(['start', 'stop', 'state', 'update']);
 export const MAX_SLOTS = 16;
+/** A one-job runner's name, as src/runner-slots.ts's poolName makes it. */
+const POOL_NAME = /^pool-m\d{1,9}-[wl](?:[1-9]|1[0-6])-[0-9a-z]{1,20}$/;
+/** A slot folder's repo name, as the slot scripts check it. */
+const REPO_NAME = /^(?!\.+$)[A-Za-z0-9_.-]{1,100}$/;
 
 /** The job Citadel sent, checked field by field: anything else is refused, so the scripts only ever get a number or two. */
 export function checkJob(job) {
@@ -51,10 +55,11 @@ export function checkJob(job) {
     if (!Number.isInteger(job.count) || job.count < 1 || job.count > MAX_RUNNERS) throw new Error(`count must be 1 to ${MAX_RUNNERS}`);
     return { id: job.id, op: 'add', scheme: scheme(job.scheme), count: job.count };
   }
-  if (job.op === 'start' && keys === 'id,once,op,scheme,slot') {
+  if (job.op === 'start' && keys === 'id,name,once,op,scheme,slot') {
     if (!Number.isInteger(job.slot) || job.slot < 1 || job.slot > MAX_SLOTS) throw new Error(`slot must be 1 to ${MAX_SLOTS}`);
     if (typeof job.once !== 'string' || !/^[0-9a-f]{48}$/.test(job.once)) throw new Error('once must be the one-time id Citadel minted');
-    return { id: job.id, op: 'start', scheme: scheme(job.scheme), slot: job.slot, once: job.once };
+    if (typeof job.name !== 'string' || !POOL_NAME.test(job.name)) throw new Error("name must be the runner's pool name");
+    return { id: job.id, op: 'start', scheme: scheme(job.scheme), slot: job.slot, once: job.once, name: job.name };
   }
   throw new Error(`refused: this agent only adds, lists and removes runners and starts one-job runners (got op ${JSON.stringify(job?.op)} with ${keys || 'nothing'})`);
 }
@@ -77,20 +82,21 @@ export function jobCommand(job, dir, appUrl, systemRoot = process.env.SystemRoot
   return { command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args };
 }
 
-/** A slot op's command: runner-slot.ps1 -Op <Op> or runner-slot.sh <op>, with the scheme and slot for start and stop. */
+/**
+ * A slot op's command: runner-slot.ps1 -Op <Op> or runner-slot.sh <op>. Start takes the scheme, slot, one-time id and
+ * Citadel's address; stop takes only the slot folder's repo name and slot, so it needs nothing from Citadel.
+ */
 function slotCommand(job, dir, appUrl, systemRoot, os) {
-  const slotted = job.op === 'start' || job.op === 'stop';
+  if (job.op === 'stop' && !REPO_NAME.test(job.repo ?? '')) throw new Error("stop needs the slot folder's repo name");
   if (os === 'linux') {
     const args = [join(dir, SLOT_SCRIPT.linux), job.op];
-    if (slotted) args.push(String(job.scheme), String(job.slot));
-    if (job.op === 'start') args.push(job.once);
-    if (slotted) args.push(appUrl);
+    if (job.op === 'start') args.push(String(job.scheme), String(job.slot), job.once, appUrl);
+    if (job.op === 'stop') args.push(job.repo, String(job.slot));
     return { command: '/bin/bash', args };
   }
   const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, SLOT_SCRIPT.windows), '-Op', job.op[0].toUpperCase() + job.op.slice(1)];
-  if (slotted) args.push('-Scheme', String(job.scheme), '-Slot', String(job.slot));
-  if (job.op === 'start') args.push('-Once', job.once);
-  if (slotted) args.push('-CitadelUrl', appUrl);
+  if (job.op === 'start') args.push('-Scheme', String(job.scheme), '-Slot', String(job.slot), '-Once', job.once, '-CitadelUrl', appUrl);
+  if (job.op === 'stop') args.push('-Repo', job.repo, '-Slot', String(job.slot));
   return { command: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args };
 }
 
@@ -149,7 +155,8 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
 export class JobRunner {
   constructor({ dir, appUrl, token, run = runCommand, log = () => {}, os = defaultOs() }) {
     Object.assign(this, { dir, appUrl, token, run, log, os, busy: null });
-    /** Told each job that ran, with its exit code and output: SlotWatch watches a slot it started. */
+    /** Told each checked job before it runs, and each that ran, with its exit code and output: SlotWatch's books. */
+    this.before = () => {};
     this.done = () => {};
   }
 
@@ -169,6 +176,7 @@ export class JobRunner {
     try {
       // The scripts ask Citadel for tokens with this machine's token; it goes in their environment, never their arguments.
       const env = { ...process.env, CC_MACHINE_TOKEN: this.token };
+      this.before(job);
       const { code, output } = await this.run(jobCommand(job, this.dir, this.appUrl, undefined, this.os), env);
       this.log(`Job ${what} ended: exit ${code}`);
       this.done(job, code, output);
@@ -184,12 +192,16 @@ export class JobRunner {
 // watches each slot it started, through the script's state op every 15 seconds, and tells Citadel when the runner took
 // a job, when it ended (Citadel then takes its leftovers off GitHub), and when it was stopped: a runner with no job
 // after 2 minutes. It keeps its slots in slots.json beside it, so an agent killed mid-job picks them up at its next start
-// and still reports their end. Between jobs it keeps the machine's one runner copy at GitHub's newest release (a day
-// apart, and only while no slot runs: the script refuses otherwise), holding the job lock so no start runs meanwhile.
+// and still reports their end; a start it was running when it died is reported ended, so Citadel takes that runner off.
+// Between jobs it keeps the machine's one runner copy at GitHub's newest release (a day apart, and only while no slot
+// runs: the script refuses otherwise), holding the job lock so no start runs meanwhile. A copy whose last good update is
+// COPY_MAX_MS old holds the lock while slots run too, so they drain and it updates before it is 30 days old.
 export const SLOT_TICK_MS = 15_000;
 export const SLOT_IDLE_MS = 2 * 60_000;
 export const COPY_EVERY_MS = 24 * 3_600_000;
-const COPY_RETRY_MS = 10 * 60_000;
+export const COPY_MAX_MS = 25 * 24 * 3_600_000;
+export const COPY_RETRY_MS = 10 * 60_000;
+const DRAINING = 'draining slots to update the runner copy';
 const SLOTS_FILE = 'slots.json';
 const OUTBOX_MAX = 200;
 
@@ -222,13 +234,31 @@ export class SlotWatch {
     } catch {}
     this.slots = saved.slots && typeof saved.slots === 'object' ? saved.slots : {};
     this.outbox = Array.isArray(saved.outbox) ? saved.outbox : [];
+    /** The last good update of the runner copy, and the last try. */
     this.copied = Number(saved.copied) || 0;
-    jobs.done = (job, code, output) => job.op === 'start' && code === 0 && this.started(job, output);
+    this.tried = Number(saved.tried) || 0;
+    // A start that was running when the agent died: whether its runner came up is unknown, so it is reported ended and
+    // Citadel takes it off GitHub by name (a runner that took a job is gone after it anyway).
+    let lost = false;
+    for (const [key, e] of Object.entries(this.slots)) {
+      if (!e?.pending) continue;
+      delete this.slots[key];
+      this.report(e, 'ended');
+      lost = true;
+    }
+    if (lost) this.save();
+    jobs.before = (job) => job.op === 'start' && this.pending(job);
+    jobs.done = (job, code, output) => {
+      if (job.op !== 'start') return;
+      delete this.slots[`pending/${job.name}`];
+      if (code === 0) this.started(job, output);
+      else this.save();
+    };
   }
 
   save() {
     try {
-      writeFileSync(`${this.file}.part`, JSON.stringify({ slots: this.slots, outbox: this.outbox, copied: this.copied }));
+      writeFileSync(`${this.file}.part`, JSON.stringify({ slots: this.slots, outbox: this.outbox, copied: this.copied, tried: this.tried }));
       renameSync(`${this.file}.part`, this.file);
     } catch (err) {
       this.log(`Couldn't save ${SLOTS_FILE}: ${err.message}`);
@@ -236,15 +266,27 @@ export class SlotWatch {
   }
 
   report(e, event, extra = {}) {
-    this.outbox.push({ scheme: e.scheme, slot: e.slot, os: this.jobs.os, event, ...extra });
+    this.outbox.push({ scheme: e.scheme, slot: e.slot, os: this.jobs.os, event, runner: e.runner, ...extra });
     if (this.outbox.length > OUTBOX_MAX) this.outbox.splice(0, this.outbox.length - OUTBOX_MAX);
+  }
+
+  /** A start about to run, saved first: an agent killed during it still reports it at its next start. */
+  pending(job) {
+    this.slots[`pending/${job.name}`] = { scheme: job.scheme, slot: job.slot, runner: job.name, at: this.now(), pending: true };
+    this.save();
   }
 
   /** A start went through: its script printed the slot's folder, whose parent is named for the repo. */
   started(job, output) {
     const repo = /^slot: .*[\\/]([^\\/]+)[\\/]slot-\d+\s*$/m.exec(output)?.[1];
-    if (!repo) return this.log(`Slot ${job.slot} of scheme ${job.scheme} started, but its script named no folder: not watched.`);
-    const e = { scheme: job.scheme, slot: job.slot, repo, at: this.now() };
+    const e = { scheme: job.scheme, slot: job.slot, runner: job.name, repo, at: this.now() };
+    if (!repo || !REPO_NAME.test(repo)) {
+      // Not watchable, so not left to idle: Citadel takes its runner off.
+      this.log(`Slot ${job.slot} of scheme ${job.scheme} started, but its script named no folder: reported ended.`);
+      this.report(e, 'ended');
+      this.save();
+      return void this.flush();
+    }
     this.slots[`${repo}/${job.slot}`] = e;
     this.report(e, 'started');
     this.save();
@@ -259,7 +301,7 @@ export class SlotWatch {
   async tick() {
     if (this.ticking) return;
     // Nothing to watch and no update due: no script runs.
-    if (!Object.keys(this.slots).length && this.now() - this.copied <= COPY_EVERY_MS) return this.flush();
+    if (!Object.keys(this.slots).length && !this.copyDue()) return this.flush();
     this.ticking = true;
     try {
       const asked = this.now();
@@ -267,8 +309,8 @@ export class SlotWatch {
       if (r.code !== 0) return this.log(`The slots' state didn't read (exit ${r.code}): ${redact(r.output).slice(-300)}`);
       const states = slotStates(r.output);
       for (const [key, e] of Object.entries(this.slots)) {
-        // Started while the state op ran: its line may be from before its start.
-        if (e.at >= asked) continue;
+        // Started while the state op ran: its line may be from before its start; a pending start is the start's to settle.
+        if (e.pending || e.at >= asked) continue;
         const s = states.find((x) => x.repo === e.repo && x.slot === e.slot);
         if (s?.job && !e.took) {
           e.took = s.job;
@@ -280,7 +322,7 @@ export class SlotWatch {
           continue;
         }
         if (!e.took && this.now() - e.at > SLOT_IDLE_MS) {
-          const stop = await this.run('stop', { scheme: e.scheme, slot: e.slot });
+          const stop = await this.run('stop', { repo: e.repo, slot: e.slot });
           if (stop.code !== 0) {
             this.log(`Couldn't stop idle slot ${e.slot} of ${e.repo}: ${redact(stop.output).slice(-300)}`);
             continue;
@@ -290,24 +332,35 @@ export class SlotWatch {
           this.report(e, 'stopped');
         }
       }
-      // shortcut: a slot running that slots.json lost (the agent died between its start and the save) isn't watched; its
-      // runner ends after a job or idles on GitHub until removed. Upgrade if it shows up: a stop by repo in the script.
       this.save();
       await this.flush();
-      if (!Object.keys(this.slots).length && !states.some((s) => s.running) && this.now() - this.copied > COPY_EVERY_MS) await this.update();
+      if (!this.copyDue()) return;
+      const idle = !Object.keys(this.slots).length && !states.some((s) => s.running);
+      if (idle) await this.update();
+      else if (this.now() - this.copied > COPY_MAX_MS && !this.jobs.busy) {
+        // No new start until the slots end and the copy updates: the lock holds while they drain.
+        this.log(`The runner copy's last update was ${Math.floor((this.now() - this.copied) / 86_400_000)} days ago: draining the slots to update it.`);
+        this.jobs.busy = DRAINING;
+      }
     } finally {
       this.ticking = false;
     }
   }
 
-  /** The runner copy at GitHub's newest release, under the job lock; tried again in 10 minutes if it fails. */
+  /** A day since the last good update and 10 minutes since the last try. */
+  copyDue() {
+    return this.now() - this.copied > COPY_EVERY_MS && this.now() - this.tried > COPY_RETRY_MS;
+  }
+
+  /** The runner copy at GitHub's newest release, under the job lock (taking over a drain's); tried again in 10 minutes if it fails. */
   async update() {
-    if (this.jobs.busy) return;
+    if (this.jobs.busy && this.jobs.busy !== DRAINING) return;
     this.jobs.busy = 'updating the runner copy';
     try {
+      this.tried = this.now();
       const r = await this.run('update');
       this.log(`Runner copy: ${redact(r.output).split('\n').slice(-2).join(' ')} (exit ${r.code})`);
-      this.copied = r.code === 0 ? this.now() : this.now() - COPY_EVERY_MS + COPY_RETRY_MS;
+      if (r.code === 0) this.copied = this.now();
       this.save();
     } finally {
       this.jobs.busy = null;

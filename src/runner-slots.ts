@@ -4,8 +4,8 @@
 // and asks the machine's runner agent to start slot <n> with that id. The process that runs as the slot's low-rights
 // account (tools/ci-runner/launch-slot.ps1, launch-slot.sh) swaps the id for the config at POST /api/machines/runner-jit,
 // so neither Citadel nor the agent ever writes the config to a file, a log or a command line. The agent then reports
-// the slot's runner started, took a job, ended (or was stopped by its 2-minute reaper); after an end Citadel takes off
-// GitHub what that slot's runners left behind, since GitHub keeps a one-job runner that never ran a job.
+// the slot's runner started, took a job, ended (or was stopped by its 2-minute reaper), naming the runner Citadel minted
+// for that start; after an end Citadel takes that runner off GitHub, which keeps a one-job runner that never ran a job.
 // What decides where and when a runner starts is the pool's (src/runner-pool.ts, P1); this is the start and the end.
 import { randomBytes } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -29,6 +29,8 @@ export function poolName(machineId: number, os: RunnerOs, slot: number, job?: nu
   return `${slotPrefix(machineId, os, slot)}${job ? `j${job}` : randomBytes(3).toString('hex')}`;
 }
 export const slotPrefix = (machineId: number, os: RunnerOs, slot: number) => `pool-m${machineId}-${os === 'linux' ? 'l' : 'w'}${slot}-`;
+/** A one-job runner's name as poolName makes it (the agent checks the same shape). */
+export const POOL_NAME = /^pool-m\d{1,9}-[wl](?:[1-9]|1[0-6])-[0-9a-z]{1,20}$/;
 
 /** Configs waiting for their launcher, each handed out once, to whoever holds its id first. Never written anywhere. */
 export class OneTime {
@@ -70,6 +72,8 @@ export interface SlotReport {
   os: RunnerOs;
   slot: number;
   event: SlotEvent;
+  /** The runner Citadel minted for the start this report is about: always one of this machine's slot's names. */
+  runner: string;
   /** took: the job's name as the runner printed it ("Running job: <name>"); the pool reads which job from GitHub by runner name. */
   job?: string;
   /** ended: the launcher's exit code, when the agent saw it. */
@@ -78,12 +82,13 @@ export interface SlotReport {
 }
 
 export function slotReport(machine: Machine, body: Record<string, unknown>, now = Date.now()): SlotReport {
-  const { scheme, slot, os, event, job, code } = body;
+  const { scheme, slot, os, event, runner, job, code } = body;
   if (!Number.isInteger(scheme) || (scheme as number) < 1) throw new HttpError(400, 'scheme must be a scheme id');
   if (!Number.isInteger(slot) || (slot as number) < 1 || (slot as number) > MAX_SLOTS) throw new HttpError(400, `slot must be 1 to ${MAX_SLOTS}`);
   if (os !== 'windows' && os !== 'linux') throw new HttpError(400, 'os must be windows or linux');
   if (!EVENTS.includes(event as SlotEvent)) throw new HttpError(400, `event must be one of ${EVENTS.join(', ')}`);
-  const r: SlotReport = { machineId: machine.id, scheme: scheme as number, os, slot: slot as number, event: event as SlotEvent, at: now };
+  if (typeof runner !== 'string' || !POOL_NAME.test(runner) || !runner.startsWith(slotPrefix(machine.id, os, slot as number))) throw new HttpError(400, "runner must be the name Citadel gave this slot's runner");
+  const r: SlotReport = { machineId: machine.id, scheme: scheme as number, os, slot: slot as number, event: event as SlotEvent, runner, at: now };
   // A job's name comes from a file a job can write: kept short and printable, and only ever shown.
   if (typeof job === 'string' && job) r.job = job.replace(/\p{Cc}/gu, ' ').slice(0, 200);
   if (Number.isInteger(code)) r.code = code as number;
@@ -94,8 +99,6 @@ type Relay = Pick<MachineRelay, 'runnerJob'>;
 
 export class RunnerSlots {
   readonly once = new OneTime();
-  /** When each runner name was minted: a cleanup leaves alone a runner minted after the end it cleans up for. */
-  private minted = new Map<string, number>();
   /** Told every report, for the pool's books (P1). */
   onReport: (r: SlotReport) => void = () => {};
   log: (line: string) => void = () => {};
@@ -122,22 +125,22 @@ export class RunnerSlots {
     if (!Number.isInteger(slot) || slot < 1 || slot > MAX_SLOTS) throw new HttpError(400, `slot must be 1 to ${MAX_SLOTS}`);
     if (!Array.isArray(labels) || !labels.length || labels.length > 10 || !labels.every((l) => typeof l === 'string' && /^[\w.-]{1,100}$/.test(l))) throw new HttpError(400, 'labels must be 1 to 10 runner labels');
     if (job !== undefined && (!Number.isSafeInteger(job) || job < 1)) throw new HttpError(400, 'job must be a GitHub job id');
+    // shortcut: a desktop job needs the signed-in person's session, which a slot's NETWORK SERVICE task isn't; refused
+    // until the pool starts session runners (spec P6).
+    if (labels.some((l) => l.endsWith('-desktop'))) throw new HttpError(400, "a desktop job's runner needs a session; one-job slots don't start those yet");
     const name = poolName(machine.id, os, slot, job);
     const config = await this.tokens.jit(machine, project, name, labels);
-    // A runner that ran its job is gone from GitHub by itself, so its name is never cleaned up: forget it after a day.
-    for (const [n, at] of this.minted) if (at < Date.now() - 86_400_000) this.minted.delete(n);
-    this.minted.set(name, Date.now());
     const once = this.once.put(config);
-    const r = await this.relay.runnerJob(machine.id, { op: 'start', scheme: project.id, slot, once }, os, START_MS);
+    const r = await this.relay.runnerJob(machine.id, { op: 'start', scheme: project.id, slot, once, name }, os, START_MS);
     if (!r.ok) {
-      // Never started (or its launcher never asked): GitHub keeps the registration, so take it off now.
+      // Never started (or its launcher never asked): GitHub keeps the registration, so take this one off now.
       this.once.drop(once);
-      void this.cleanUp(project, machine.id, os, slot, Date.now() + 1);
+      void this.cleanUp(project, name);
     }
     return { name, ...r };
   }
 
-  /** An agent's report on a slot; after an end or a stop, what that slot's runners left on GitHub goes. */
+  /** An agent's report on a slot; after an end or a stop, its runner goes from GitHub if it is still there. */
   report(machine: Machine, body: Record<string, unknown>) {
     const r = slotReport(machine, body);
     const project = this.store.getProject(r.scheme);
@@ -145,43 +148,36 @@ export class RunnerSlots {
     if (!project || !hostsCi(this.store, machine, project)) throw new HttpError(404, `No scheme ${r.scheme} that machine ${machine.name} runs CI for`);
     this.log(`${machine.name} ${r.os} slot ${r.slot} of ${project.name}: ${r.event}${r.job ? ` (${r.job})` : ''}${r.code !== undefined ? `, exit ${r.code}` : ''}`);
     this.onReport(r);
-    if (r.event === 'ended' || r.event === 'stopped') void this.cleanUp(project, machine.id, r.os, r.slot, r.at);
+    if (r.event === 'ended' || r.event === 'stopped') void this.cleanUp(project, r.runner);
     return r;
   }
 
   /**
-   * Take off GitHub every runner of this machine's slot minted by `before` (an end's time) that isn't running a job: a one-job runner
-   * that ended its job is gone already, one that never took a job stays listed (P0, #2266). One GitHub still calls busy
-   * (it hasn't seen a killed runner go) is tried again, up to CLEAN_TRIES times.
+   * Take runner `name` off GitHub if it is still there: a one-job runner that ended its job is gone already, one that never
+   * took a job stays listed (P0, #2266). One GitHub still calls busy (it hasn't seen a killed runner go), or a list that
+   * failed, is tried again, up to CLEAN_TRIES times; true once it's gone.
    */
-  async cleanUp(project: Project, machineId: number, os: RunnerOs, slot: number, before: number): Promise<number> {
-    const prefix = slotPrefix(machineId, os, slot);
-    let removed = 0;
+  async cleanUp(project: Project, name: string): Promise<boolean> {
     for (let tried = 1; tried <= CLEAN_TRIES; tried++) {
-      let listed: Listed[];
+      if (tried > 1) await sleep(this.againMs, undefined, { ref: false });
+      let listed: Listed | undefined;
       try {
-        listed = (await this.tokens.listed(project)).filter((x) => x.name.startsWith(prefix) && (this.minted.get(x.name) ?? 0) <= before);
+        listed = (await this.tokens.listed(project)).find((x) => x.name === name);
       } catch (err) {
-        this.log(`couldn't list ${project.name}'s runners to clean slot ${slot}: ${thrown(err).message}`);
-        return removed;
+        this.log(`couldn't list ${project.name}'s runners to take ${name} off: ${thrown(err).message}`);
+        continue;
       }
-      let busy = 0;
-      for (const x of listed) {
-        if (x.busy) {
-          busy++;
-          continue;
-        }
-        try {
-          if (await this.tokens.removeById(project, x.id)) removed++;
-          this.minted.delete(x.name);
-        } catch (err) {
-          busy++;
-          this.log(`couldn't take ${x.name} off ${project.name}: ${thrown(err).message}`);
-        }
+      if (!listed) return true;
+      if (listed.busy) continue;
+      try {
+        await this.tokens.removeById(project, listed.id);
+        this.log(`took ${name} off ${project.name}`);
+        return true;
+      } catch (err) {
+        this.log(`couldn't take ${name} off ${project.name}: ${thrown(err).message}`);
       }
-      if (!busy || tried === CLEAN_TRIES) break;
-      await sleep(this.againMs, undefined, { ref: false });
     }
-    return removed;
+    this.log(`${name} is still on ${project.name} after ${CLEAN_TRIES} tries`);
+    return false;
   }
 }

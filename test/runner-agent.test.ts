@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { linuxProcs, checkJob, keeperCommand, ownerCaps, SLICE, sliceCap, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, SLOT_IDLE_MS, SlotWatch, slotStates, writeShips } from '../public/runner-agent.mjs';
+import { linuxProcs, checkJob, keeperCommand, ownerCaps, SLICE, sliceCap, cleanShips, JobRunner, jobCommand, LinuxSqueeze, personIdle, redact, runCommand, runnerUse, Sampler, SHIP_HOLD_MS, SLOT_IDLE_MS, COPY_EVERY_MS, COPY_MAX_MS, COPY_RETRY_MS, SlotWatch, slotStates, writeShips } from '../public/runner-agent.mjs';
 import { bootServer, stopProcs, tempRoot, until } from './helpers.ts';
 
 const ID = 'a'.repeat(24);
@@ -176,7 +176,7 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     const jit = (body: unknown) => fetch(`${srv.base}/api/machines/runner-jit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     assert.equal((await jit({ once: 'ab'.repeat(24) })).status, 410);
     assert.equal((await jit({ once: 'nope' })).status, 410);
-    const slotPost = (token: string) => fetch(`${srv.base}/api/machines/runner-slot`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scheme: 1, slot: 1, os: 'windows', event: 'ended' }) });
+    const slotPost = (token: string) => fetch(`${srv.base}/api/machines/runner-slot`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scheme: 1, slot: 1, os: 'windows', event: 'ended', runner: `pool-m${laptop.data.machine.id}-w1-abc123` }) });
     assert.equal((await slotPost('ccm_1_nope')).status, 401);
     assert.equal((await slotPost(laptop.data.token)).status, 404);
 
@@ -481,19 +481,24 @@ test("Linux: the owner's squeeze is used, and the all-CI cap goes on the runners
 
 // One-job runners (runner pool P2, #2269): Citadel's start op, and the agent's own watch on the slots it started.
 const ONCE = 'ab'.repeat(24);
+const NAME = 'pool-m7-w1-j123';
+const start = (slot: number, name = `pool-m7-w${slot}-j${slot}00`) => ({ id: ID, op: 'start', scheme: 3, slot, once: ONCE, name });
 
-test('a start names a scheme, a slot of 1 to 16 and a one-time id, and runs only runner-slot', () => {
-  assert.deepEqual(checkJob({ id: ID, op: 'start', scheme: 3, slot: 16, once: ONCE }), { id: ID, op: 'start', scheme: 3, slot: 16, once: ONCE });
-  for (const bad of [{ slot: 0 }, { slot: 17 }, { slot: '1' }, { once: ONCE.toUpperCase() }, { once: `${ONCE}; calc` }, { once: undefined }, { extra: 1 }]) {
-    assert.throws(() => checkJob({ id: ID, op: 'start', scheme: 3, slot: 1, once: ONCE, ...bad }), Error, JSON.stringify(bad));
+test("a start names a scheme, a slot of 1 to 16, a one-time id and the runner's pool name, and runs only runner-slot", () => {
+  assert.deepEqual(checkJob({ id: ID, op: 'start', scheme: 3, slot: 16, once: ONCE, name: NAME }), { id: ID, op: 'start', scheme: 3, slot: 16, once: ONCE, name: NAME });
+  for (const bad of [{ slot: 0 }, { slot: 17 }, { slot: '1' }, { once: ONCE.toUpperCase() }, { once: `${ONCE}; calc` }, { once: undefined }, { name: undefined }, { name: 'peek-desktop' }, { name: `${NAME}; calc` }, { extra: 1 }]) {
+    assert.throws(() => checkJob({ id: ID, op: 'start', scheme: 3, slot: 1, once: ONCE, name: NAME, ...bad }), Error, JSON.stringify(bad));
   }
   // The agent's own slot ops never come from Citadel.
   for (const op of ['stop', 'state', 'update']) assert.throws(() => checkJob({ id: ID, op, scheme: 3, slot: 1 }), /refused/);
-  const win = jobCommand({ op: 'start', scheme: 3, slot: 2, once: ONCE }, 'C:\\agent', 'http://perigee:8574', 'C:\\Windows', 'windows');
+  const win = jobCommand(checkJob(start(2)), 'C:\\agent', 'http://perigee:8574', 'C:\\Windows', 'windows');
   assert.match(win.command, /powershell\.exe$/);
   assert.deepEqual(win.args.slice(5), [join('C:\\agent', 'runner-slot.ps1'), '-Op', 'Start', '-Scheme', '3', '-Slot', '2', '-Once', ONCE, '-CitadelUrl', 'http://perigee:8574']);
-  assert.deepEqual(jobCommand({ op: 'start', scheme: 3, slot: 2, once: ONCE }, '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'start', '3', '2', ONCE, 'u']);
-  assert.deepEqual(jobCommand({ op: 'stop', scheme: 3, slot: 2 }, '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'stop', '3', '2', 'u']);
+  assert.deepEqual(jobCommand(checkJob(start(2)), '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'start', '3', '2', ONCE, 'u']);
+  // A stop goes by the slot folder's repo name only: it asks Citadel nothing, so it works once the loan has ended.
+  assert.deepEqual(jobCommand({ op: 'stop', repo: 'peek', slot: 2 }, '/a', 'u', undefined, 'linux').args, ['/a/runner-slot.sh', 'stop', 'peek', '2']);
+  assert.deepEqual(jobCommand({ op: 'stop', repo: 'peek', slot: 2 }, 'C:\\agent', 'u', 'C:\\Windows', 'windows').args.slice(6), ['-Op', 'Stop', '-Repo', 'peek', '-Slot', '2']);
+  for (const repo of [undefined, '..', 'a b', 'x;calc']) assert.throws(() => jobCommand({ op: 'stop', repo, slot: 2 }, '/a', 'u', undefined, 'linux'), /repo name/, String(repo));
   assert.deepEqual(jobCommand({ op: 'state' }, '/a', 'u', 'C:\\Windows', 'windows').args.slice(6), ['-Op', 'State']);
 });
 
@@ -504,20 +509,36 @@ test("the state op's lines read, and what doesn't read is skipped", () => {
   ]);
 });
 
-/** A SlotWatch over faked scripts: `states` is what the state op prints next; every op run is kept. */
+/** A SlotWatch over faked scripts: `states` is what the state op prints next; every op run is kept, with its arguments in `args`. */
 function slotWorld() {
   const dir = mkdtempSync(join(tmpdir(), 'slots-'));
-  const f = { dir, now: Date.UTC(2026, 10, 28), states: [] as object[], ran: [] as string[], posted: [] as Record<string, unknown>[], down: false };
+  const f = {
+    dir,
+    now: Date.UTC(2026, 10, 28),
+    states: [] as object[],
+    ran: [] as string[],
+    args: [] as string[][],
+    posted: [] as Record<string, unknown>[],
+    down: false,
+    failUpdate: false,
+    /** While set, a start waits on it: the agent can be "killed" mid-start. */
+    hold: null as Promise<void> | null,
+  };
   const run = async ({ args }: { args: string[] }) => {
     const op = args.includes('-Op') ? args[args.indexOf('-Op') + 1].toLowerCase() : args[1];
     f.ran.push(op);
+    f.args.push(args.slice(args.indexOf('-Op')));
     if (op === 'state') return { code: 0, output: f.states.map((x) => JSON.stringify(x)).join('\n') };
-    if (op === 'start') return { code: 0, output: `started peek slot 1\nslot: C:\\citadel-pool\\peek\\slot-${args[args.indexOf('-Slot') + 1]}` };
+    if (op === 'start') {
+      if (f.hold) await f.hold;
+      return { code: 0, output: `started peek slot 1\nslot: C:\\citadel-pool\\peek\\slot-${args[args.indexOf('-Slot') + 1]}` };
+    }
+    if (op === 'update' && f.failUpdate) return { code: 1, output: 'GitHub is away' };
     return { code: 0, output: 'ok' };
   };
-  const jobs = new JobRunner({ dir, appUrl: 'http://citadel', token: 'ccm_1_x', run, os: 'windows' });
-  const make = () =>
-    new SlotWatch({
+  const make = () => {
+    const jobs = new JobRunner({ dir, appUrl: 'http://citadel', token: 'ccm_1_x', run, os: 'windows' });
+    const watch = new SlotWatch({
       jobs,
       now: () => f.now,
       post: async (b: Record<string, unknown>) => {
@@ -526,18 +547,20 @@ function slotWorld() {
         return true;
       },
     });
-  return { f, jobs, watch: make(), make };
+    return { jobs, watch };
+  };
+  return { f, ...make(), make };
 }
 
-test("a started slot is watched: its job, its end with the launcher's code, and a copy update once no slot runs", async () => {
+test("a started slot is watched: its job, its end with the launcher's code, each naming its runner, and a copy update once no slot runs", async () => {
   const { f, jobs, watch } = slotWorld();
   try {
     // At its first start the copy is due: the update runs under the job lock.
     await watch.tick();
     assert.deepEqual(f.ran, ['state', 'update']);
     f.ran.length = 0;
-    assert.equal((await jobs.handle({ id: ID, op: 'start', scheme: 3, slot: 1, once: ONCE })).ok, true);
-    assert.deepEqual(f.posted, [{ scheme: 3, slot: 1, os: 'windows', event: 'started' }]);
+    assert.equal((await jobs.handle(start(1, NAME))).ok, true);
+    assert.deepEqual(f.posted, [{ scheme: 3, slot: 1, os: 'windows', event: 'started', runner: NAME }]);
     f.now += 1000;
     f.states = [{ repo: 'peek', slot: 1, running: true, job: 'test (linux)' }];
     await watch.tick();
@@ -545,8 +568,8 @@ test("a started slot is watched: its job, its end with the launcher's code, and 
     f.now += SLOT_IDLE_MS * 2;
     await watch.tick();
     assert.deepEqual(f.posted.slice(1), [
-      { scheme: 3, slot: 1, os: 'windows', event: 'took', job: 'test (linux)' },
-      { scheme: 3, slot: 1, os: 'windows', event: 'ended', code: 0 },
+      { scheme: 3, slot: 1, os: 'windows', event: 'took', runner: NAME, job: 'test (linux)' },
+      { scheme: 3, slot: 1, os: 'windows', event: 'ended', runner: NAME, code: 0 },
     ]);
     // Watching nothing, with the copy fresh: no script runs at all.
     assert.deepEqual(f.ran, ['start', 'state', 'state']);
@@ -557,12 +580,12 @@ test("a started slot is watched: its job, its end with the launcher's code, and 
   }
 });
 
-test('a runner with no job after 2 minutes is stopped, and an agent started again carries on its watch and its unsent reports', async () => {
+test('a runner with no job after 2 minutes is stopped by its repo, and an agent started again carries on its watch and its unsent reports', async () => {
   const { f, jobs, watch, make } = slotWorld();
   try {
     await watch.tick();
-    await jobs.handle({ id: ID, op: 'start', scheme: 3, slot: 2, once: ONCE });
-    await jobs.handle({ id: ID, op: 'start', scheme: 4, slot: 5, once: ONCE });
+    await jobs.handle(start(2));
+    await jobs.handle({ ...start(5), scheme: 4 });
     f.states = [
       { repo: 'peek', slot: 2, running: true },
       { repo: 'peek', slot: 5, running: true },
@@ -577,15 +600,79 @@ test('a runner with no job after 2 minutes is stopped, and an agent started agai
     f.states = [{ repo: 'peek', slot: 2, running: true }];
     await watch.tick();
     assert.deepEqual(f.ran, ['state', 'state', 'stop']);
+    assert.deepEqual(f.args.at(-1), ['-Op', 'Stop', '-Repo', 'peek', '-Slot', '2']);
     assert.equal(f.posted.length, 2);
     // A new agent (the old one killed) reads slots.json: slot 5 ended while it was gone, and the stop's report goes too.
     f.down = false;
     f.states = [];
-    await make().tick();
+    await make().watch.tick();
     assert.deepEqual(
-      f.posted.slice(2).map((p) => `${p.slot} ${p.event}`),
-      ['2 stopped', '5 ended'],
+      f.posted.slice(2).map((p) => `${p.slot} ${p.event} ${p.runner}`),
+      ['2 stopped pool-m7-w2-j200', '5 ended pool-m7-w5-j500'],
     );
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
+test('an agent killed during a start reports that runner ended at its next start, so Citadel takes it off GitHub', async () => {
+  const { f, jobs, watch, make } = slotWorld();
+  try {
+    await watch.tick();
+    let release = () => {};
+    f.hold = new Promise((r) => {
+      release = r;
+    });
+    const going = jobs.handle(start(3, NAME));
+    await until('the start is running', () => f.ran.includes('start'));
+    // The agent dies here: its watch never hears the start end. The next one finds the start it saved before running it.
+    const next = make();
+    await next.watch.flush();
+    assert.deepEqual(f.posted, [{ scheme: 3, slot: 3, os: 'windows', event: 'ended', runner: NAME }]);
+    f.hold = null;
+    release();
+    await going;
+    assert.ok(!Object.keys(next.watch.slots).some((k) => k.startsWith('pending/')), 'the next agent keeps no pending start');
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
+test('a copy 25 days past its last good update drains the slots: no start meanwhile, the update once they end, and a failed one tried again in 10 minutes', async () => {
+  const { f, jobs, watch } = slotWorld();
+  try {
+    await watch.tick();
+    await jobs.handle(start(1, NAME));
+    f.states = [{ repo: 'peek', slot: 1, running: true, job: 'build' }];
+    // A busy slot all along: a day on, the update waits for it.
+    f.now += COPY_EVERY_MS + 1;
+    f.ran.length = 0;
+    await watch.tick();
+    assert.deepEqual(f.ran, ['state']);
+    assert.equal(jobs.busy, null);
+    f.now += COPY_MAX_MS;
+    await watch.tick();
+    assert.match(String(jobs.busy), /draining/);
+    assert.match((await jobs.handle(start(2))).output, /busy with draining/);
+    // The slot ends; the update takes the lock over, fails, and lets starts in until its next try.
+    f.failUpdate = true;
+    f.states = [{ repo: 'peek', slot: 1, running: false, exit: 0 }];
+    await watch.tick();
+    assert.deepEqual(f.ran.slice(-2), ['state', 'update']);
+    assert.equal(jobs.busy, null);
+    f.ran.length = 0;
+    f.states = [];
+    f.now += COPY_RETRY_MS - 1;
+    await watch.tick();
+    assert.deepEqual(f.ran, []);
+    f.failUpdate = false;
+    f.now += 2;
+    await watch.tick();
+    assert.deepEqual(f.ran, ['state', 'update']);
+    f.ran.length = 0;
+    f.now += 1000;
+    await watch.tick();
+    assert.deepEqual(f.ran, [], 'a good update is good for a day');
   } finally {
     rmSync(f.dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }

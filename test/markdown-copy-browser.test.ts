@@ -12,6 +12,8 @@ const skip = !bin && skipMessage;
 
 /** PowerShell with indentation, both quotes, a backtick and a trailing blank line inside the fence. */
 const CODE = `$ErrorActionPreference = 'Stop'\nif (-not (Test-Path "$env:USERPROFILE\\citadel")) {\n    New-Item -ItemType Directory "$env:USERPROFILE\\citadel" | Out-Null\n\tWrite-Host "it's \`"done\`""\n}\n`;
+// A shell-tagged block copies without its trailing newline (#2311), so a paste leaves the cursor at the end of the command.
+const COPIED = CODE.replace(/\n+$/, '');
 const SRC = `Run this:\n\n\`\`\`powershell\n${CODE}\n\`\`\`\n\nThen \`inline code\` and front matter-free text.\n\n\`\`\`\none line, long enough to wrap under where a button would sit if it covered the text at all, which it must not\n\`\`\``;
 
 const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -79,7 +81,7 @@ test('desktop: copies the code exactly through navigator.clipboard, says Copied,
   assert.equal(await hoverHides(page), false, 'a shell-tagged command block keeps Copy in view (#944)');
   assert.equal(await hoverHides(page, 1), true, 'an untagged block hides it until hover where there is hover');
   await click(page, 'pre .cui-copy');
-  assert.deepEqual(await page.eval('window.copies'), [`api:${CODE}`]);
+  assert.deepEqual(await page.eval('window.copies'), [`api:${COPIED}`]);
   assert.equal(await page.eval('md.querySelector(".cui-copy").dataset.copied'), 'yes');
   assert.equal(await page.eval('getComputedStyle(md.querySelector(".cui-copy"), "::before").content'), '"Copied"');
   await page.mouse(5, 690);
@@ -96,7 +98,7 @@ test('plain http (no navigator.clipboard): the textarea fallback copies the same
   const page = await browser.page(base, { width: 900, height: 700 });
   await page.eval('useClipboard(false)');
   await click(page, 'pre .cui-copy');
-  assert.deepEqual(await page.eval('window.copies'), [CODE]);
+  assert.deepEqual(await page.eval('window.copies'), [COPIED]);
   assert.equal(await page.eval('md.querySelector(".cui-copy").dataset.copied'), 'yes');
   assert.equal(await page.eval('document.querySelectorAll("textarea").length'), 0, 'the textarea is gone again');
 });

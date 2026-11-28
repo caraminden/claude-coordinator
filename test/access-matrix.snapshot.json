@@ -239,6 +239,16 @@
   "m1": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store",
   "m2": "401 Not a GitHub run token for this store (not a JWT). The job needs `permissions: id-token: write` and a token asked for with audience citadel-ci-store"
  },
+ "GET /api/ci/pool": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Only people read the runner pool",
+  "tmB": "403 Only people read the runner pool",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/client-errors": {
   "anon": "401 Not logged in",
   "person": "202",
@@ -1329,6 +1339,16 @@
   "m1": "403 This turn doesn't reach a machine's host: only a minion marked to run on a machine, on a turn of that machine's owner, while it runs there",
   "m2": "403 This turn doesn't reach a machine's host: only a minion marked to run on a machine, on a turn of that machine's owner, while it runs there"
  },
+ "POST /api/machines/runner-jit": {
+  "anon": "410 No runner config waits under that id: it was taken, or ran out",
+  "person": "410 No runner config waits under that id: it was taken, or ran out",
+  "member": "410 No runner config waits under that id: it was taken, or ran out",
+  "outsider": "410 No runner config waits under that id: it was taken, or ran out",
+  "tmA": "410 No runner config waits under that id: it was taken, or ran out",
+  "tmB": "410 No runner config waits under that id: it was taken, or ran out",
+  "m1": "410 No runner config waits under that id: it was taken, or ran out",
+  "m2": "410 No runner config waits under that id: it was taken, or ran out"
+ },
  "POST /api/machines/runner-load": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
@@ -1340,6 +1360,16 @@
   "m2": "401 Unknown machine token; make a new one in the Machines panel"
  },
  "POST /api/machines/runner-result": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/runner-slot": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
   "member": "401 Unknown machine token; make a new one in the Machines panel",

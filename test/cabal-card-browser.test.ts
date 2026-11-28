@@ -45,6 +45,11 @@ const STUB = pageStub(
   function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: location.search === '?waits' ? [lead, other, waiter] : location.search === '?mix' ? [lead, other, ...mixRows] : [lead, other], seen: {}, person_notes: {}, pins: [], cabals: location.search === '?late' && !window.formed ? [] : cabals, builds: [{ build: 10, merged: 1, open: 1, behind: 42 }], build_previews: true });
+    // The Overseer's chat strip (#2303): the board in roster order, not started first and finished last.
+    if (path === 'api/tickets/101/cabal') {
+      const bm = (label, state) => ({ row: 1, label, title: label, number: null, project_id: 1, scheme: null, open: true, lane: '', role: '', state, word: state, after: null, note: '', note_at: null, spend: 0, risk: null, claims: [], files: [], doubled: [] });
+      return reply(200, { lead: 101, board: { lead: { id: 101, number: 7, title: lead.title, spend: 0, project_id: 1, open: true }, name: 'Plot 10', kind: 'build', build: 10, members: [bm('R', 'roster'), bm('B', 'blocked'), bm('M1', 'merged'), bm('S', 'sealed'), bm('RN', 'running'), bm('M2', 'merged')], asks: [], log: [], red: null, counts: { members: 6, started: 5, merged: 2, open: 2, running: 1, spend: 0 } } });
+    }
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
     let m;
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: m[1] === '100' ? coordinator : lead });
@@ -95,6 +100,13 @@ for (const [what, dot] of [
     assert.ok(began >= from - 2 && began <= to + 2, `the pulse began where the clock was at the redraw (${Math.round(began)} ms into its turn; the clock was at ${from} to ${to})`);
   });
 }
+
+// Cara, 2026-11-28: "these 2 views of the Plot status are backwards, both should have the green on the left".
+test("the Overseer's chat strip fills finished, then at work, then not started (#2303)", { skip }, async () => {
+  const page = await browser.page(`${base}#/p/1/t/7`, { width: 1280, height: 800 });
+  await waitFor(page, 'the strip to draw', `document.querySelectorAll('#chat-cabal .cabal-meter i').length === 6`);
+  assert.deepEqual(await page.eval(`[...document.querySelectorAll('#chat-cabal .cabal-meter i')].map((i) => i.dataset.s)`), ['merged', 'merged', 'blocked', 'running', 'roster', 'sealed']);
+});
 
 test('opening a card that has no member rows to show moves nothing', { skip }, async () => {
   const page = await browser.page(`${base}?bare#/p/1`, { width: 1280, height: 800 });

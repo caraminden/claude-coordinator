@@ -2,7 +2,7 @@
 // title, a meter with a segment a member, the counts, and the open asks in red. A click shows its members under it with
 // no request: the cards come with the scheme (src/cabal-cards.ts) and the rows are the page's own.
 import { h, phase, threadHref } from './base.js';
-import { money } from './cabal.js';
+import { inMeterOrder, money } from './cabal.js';
 import { cardsYours } from './threadstate.js';
 /** @import { BuildHeader, CabalCard, ListedTicket as Row } from './types/list.js' */
 
@@ -23,9 +23,6 @@ function liveMember(m, t) {
   if (t && m.state === 'running' && t.status !== 'running') return { state: 'idle', word: 'open' };
   return m;
 }
-
-/** Where a segment sits in the bar: 0 finished, 1 at work, 2 not started. */
-const stage = (/** @type {string} */ state) => (state === 'merged' || state === 'shipped' ? 0 : ['running', 'blocked', 'idle'].includes(state) ? 1 : 2);
 
 /**
  * @param {CabalCard} c
@@ -99,15 +96,15 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
             'span',
             { class: 'cabal-meter' },
             // Filled like a progress bar (Cara, 2026-11-28: "fill green, then blue, then grey"): finished, then at work, then not started, roster order within each.
-            ...c.members
-              .map((m) => ({ m, now: liveMember(m, m.id == null ? undefined : tickets.get(m.id)) }))
-              .sort((a, b) => stage(a.now.state) - stage(b.now.state))
-              .map(({ m, now }) => {
-                const name = [m.label, m.number != null ? `#${m.number}` : '', m.title].filter(Boolean).join(' ');
-                const seg = h('i', { 'data-s': now.state, 'data-ask': now.ask ? '' : null, title: `${name}: ${now.word}` });
-                // The list redraws on every bit of news: a building segment rejoins the shared pulse, or each redraw starts it over (#2197).
-                return now.state === 'running' ? phase(seg, 1600) : seg;
-              }),
+            ...inMeterOrder(
+              c.members.map((m) => ({ m, now: liveMember(m, m.id == null ? undefined : tickets.get(m.id)) })),
+              (x) => x.now.state,
+            ).map(({ m, now }) => {
+              const name = [m.label, m.number != null ? `#${m.number}` : '', m.title].filter(Boolean).join(' ');
+              const seg = h('i', { 'data-s': now.state, 'data-ask': now.ask ? '' : null, title: `${name}: ${now.word}` });
+              // The list redraws on every bit of news: a building segment rejoins the shared pulse, or each redraw starts it over (#2197).
+              return now.state === 'running' ? phase(seg, 1600) : seg;
+            }),
           )
         : '',
       h(

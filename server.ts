@@ -62,7 +62,7 @@ import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { queuedOn, shipsOn, ShipWatch } from './src/ci-ships.ts';
 import { CiAuto, lendsCi, noMachineCard, PASS_MS as CI_AUTO_PASS_MS } from './src/ci-auto.ts';
-import { MachineBalancer } from './src/machine-balancer.ts';
+import { COST, MachineBalancer } from './src/machine-balancer.ts';
 import { runnerOrder, runnerShares, runnersFor } from './src/machine-balancer.ts';
 import { storedReport } from './src/machine-join.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
@@ -101,6 +101,7 @@ import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
+import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import { heavyNow } from './src/heavy-now.ts';
 import { appOwners } from './src/host-load.ts';
@@ -2299,6 +2300,42 @@ const heavyPlacer = new HeavyPlacer({
   log: (line) => console.log(line),
 });
 if (!BOOT_CHECK) every('heavy job leases', 15_000, () => heavyPlacer.expire());
+// The runner pool, watching only (Build 11 P1, src/runner-pool.ts): each look's self-hosted jobs go in its books
+// (pool_jobs) and its line, and it logs where it would start each. Nothing on any PC changes until P3 turns it on.
+const runnerPool = new RunnerPool({
+  scheme: (repo) => {
+    const p = schemeOf(repo);
+    return p ? { id: p.id, name: p.name } : null;
+  },
+  first: () => liveSlug,
+  machines: (): PoolPc[] => {
+    const projects = store.listProjects();
+    return store.listMachines().flatMap((m) => {
+      const ci = store.machineRoles(m.id).find((r) => r.role === 'ci');
+      if (!ci?.on || m.owner_id === null) return [];
+      const os = (['windows', 'linux'] as const).filter((o) => machines.runnerHost(m.id, o));
+      const threads = storedReport(m)?.threads ?? 0;
+      return [
+        {
+          id: m.id,
+          name: m.name,
+          priority: m.priority ?? null,
+          // With no runner agent connected its OS isn't known: it is offline, which is the reason people read.
+          os: os.length ? os : ['windows', 'linux'],
+          // shortcut: a session is taken as there while the PC's own agent (which runs as the person) is connected; P2 proves the session start.
+          session: os.includes('windows') && machines.isOnline(m.id),
+          schemes: projects.filter((p) => lendsCi(store, m, p)).map((p) => p.id),
+          limit: Math.max(0, Math.min(ci.caps.threads ?? threads, threads - runner.turnLine.used(m.id) * COST.turn)),
+          off: os.length ? null : 'is offline',
+          hosts: os.map((o) => machines.runnerHost(m.id, o) ?? ''),
+        },
+      ];
+    });
+  },
+  store,
+  log: (line) => console.log(line),
+  now: Date.now,
+});
 const shipWatch = new ShipWatch({
   repos: runnerRepos,
   as: asScheme,
@@ -2308,6 +2345,13 @@ const shipWatch = new ShipWatch({
     ciHeavy = new Map();
     for (const j of jobs) ciHeavy.set(j.repo, (ciHeavy.get(j.repo) ?? 0) + 1);
     void heavyPlacer.pass(jobs, read);
+  },
+  pool: (sight) => {
+    try {
+      runnerPool.pass(sight);
+    } catch (err) {
+      console.error(`Runner pool: ${thrown(err).message ?? err}`);
+    }
   },
   queued: (byRepo, labels, jobs) => {
     ciQueued = byRepo;
@@ -2755,6 +2799,7 @@ const app: App = {
   ciHold,
   runnerCap,
   heavy: heavyPlacer,
+  pool: runnerPool,
   buildPlacer,
   heavyNow: (canSee, owns) =>
     heavyNow({

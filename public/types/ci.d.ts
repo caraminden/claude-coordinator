@@ -425,4 +425,32 @@ export interface CiRead {
   schemes: CiScheme[];
   pcs: PcView[];
   now: number;
+  /** The runner pool's line (src/runner-pool.ts PoolView, Build 11 P1); null or absent from a server without it. */
+  pool?: CiPool | null;
+}
+
+/** One job in the runner pool's line (src/runner-pool.ts PoolLineJob). */
+export interface CiPoolJob {
+  repo: string;
+  scheme: number;
+  id: number;
+  run: number;
+  name: string;
+  labels: string[];
+  ship: boolean;
+  since: number;
+  size: number;
+  place: number;
+  step: number;
+  machine: string | null;
+  why: string | null;
+}
+
+export interface CiPool {
+  at: number;
+  /** The jobs of the schemes the viewer can see, in line order. */
+  line: CiPoolJob[];
+  /** Every job in the line, seen or not. */
+  total: number;
+  watching: true;
 }

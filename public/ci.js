@@ -3,7 +3,7 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-/** @import { CiRead, CiScheme, CiProblem, CiRun, CiFallback, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, PcView, HostLoad, ReadFailed, TestHealth, CiNumbersView } from './types/ci.js' */
+/** @import { CiPool, CiPoolJob, CiRead, CiScheme, CiProblem, CiRun, CiFallback, CiViewData, CiWho, CiWaitingJob, CiRunningJob, CiQueue, CiWorkflow, PcView, HostLoad, ReadFailed, TestHealth, CiNumbersView } from './types/ci.js' */
 /** @import { ListedTicket } from './types/list.js' */
 /** @import { View, Scheme } from './types.js' */
 /** @import { StatusData } from './types/status.js' */
@@ -31,7 +31,7 @@ import { DOT as STATUS_DOT, RANK as STATUS_RANK, statusPane, WORD as STATUS_WORD
 
 /**
  * What the Overview's blocks need of the open page: its Host load read, and the opened queue groups and runners row.
- * @typedef {{ host: HostLoad | null; queueOpen: Set<string>; toggleQueue: (id: string) => void; hostedOpen: boolean; toggleHosted: () => void; openPc: (host: string) => void }} CiUi
+ * @typedef {{ host: HostLoad | null; queueOpen: Set<string>; toggleQueue: (id: string) => void; hostedOpen: boolean; toggleHosted: () => void; openPc: (host: string) => void; pool: CiPool | null }} CiUi
  */
 
 /** @typedef {number | 'all'} Scope */
@@ -432,6 +432,35 @@ function waitingBlock(s, now, ui) {
   return block(null, n ? 'waiting' : 'done', 'ci-waiting', row);
 }
 
+// ---------- the runner pool's line (Build 11 P1, specs/one-runner-pool.md section 7: watching only) ----------
+
+/** @param {CiPoolJob} j */
+const poolItem = (j) =>
+  hueRow(
+    { hue: j.machine ? 'running' : 'waiting', lead: `${j.place}`, meta: ago(j.since) },
+    h('span', { title: `${j.name}: ${j.size} threads, on ${j.labels.filter((l) => l !== 'self-hosted').join(', ')}${j.ship ? ', a ship' : ''}` }, ext(`https://github.com/${j.repo}/actions/runs/${j.run}`, j.name)),
+    j.ship ? h('span', { class: 'muted' }, ' · ship') : '',
+    ' · ',
+    j.machine ? `would start on ${j.machine}` : h('span', { class: 'muted' }, j.why ?? 'waiting'),
+  );
+
+/**
+ * The scheme's jobs in the pool's one line across every scheme, each with its place and where it would start or why it waits.
+ * @param {CiScheme} s
+ * @param {CiPool | null} pool
+ */
+function poolBlock(s, pool) {
+  const mine = (pool?.line ?? []).filter((j) => j.scheme === s.id);
+  if (!pool || !mine.length) return '';
+  const would = mine.filter((j) => j.machine).length;
+  const [row] = settingsRow(
+    { key: `ci-pool-${s.id}`, icon: 'rows', hue: 'waiting', title: "The runner pool's line", summary: [toneChip('warn', `${mine.length} in line`), `of ${pool.total} across every scheme`, would ? `${would} would start now` : ''] },
+    h('p', { class: 'look-prose' }, "Watching only: the pool shows where it would start each job and why the rest wait. This scheme's runners still take them."),
+    showFirst({ key: `ci-pool-${s.id}`, items: mine.map(poolItem), n: 6, noun: 'jobs', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows) }),
+  );
+  return block(null, 'waiting', 'ci-pool', row);
+}
+
 // ---------- ship CI on GitHub's runners (#2231; Cara, 2026-11-27, picked "Its own block, with a shard strip" and "Ships on top") ----------
 
 /** A ship's run (a `land/` branch) split into shards on GitHub's runners: a scheme whose ships run whole on GitHub keeps its page as it was. */
@@ -667,7 +696,7 @@ function historyTab(s) {
  * @param {CiUi} ui
  */
 function overview(s, pcs, now, ui) {
-  return [problemsBlock(s), verdictsBlock(s.view), shipBlock(s, now), runningBlock(s, now, ui), fallbacksBlock(s), waitingBlock(s, now, ui), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
+  return [problemsBlock(s), verdictsBlock(s.view), shipBlock(s, now), runningBlock(s, now, ui), fallbacksBlock(s), waitingBlock(s, now, ui), poolBlock(s, ui.pool), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
 }
 
 // ---------- the Releases page (#1423) ----------
@@ -1013,6 +1042,7 @@ export function releasesShell() {
       ...(tab === 'overview'
         ? overview(s, ciRead.pcs, Date.now(), {
             host: hostRead,
+            pool: ciRead.pool ?? null,
             queueOpen,
             toggleQueue: (id) => {
               queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id);

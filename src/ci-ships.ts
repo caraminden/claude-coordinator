@@ -166,10 +166,9 @@ export class ShipWatch {
             if (w.labels.size) labels.set(repo, w.labels);
             if (w.jobs.length) jobs.set(repo, w.jobs);
             heavy.push(...w.heavy);
-            if (this.poolsRepo(repo)) {
-              await this.running(repo, as, used, sight, now);
-              sight.repos.add(repo);
-            }
+            if (this.poolsRepo(repo)) await this.running(repo, as, used, sight, now);
+            // A repo off the pool is read as having no jobs: any the pool still had open for it end, never stay open for good.
+            if (this.deps.pool) sight.repos.add(repo);
           } catch (err) {
             if (err instanceof RateLimited) throw err;
             this.say(`Ship watch: ${repo}'s queued jobs: ${thrown(err).message ?? err}`);

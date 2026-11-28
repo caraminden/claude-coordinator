@@ -289,7 +289,8 @@ test("a repo whose scheme isn't on the pool costs GitHub what it did without the
   await new ShipWatch({ repos: () => [off], as: () => ({}), send: () => {}, get: before.get, log: () => {}, queued: () => {} }).tick(0);
   assert.deepEqual(asked(off), before.asked);
   assert.ok(asked(on).length > before.asked.length, 'the pooled repo reads all seven runs and the in-progress list too');
-  assert.deepEqual([...sights[0].repos], [on]);
+  // Read, with nothing listed: a job the pool still had open for it (its scheme just switched off) ends, never stays open for good.
+  assert.deepEqual([...sights[0].repos].sort(), [on, off].sort());
   assert.ok(sights[0].jobs.length === 7 && sights[0].jobs.every((j) => j.repo === on));
   assert.ok([...sights[0].runs].every((r) => r.startsWith(`${on}#`)));
 });

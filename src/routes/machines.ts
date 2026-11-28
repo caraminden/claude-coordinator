@@ -441,6 +441,21 @@ export const agentRoutes: Route[] = [
     if (body.kind !== undefined && body.kind !== 'register' && body.kind !== 'remove') throw new HttpError(400, 'kind must be register, remove or delete');
     return json(res, body.mint === false ? 200 : 201, await app.runnerTokens.issue(machine, body.scheme, body.mint !== false, body.kind ?? 'register'));
   }),
+  // A one-job runner's config (runner pool P2, #2269), for the launcher that runs as the slot's low-rights account: it holds no
+  // machine token, so the one-time id Citadel sent its agent a moment ago is the whole check. Handed out once, as plain text.
+  {
+    method: 'POST',
+    path: '/api/machines/runner-jit',
+    who: 'anyone',
+    async handler({ req, res, app }) {
+      const config = app.runnerSlots.once.take((await readJson(req, 1_000)).once);
+      if (!config) throw new HttpError(410, 'No runner config waits under that id: it was taken, or ran out');
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(config);
+    },
+  },
+  // A runner agent's word on one of its slots' one-job runners: started, took a job, ended, stopped (src/runner-slots.ts).
+  agent('POST', '/api/machines/runner-slot', async ({ req, res, app }, machine) => json(res, 202, app.runnerSlots.report(machine, await readJson(req, 10_000)))),
   // A CI runner agent's answer to a job (#328, public/runner-agent.mjs).
   agent('POST', '/api/machines/runner-result', async ({ req, res, app }, machine) => {
     if (!app.machines.runnerResult(machine, await readJson(req, 100_000))) throw new HttpError(410, 'No such runner job');
@@ -617,6 +632,23 @@ export const machineRoutes: Route[] = [
     async handler(ctx) {
       const ask = runnerAsk(await readJson(ctx.req));
       return json(ctx.res, 202, await ctx.app.runnerJobs.start(ctx.project, askerOf(ctx), ask));
+    },
+  },
+  // Start one one-job runner by hand (runner pool P2, #2269): {host, os, slot, labels}. The pool starts them by itself (P1);
+  // this is for trying a machine's slots. host names the PC (its machine name or hostname), and it must run CI for the scheme.
+  {
+    method: 'POST',
+    path: '/api/projects/:project/ci-runners/slot',
+    ...runnerAskers,
+    async handler({ req, res, app, project }) {
+      const body = await readJson(req, 10_000);
+      const os = body.os ?? 'windows';
+      if (os !== 'windows' && os !== 'linux') throw new HttpError(400, 'os must be windows or linux');
+      if (typeof body.host !== 'string' || !body.host) throw new HttpError(400, 'host must name the PC');
+      const host = body.host.toLowerCase();
+      const machine = app.machines.runnerMachines(os).find((m) => m.name.toLowerCase() === host || app.machines.runnerHost(m.id, os)?.toLowerCase() === host);
+      if (!machine) throw new HttpError(409, `No ${os} runner agent named ${body.host} is connected`);
+      return json(res, 202, await app.runnerSlots.start(project, machine, { os, slot: body.slot as number, labels: body.labels as string[] }));
     },
   },
   {

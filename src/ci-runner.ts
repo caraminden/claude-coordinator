@@ -87,6 +87,31 @@ export function mayFetch(store: Store, machine: Machine, project: Project, remov
   return ownerAsked(store, machine.owner_id, [machine.owner_id ?? -1], project.id);
 }
 
+/** Whether this machine runs CI for the scheme now: its CI role on and lent there (a one-job runner's config needs it, #2269). */
+export function lendsCi(store: Store, machine: Machine, project: Project): boolean {
+  return (store.machineRoles(machine.id).find((r) => r.role === 'ci')?.on ?? false) && lendsRole(store, machine, 'ci', project);
+}
+
+/**
+ * The config with the runner's own self-update off: slots link to one shared copy of the runner program, which an update
+ * from inside a job would rewrite under every slot, so the agent updates the copy between jobs instead (runner-slot.ps1
+ * Update). The runner reads `disableUpdate` from `.runner`, one of the config's base64 files. A config in a shape this
+ * doesn't know passes unchanged.
+ */
+export function noSelfUpdate(encoded: string): string {
+  try {
+    const files = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as Record<string, unknown>;
+    if (typeof files['.runner'] !== 'string') return encoded;
+    const runner = JSON.parse(Buffer.from(files['.runner'], 'base64').toString('utf8')) as Record<string, unknown>;
+    if (!runner || typeof runner !== 'object' || Array.isArray(runner)) return encoded;
+    runner.disableUpdate = true;
+    files['.runner'] = Buffer.from(JSON.stringify(runner)).toString('base64');
+    return Buffer.from(JSON.stringify(files)).toString('base64');
+  } catch {
+    return encoded;
+  }
+}
+
 export class RunnerTokens {
   private store: Store;
   private link: GithubLink;
@@ -168,6 +193,31 @@ export class RunnerTokens {
     if (r.status !== 204) throw new HttpError(502, await refused(r, owner.name, slug, hint));
     this.onFetched(project, `Machine ${machine.name} took the CI runner ${name} of ${slug} off GitHub, with ${owner.name}'s GitHub login.`, machine);
     return { ...answer, removed: true };
+  }
+
+  /**
+   * A just-in-time config for one one-job runner of `project`'s repo (runner pool P2, #2269), as its owner, named `name` with
+   * exactly `labels`, working in the slot's `_work`. Only for a machine whose CI role is on and lent to the scheme
+   * (`lendsCi`). The config is a credential: the caller hands it out once (src/runner-slots.ts) and never stores or logs it.
+   * No note in the Taskmaster's chat, as a registration token gets: this runs once per CI job.
+   */
+  async jit(machine: Machine, project: Project, name: string, labels: string[]): Promise<string> {
+    if (!lendsCi(this.store, machine, project)) throw new HttpError(404, `No scheme "${project.name}" that machine ${machine.name} runs CI for`);
+    const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const r = await this.github(ownerToken, 'POST', `/repos/${slug}/actions/runners/generate-jitconfig`, { name, runner_group_id: 1, labels, work_folder: '_work' });
+    if (r.status !== 201) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+    const body = (await r.json().catch(() => ({}))) as { encoded_jit_config?: unknown };
+    if (typeof body.encoded_jit_config !== 'string' || !/^[A-Za-z0-9+/=]{100,}$/.test(body.encoded_jit_config)) throw new HttpError(502, `GitHub answered ${r.status} without a runner config`);
+    return noSelfUpdate(body.encoded_jit_config);
+  }
+
+  /** Take the runner with GitHub id `id` off `project`'s repo, as its owner; false when GitHub no longer has it. GitHub refuses (502 here) while it runs a job. */
+  async removeById(project: Project, id: number): Promise<boolean> {
+    const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const r = await this.github(ownerToken, 'DELETE', `/repos/${slug}/actions/runners/${id}`);
+    if (r.status === 404) return false;
+    if (r.status !== 204) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+    return true;
   }
 
   /** Make `labels` a runner's custom labels, instead of those it had (GitHub's own, self-hosted and the OS, stay), as the repo's owner (#1934). */

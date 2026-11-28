@@ -142,6 +142,7 @@ import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerCap, runnersBeside } from './src/runner-cap.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
+import { RunnerSlots } from './src/runner-slots.ts';
 import { POOL } from './src/turn-line.ts';
 import { pressure } from './src/pressure.ts';
 import { MemoryEase } from './src/memory-ease.ts';
@@ -709,6 +710,8 @@ const machines = new MachineRelay(store, () => broadcast({ type: 'machines', mac
 const serverTools = config.serverTools && !PREVIEW ? new ServerToolSessions() : undefined;
 machines.tokenKey = machineTokenKey;
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
+const runnerSlots = new RunnerSlots(store, runnerTokens, machines);
+runnerSlots.log = (line) => console.log(`[runner slots] ${line}`);
 /** Take a card out of people's way with a line saying why (a machine job's go, a superseded kit sync); an answered or settled one stays. */
 function settleCard(card: { ticket: number; question: string }, by: string, line: string) {
   const e = store.eventsOfKinds(card.ticket, ['question']).find((q) => JSON.parse(q.data).id === card.question);
@@ -2662,6 +2665,11 @@ const RUNNER_FILES = new Set([
   'remove-runner.sh',
   'keep-wsl-up.ps1',
   'keep-runners.ps1',
+  // One-job runners in slot folders (runner pool P2, #2269).
+  'runner-slot.ps1',
+  'launch-slot.ps1',
+  'runner-slot.sh',
+  'launch-slot.sh',
 ]);
 // The same for the Android emulator's distro on that desktop (#533): deploy/desktop/android/setup.sh and what it downloads.
 const ANDROID_FILES: Record<string, string> = { 'setup.sh': 'deploy/desktop/android/setup.sh', 'citadel-android': 'tools/citadel-android', 'install-sdk.sh': 'tools/android/install-sdk.sh' };
@@ -2788,6 +2796,7 @@ const app: App = {
   repoAccess,
   runnerTokens,
   runnerJobs,
+  runnerSlots,
   ciLoad,
   heavyDir: join(DATA_DIR, 'projects', '.heavy'),
   ciHealth,

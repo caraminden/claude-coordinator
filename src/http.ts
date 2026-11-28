@@ -43,6 +43,7 @@ import type { CiLoad } from './ci-load.ts';
 import type { CiHealth } from './ci-health.ts';
 import type { RunnerCap } from './runner-cap.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
+import type { RunnerSlots } from './runner-slots.ts';
 import type { ChunkedUploads } from './chunked-uploads.ts';
 import type { CiNumbers } from './ci-numbers.ts';
 import type { CodeCounts } from './code-counts.ts';
@@ -431,6 +432,8 @@ export interface App {
   workFlow: WorkFlow;
   /** Jobs for the CI runner agent on a CI PC: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
   runnerJobs: RunnerJobs;
+  /** One-job runners in slot folders (src/runner-slots.ts, runner pool P2): their start, the one-time config handover, the agents' reports. */
+  runnerSlots: RunnerSlots;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;
   /** People's own OpenRouter keys and caps, and the media tools that spend them (src/openrouter.ts, #717). */

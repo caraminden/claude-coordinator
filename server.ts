@@ -1273,7 +1273,7 @@ if (!BOOT_CHECK) {
   every('reap closed minions', 3600_000, () => reaper.reap().finally(() => reaper.reapSupervisors()), 10 * 60_000);
   liveOn(BOOT_COMMIT, true);
 }
-// Citadel's recovery promises, checked at boot and hourly, report only (#1415, src/standing-checks.ts): reads in a worker.
+// Citadel's recovery promises, checked at boot and hourly (#1415, src/standing-checks.ts): reads in a worker; one repair.
 const standingChecks = new StandingChecks({
   store,
   dataDir: DATA_DIR,
@@ -1281,6 +1281,9 @@ const standingChecks = new StandingChecks({
   queued: (ids) => runner.queuedIds(ids),
   appTurns: () => contraptionTurns.liveIds(),
   procs: async () => (await reaper.owned()).map((x) => ({ pid: x.proc.pid, ticketId: x.ticketId, projectId: x.projectId, command: shownCommand(x.proc.argv) })),
+  // Its one repair (#2312): a minion stuck in pending-deploy past a live deploy of its commit gets the deploy-live step.
+  liveNow: () => waiters.pendingLive(),
+  deployLive: (id) => runner.deployLive(id),
 });
 if (!BOOT_CHECK && !PREVIEW) every('standing checks', 3600_000, () => standingChecks.run(), 3 * 60_000);
 // Main went back (#2077): each open minion cut from the commits a reset took off its scheme's main is told the rebase that takes them out.

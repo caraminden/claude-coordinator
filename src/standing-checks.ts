@@ -1,7 +1,7 @@
 // Standing checks (#1415, the reliability lens's RL9): Citadel's recovery promises, checked at boot and hourly. Each
 // check reads the store and the run folders and names every broken promise: a running minion with no turn record, a
-// queued message in two places, a due wake that never fired, a hand-off with no ship process, and so on. Report only:
-// nothing here repairs anything. A promise seen broken in two passes two minutes apart is a finding; its first sighting
+// queued message in two places, a due wake that never fired, a hand-off with no ship process, and so on. Report only,
+// but for one repair: shipped-live runs the deploy-live step for a minion stuck past its live deploy (#2312). A promise seen broken in two passes two minutes apart is a finding; its first sighting
 // writes one `standing-check` health row (so it lands in an open incident's timeline), and the Status page lists the
 // current ones. The reads run in a worker on a read-only handle, never on the server's thread (Josh, 2026-11-20: "I dont
 // want to go too crazy until the halts are dealt with"). The handoff: shared/project/handoffs/qp-reliability-standing-checks.md.
@@ -27,6 +27,8 @@ export interface Finding {
   project?: number | null;
   /** "#N: what's wrong", for people. */
   text: string;
+  /** shipped-live's repair ran the server's deploy-live step for it (#2312): never again while it stays broken. */
+  repaired?: true;
 }
 
 /** What only the server's own memory and /proc know, read on its thread (cheap) just before the worker starts. */
@@ -404,6 +406,10 @@ export interface StandingDeps {
   queued: (ticketIds: number[]) => Record<number, number[]>;
   appTurns: () => number[];
   procs: () => Promise<Snapshot['procs']>;
+  /** The pending-deploy minions whose commit is in the live deploy (LiveWaiters.pendingLive), and the server's
+   * deploy-live step (Runner.deployLive), for shipped-live's one repair (Cara, 2026-11-28, "Fix the stuck deploy wait"). */
+  liveNow?: () => Promise<number[]>;
+  deployLive?: (ticketId: number) => boolean;
   now?: () => number;
   confirmMs?: number;
   wait?: (ms: number) => Promise<void>;
@@ -455,7 +461,26 @@ export class StandingChecks {
     const seen = new Set(first.map((f) => f.key));
     const found = (await this.pass(await this.snapshot(), integrity)).filter((f) => seen.has(f.key) || f.check === 'db-integrity');
     if (!integrity) found.push(...this.lastIntegrity(kept));
+    await this.repair(found, kept);
     this.keep(found, integrity ? this.now() : (kept?.integrityAt ?? null), null);
+  }
+
+  /**
+   * The checks' one repair (#2312): a minion shipped-live confirms stuck, whose commit is in the live deploy, gets the
+   * server's own deploy-live step once, on the server's thread. That step decides what happens; this adds no rule.
+   */
+  private async repair(found: Finding[], kept: Kept | null) {
+    const done = new Set((kept?.findings ?? []).filter((f) => f.repaired).map((f) => f.key));
+    const stuck = found.filter((f) => f.check === 'shipped-live' && f.ticket !== null);
+    const live = stuck.some((f) => !done.has(f.key)) && this.d.deployLive ? new Set(await this.d.liveNow?.()) : new Set<number>();
+    for (const f of stuck) {
+      if (!done.has(f.key)) {
+        if (!live.has(f.ticket!)) continue;
+        this.d.deployLive!(f.ticket!);
+      }
+      f.repaired = true;
+      f.text += ' The check ran the deploy-live step for it once.';
+    }
   }
 
   /** Between weekly integrity checks the last verdict stands. */

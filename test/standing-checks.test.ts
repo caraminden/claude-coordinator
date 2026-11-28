@@ -273,6 +273,28 @@ test('a run confirms in a worker, writes one health row per broken promise, keep
   assert.equal(keptChecks(store)!.error, null);
 });
 
+test("shipped-live's one repair: a stuck minion whose deploy is live gets the server's deploy-live step, once (#2312)", async () => {
+  const { store, dataDir, minion, sql } = setup();
+  const [live, notLive] = [minion('live'), minion('not live')];
+  for (const t of [live, notLive]) {
+    store.updateTicket(t.id, { state: 'pending-deploy' });
+    store.addEvent(t.id, 'note', { text: 'Shipped abc.' });
+  }
+  sql('UPDATE events SET created_at = ? WHERE ticket_id IN (?, ?)', NOW - 2 * 3600_000, live.id, notLive.id);
+  // The step decides; here it keeps the minion open without a note (a probe still to run, say), so the check finds it again.
+  const ran: number[] = [];
+  const checks = new StandingChecks({ store, dataDir, commit: 'abc', queued: () => ({}), appTurns: () => [], procs: async () => [], now: () => NOW + 1, wait: async () => {}, liveNow: async () => [live.id], deployLive: (id) => (ran.push(id), false) });
+  await checks.run();
+  await checks.settled();
+  assert.deepEqual(ran, [live.id], 'only the minion with a live deploy of its commit');
+  const kept = keptChecks(store)!.findings.find((f) => f.ticket === live.id)!;
+  assert.match(kept.text, /ran the deploy-live step/);
+  await checks.run();
+  await checks.settled();
+  assert.deepEqual(ran, [live.id], 'once: a minion it kept open is not tried again');
+  assert.match(keptChecks(store)!.findings.find((f) => f.ticket === live.id)!.text, /ran the deploy-live step/);
+});
+
 test("the Status tile shows a viewer only their schemes' findings, and Citadel's own only in Citadel's (ADR 0015)", () => {
   const { store, project, minion } = setup();
   const other = store.createProject(`other${n}`, null);

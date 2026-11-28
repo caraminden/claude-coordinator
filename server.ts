@@ -104,7 +104,9 @@ import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
 import { poolOn } from './src/runner-pool.ts';
 import { BUSY, OwnerBusy, offWords } from './src/owner-busy.ts';
-import { actionsMinutes, Fallbacks, type Gh, restartOnGithub } from './src/runner-fallback.ts';
+import { actionsMinutes, FALLBACK, Fallbacks, type Gh, perigeeRunner, restartOnGithub } from './src/runner-fallback.ts';
+import { readPressure } from './src/host-load.ts';
+import { ghSend } from './src/gh-api.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import { heavyNow } from './src/heavy-now.ts';
 import { appOwners } from './src/host-load.ts';
@@ -2336,6 +2338,8 @@ const poolGh =
       else fields[k] = String(v);
     return { ...(await ghPost(path, as, fields)), body: null };
   };
+// Each ended dispatched run's minutes, counted once (src/runner-fallback.ts actionsMinutes).
+const poolCounted = new Map<string, number>();
 const poolFallback = new Fallbacks({
   now: Date.now,
   isPublic: async (repo) => {
@@ -2356,8 +2360,43 @@ const poolFallback = new Fallbacks({
       },
       repos,
       since,
+      poolCounted,
     );
   },
+  // Private repos' Linux jobs: a one-job runner in a rootless podman container in citadel-heavy's slot, with the scheme
+  // owner's login minting its config; the config goes only into the container's environment.
+  perigee: perigeeRunner({
+    pressure: () => readPressure(),
+    jit: async (repo, name, labels) => {
+      const as = asScheme(repo);
+      if (as === null) throw new Error('no scheme reads its repo');
+      const r = await ghSend('POST', `repos/${repo}/actions/runners/generate-jitconfig`, as, { name, runner_group_id: 1, labels, work_folder: '_work' });
+      const b = r.body as { encoded_jit_config?: unknown; runner?: { id?: unknown } } | null;
+      const id = Number(b?.runner?.id);
+      if (r.status !== 201 || typeof b?.encoded_jit_config !== 'string' || !Number.isSafeInteger(id)) throw new Error(`GitHub answered ${r.status} for a runner config`);
+      return { id, config: b.encoded_jit_config };
+    },
+    run: (name, config) => {
+      const P = FALLBACK.perigee;
+      const args = ['podman', 'run', '--rm', '--name', name, '--cpus', String(P.cpus), '--memory', P.memory, '--pull', 'missing', '-e', 'ACTIONS_RUNNER_INPUT_JITCONFIG', P.image, '/home/runner/run.sh'];
+      const env = { ...turnEnv(process.env), CITADEL_HEAVY_DIR: join(DATA_DIR, 'projects', '.heavy'), CITADEL_HEAVY_WHO: 'CI fallback', CITADEL_HEAVY_WHAT: `CI fallback ${name}`, ACTIONS_RUNNER_INPUT_JITCONFIG: config };
+      const done = new Promise((end) => execFile(join(import.meta.dirname, 'tools', 'citadel-heavy'), args, { env, maxBuffer: 1 << 24 }, (e) => end(e ? 1 : 0)));
+      return { done, stop: () => execFile('podman', ['stop', '-t', '10', name], { timeout: 60_000 }, () => {}) };
+    },
+    runner: async (repo, id) => {
+      const as = asScheme(repo);
+      if (as === null) return null;
+      const r = await ghGet(`repos/${repo}/actions/runners/${id}`, null, as);
+      if (r.status === 404) return null;
+      if (r.status !== 200) throw new Error(`GitHub answered ${r.status}`);
+      return { busy: (r.body as { busy?: unknown } | null)?.busy === true };
+    },
+    remove: async (repo, id) => {
+      const as = asScheme(repo);
+      if (as !== null) await ghSend('DELETE', `repos/${repo}/actions/runners/${id}`, as);
+    },
+    log: (line) => console.log(line),
+  }),
   github: async (repo, run) => {
     const as = asScheme(repo);
     return as === null ? { ok: false, why: 'no scheme reads its repo' } : restartOnGithub(poolGh(as), repo, run);
@@ -2400,6 +2439,7 @@ const runnerPool = new RunnerPool({
           session: os.includes('windows') && machines.isOnline(m.id),
           schemes: projects.filter((p) => lendsCi(store, m, p)).map((p) => p.id),
           limit: Math.max(0, Math.min(ci.caps.threads ?? threads, threads - runner.turnLine.used(m.id) * COST.turn)),
+          cap: Math.min(ci.caps.threads ?? threads, threads),
           off: os.length ? null : 'is offline',
           // Paused or stepping back (P4): the pool's reason for starting nothing here.
           ...(os.length && use ? { off: offWords(use) } : {}),

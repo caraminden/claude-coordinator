@@ -86,6 +86,7 @@ import {
   DISPATCH_SINCE,
   trackOffline,
   stuckProblems,
+  refusedProblems,
   hungProblems,
   deadGroups,
   deadProblem,
@@ -316,6 +317,8 @@ export interface CiHealthDeps {
   longs?: () => LongJob[];
   /** A scheme on the runner pool (Build 11 P3): the machines that could take its jobs now (src/runner-pool.ts able); null for a scheme on standing runners. With one, it has no runner to be offline: it's fine, and minions waiting on its runners wake. */
   pool?: (p: Project) => string[] | null;
+  /** #2320: the pool machines lending a scheme CI that refused their last starts in a row (src/runner-pool.ts refusals): the scheme's runners are down, whatever else is online. */
+  poolRefusals?: (p: Project) => { machine: string; why: string }[];
   /** #2231: a scheme's retro-log lines from `since` (its ship script's fallbacks); none, and no fallbacks show or ring. */
   retro?: (project: Project, since: number, now: number) => Promise<RetroLine[]>;
   /** #2231: each poll's ship runs' push-to-verdict, for the Numbers tab (CiNumbers.own); none, and they aren't kept. */
@@ -645,6 +648,7 @@ export class CiHealth {
     // A runner list it can't read keeps the stuck items as they were: it can't tell, so it neither clears nor rings anew.
     // A pool scheme a machine can take jobs for has no runner whose being offline strands them: the pool's line says why each waits.
     if (!this.deps.pool?.(p)?.length) out.push(...(runners ? stuckProblems(runners, all, saved.offline, now) : (saved.problems ?? []).filter((x) => x.key.startsWith('stuck:'))));
+    if (!this.deps.pool?.(p)?.length) out.push(...refusedProblems(p, this.deps.poolRefusals?.(p) ?? []));
     out.push(...hungProblems(all, now, this.deps.longs?.() ?? []));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
@@ -1458,6 +1462,7 @@ ${text}`,
 
   /** The scheme's runners online, or for a pool scheme the machines that could take its jobs, as runners by name; null when the list can't be read. */
   private upFor(p: Project, runners: Runner[] | null): { name: string }[] | null {
+    if (this.deps.poolRefusals?.(p).length) return [];
     const able = this.deps.pool?.(p);
     if (able?.length) return able.map((name) => ({ name }));
     return runners && onlineRunners(runners, p.name);

@@ -356,6 +356,7 @@ function world({ delve = false } = {}) {
       return mandateUp.ok;
     },
     pool: undefined as ((p: { id: number }) => string[] | null) | undefined,
+    poolRefusals: undefined as ((p: { id: number }) => { machine: string; why: string }[]) | undefined,
   };
   return { store, peek, gh, puts, parts, from, quiet, links, mandateUp, deps, health: new CiHealth(store, deps) as CiHealth };
 }
@@ -433,6 +434,19 @@ test('a scheme on the runner pool with a machine that can take its jobs is fine:
       able.length ? 'a machine can take it: fine' : 'no machine can take it: still a problem',
     );
   }
+});
+
+test('#2320: a pool scheme whose machines refuse every start gets a runners-down problem with the refusal as the reason; runners-back waits', async () => {
+  const w = world();
+  w.deps.pool = (p) => (p.id === w.peek.id ? [] : null);
+  w.deps.poolRefusals = (p) => (p.id === w.peek.id ? [{ machine: 'cara-desktop', why: 'this agent only adds, lists and removes runners' }] : []);
+  w.gh.runners = [desk('online')];
+  await w.health.tick(NOW);
+  const [peek] = w.health.snapshot(() => true);
+  const item = peek.problems.find((x) => x.key.startsWith('pool-refused:'));
+  assert.ok(item, 'a problem names it');
+  assert.match(item!.why!, /cara-desktop.*this agent only adds, lists and removes runners/);
+  assert.match(item!.fix!, /update the runner agent on cara-desktop/);
 });
 
 test("#2239: runners a PC's agent keeps asleep read asleep on the CI page; the rest of the offline ones stay offline", async () => {

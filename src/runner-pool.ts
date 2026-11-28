@@ -42,6 +42,8 @@ export const POOL = {
   tookMs: 10 * 60_000,
   /** A job whose runner didn't start is tried again after this long. */
   startAgainMs: 60_000,
+  /** A machine that refused this many starts in a row no longer counts as able for CI health (#2320). */
+  refusedAfter: 3,
   /** A running run's jobs are read again at least this often when GitHub says the run didn't change (API budget, P0). */
   runningMs: 60_000,
   /** An ended job's row is kept this long, then pruned (once a day). */
@@ -408,6 +410,8 @@ export class RunnerPool {
   private started = new Map<string, Started>();
   /** A job whose runner didn't start: not tried again before `until`, and `why` says what went wrong. */
   private failed = new Map<string, { until: number; why: string }>();
+  /** Each machine's starts refused in a row, and the last refusal's words; one start that works clears it. */
+  private refused = new Map<number, { n: number; why: string }>();
   /** Each scheme's queued jobs' needs at the last look, for able(). */
   private queued = new Map<number, Needs[]>();
   private current: PoolView = { at: 0, line: [], machines: [], watching: true };
@@ -425,9 +429,17 @@ export class RunnerPool {
    * such machine (its OS, or a signed-in session for a desktop job). For CI health's "fine" (a pool scheme has no standing runner to be online).
    */
   able(scheme: number): string[] {
-    const can = this.d.machines().filter((m) => m.schemes.includes(scheme) && !m.off);
+    const can = this.d.machines().filter((m) => m.schemes.includes(scheme) && !m.off && (this.refused.get(m.id)?.n ?? 0) < POOL.refusedAfter);
     const fits = (n: Needs) => n.os !== null && can.some((m) => m.os.includes(n.os!) && (!n.session || m.session));
     return (this.queued.get(scheme) ?? []).every(fits) ? can.map((m) => m.name) : [];
+  }
+
+  /** The machines lending the scheme CI that refused their last POOL.refusedAfter starts in a row, with the last refusal (#2320). */
+  refusals(scheme: number): { machine: string; why: string }[] {
+    return this.d
+      .machines()
+      .filter((m) => m.schemes.includes(scheme) && (this.refused.get(m.id)?.n ?? 0) >= POOL.refusedAfter)
+      .map((m) => ({ machine: m.name, why: this.refused.get(m.id)!.why }));
   }
 
   /**
@@ -640,13 +652,15 @@ export class RunnerPool {
     const key = `${job.repo}#${job.id}`;
     const fail = (why: string) => {
       this.started.delete(name);
+      this.refused.set(machine, { n: (this.refused.get(machine)?.n ?? 0) + 1, why: why.slice(0, 200) });
       this.failed.set(key, { until: this.d.now() + POOL.startAgainMs, why: `its runner didn't start (${why.slice(0, 200)}); trying again shortly` });
       this.d.log(`Runner pool: couldn't start ${name} for ${job.repo} "${job.name}" (job ${job.id}): ${why}`);
     };
     this.d.log(`Runner pool: starting ${name} for ${job.repo} "${job.name}" (job ${job.id}${job.ship ? ', a ship' : ''})`);
     this.d.start!({ repo: job.repo, scheme: job.scheme, machine, os, slot, labels, job: job.id }).then(
       (r) => {
-        if (!r.ok) fail(r.output.trim().split('\n').at(-1) || 'the agent refused');
+        if (r.ok) this.refused.delete(machine);
+        else fail(r.output.trim().split('\n').at(-1) || 'the agent refused');
       },
       (err: unknown) => fail(err instanceof Error ? err.message : String(err)),
     );

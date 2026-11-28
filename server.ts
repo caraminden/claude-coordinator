@@ -1959,6 +1959,7 @@ const ciHealth = new CiHealth(store, {
   asleep: () => ciLoad.asleep(),
   // A scheme on the runner pool (Build 11 P3) is fine while a machine can take its jobs; read once requests come in, after runnerPool is set up below.
   pool: (p) => (poolOn(store, p.id) ? runnerPool.able(p.id) : null),
+  poolRefusals: (p) => (poolOn(store, p.id) ? runnerPool.refusals(p.id) : []),
   get: withoutHeld(ghGet, (run) => ciHold.isHeld(run)),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.

@@ -190,6 +190,21 @@ export function stuckProblems(runners: Runner[], jobs: Job[], offline: Record<st
   });
 }
 
+/** #2320: a pool machine that is online but refuses every start (an agent too old for one-job runners): CI is down there, with the agent's own words. */
+export function refusedProblems(p: { id: number; name: string }, refused: { machine: string; why: string }[]): Problem[] {
+  if (!refused.length) return [];
+  const names = refused.map((r) => r.machine).join(', ');
+  return [
+    {
+      key: `pool-refused:${p.id}`,
+      title: `CI: ${p.name}'s runners are down: ${names} can't start runners`,
+      why: refused.map((r) => `${r.machine}: ${r.why}`).join('; '),
+      fix: `update the runner agent on ${names}; once a start works the jobs go on by themselves`,
+      plain: { what: `${p.name}'s CI can't start: ${names} refuses to start runners`, next: `Update the runner agent on ${names}; jobs then start by themselves` },
+    },
+  ];
+}
+
 /** The minutes a long job may run: its command's DEADLINE_MIN=<n> when it sets one, else LONG_MINUTES (the run's own time limit, 6 h). */
 export function longDeadlineMs(l: Pick<LongJob, 'command'>): number {
   const m = /\bDEADLINE_MIN=(\d+)/.exec(l.command);

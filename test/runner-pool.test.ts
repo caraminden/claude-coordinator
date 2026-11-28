@@ -505,6 +505,30 @@ test("a runner that doesn't start frees its room, says why on the job, and is tr
   assert.equal(v.line[0].starting, true);
 });
 
+test('a machine that refuses its last 3 starts in a row stops counting as able, says why, and one start that works makes it able again (#2320)', async () => {
+  const w = poolWorld();
+  assert.deepEqual(w.pool.able(TOC), ['cara-desktop']);
+  const refuse = async (job: number) => {
+    w.pool.pass(w.sight([w.j(w.toc, job)]));
+    w.answers.at(-1)!({ ok: false, output: 'refused: this agent only adds, lists and removes runners (got op "start")\n' });
+    await new Promise((r) => setImmediate(r)); // timing-ok: lets the start's answer settle
+    w.tick(POOL.startAgainMs);
+  };
+  await refuse(11);
+  await refuse(11);
+  assert.deepEqual(w.pool.able(TOC), ['cara-desktop'], 'two refusals: still able');
+  await refuse(11);
+  assert.deepEqual(w.pool.able(TOC), [], 'three in a row: not able');
+  assert.match(w.pool.refusals(TOC)[0].why, /this agent only adds, lists and removes runners/);
+  assert.equal(w.pool.refusals(TOC)[0].machine, 'cara-desktop');
+  // The pool keeps trying; one start that works clears it at once.
+  w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  w.answers.at(-1)!({ ok: true, output: '' });
+  await new Promise((r) => setImmediate(r)); // timing-ok: lets the start's answer settle
+  assert.deepEqual(w.pool.able(TOC), ['cara-desktop']);
+  assert.deepEqual(w.pool.refusals(TOC), []);
+});
+
 test("a standing scheme's jobs are only watched and take none of the pool's room; standing runners' running jobs do (Build 11 P3)", () => {
   const w = poolWorld();
   // Peek's two waiting jobs are older but on standing runners: Theory of Crafting's job still starts. Taking turns, ToC's job

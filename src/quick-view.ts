@@ -48,8 +48,12 @@ export function quickInfo(on: boolean, behindText: string, fast: FastState | und
   };
 }
 
-/** The same, read from `stateDir` (the live checkout's cc-deploy) off the server's thread; the card shows the last read. */
-export async function readQuick(stateDir: string, fast: FastState | undefined): Promise<QuickInfo> {
+/**
+ * The same, read from `stateDir` (the live checkout's cc-deploy) off the server's thread; the card shows the last read.
+ * `onMain`: is that top still on main? A rollback takes an unverified quick train off main, and its quick-behind line stays
+ * until the next full ship, so without this it would read live (the worker skips it the same way, src/fast-mode.ts).
+ */
+export async function readQuick(stateDir: string, fast: FastState | undefined, onMain: (top: string) => Promise<boolean> = async () => true): Promise<QuickInfo> {
   const [on, text] = await Promise.all([
     access(join(stateDir, 'quick-train-on')).then(
       () => true,
@@ -57,5 +61,7 @@ export async function readQuick(stateDir: string, fast: FastState | undefined): 
     ),
     readFile(join(stateDir, 'quick-behind'), 'utf8').catch(() => ''),
   ]);
-  return quickInfo(on, text, fast);
+  const q = quickInfo(on, text, fast);
+  const live = await Promise.all(q.behind.map((b) => onMain(b.top)));
+  return { ...q, behind: q.behind.filter((_, i) => live[i]) };
 }

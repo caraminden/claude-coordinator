@@ -40,3 +40,12 @@ test('a red: a top marked red or being pinned is no longer "running behind"; the
   assert.equal(r.pinning, null);
   assert.deepEqual(r.reds, [{ ids: ['test/y.test.ts'], n: 14, at: 100, escalateAt: 100 + ESCALATE_MS, escalated: false }]);
 });
+
+test('a quick train rolled back off main before its full tests gave a verdict no longer reads live', async () => {
+  writeFileSync(join(root.dir, 'quick-behind'), [`1000 ${sha('a')} ${sha('b')} ${sha('b')}:12`, `2000 ${sha('b')} ${sha('c')} ${sha('c')}:13`].join('\n'));
+  const v = await readQuick(root.dir, undefined, async (top) => top !== sha('c'));
+  assert.deepEqual(
+    v.behind.map((b) => b.ships),
+    [[12]],
+  );
+});

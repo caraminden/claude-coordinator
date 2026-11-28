@@ -204,28 +204,20 @@ b.waits { color: var(--held); }
 /* A link that names a release target scrolls its card to the top, clear of the sticky head (#1647). */
 .rel-card[data-target] { scroll-margin-top: calc(var(--topbar-h, 0px) + var(--rel-head-h, 3.5rem) + var(--space-3)); }
 
-/* Quick trains (#2245, take A "In the line"): the off or on line, a quick train live with its full tests behind, a red, and its rows in the line. */
+/* Quick trains (#2245, take A "In the line"): the off or on line, a quick train live with its full tests behind, a red, and its rows in the line.
+   No entry motion: the page replaces its cards on every redraw, so it would replay on each poll. */
 .rel-card { --qk: var(--cat-5); }
 .rel-qline { margin: 0.45rem 0 0; font-size: 0.88em; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
 .rel-qtag { display: inline-flex; align-items: center; padding: 0.05em 0.5em; border-radius: 999px; font-size: 0.85em; font-weight: 600; line-height: 1.45; white-space: nowrap; color: var(--qk); border: 1px solid currentColor; background: color-mix(in srgb, var(--qk) 9%, var(--panel)); }
 .rel-qtag.off { color: var(--muted); border-style: dashed; background: none; }
 .rel-qtip { cursor: help; border-radius: 999px; }
 .rel-qtip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rel-quick { margin: 0.45rem 0 0; padding: 0.45rem 0.6rem; border-radius: 8px; font-size: 0.88em; border: 1px solid color-mix(in srgb, var(--qk) 35%, var(--line)); background: color-mix(in srgb, var(--qk) 5%, var(--panel)); animation: rel-qin 0.3s ease-out; }
+.rel-quick { margin: 0.45rem 0 0; padding: 0.45rem 0.6rem; border-radius: 8px; font-size: 0.88em; border: 1px solid color-mix(in srgb, var(--qk) 35%, var(--line)); background: color-mix(in srgb, var(--qk) 5%, var(--panel)); }
 .rel-quick > b, .rel-quick > .rel-qtip > b { color: var(--qk); }
 .rel-quick > div { margin-top: 0.2rem; overflow-wrap: anywhere; }
-.rel-quick.red { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); background: color-mix(in srgb, var(--error) 5%, var(--panel)); animation: rel-qin 0.3s ease-out, rel-qpulse 1.2s ease-out 2; }
+.rel-quick.red { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); background: color-mix(in srgb, var(--error) 5%, var(--panel)); }
 .rel-quick.red > b { color: var(--error); }
-.rel-qbar { position: relative; height: 4px; max-width: 16rem; border-radius: 2px; overflow: hidden; background: var(--line); }
-.rel-qbar > b { position: absolute; inset: 0; background: color-mix(in srgb, var(--qk) 35%, var(--line)); }
-.rel-qbar.run > b { background: none; }
-.rel-qbar.run > b::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 2px; background: var(--qk); animation: rel-qrun 1.6s ease-in-out infinite; }
-.rel-quick.red .rel-qbar.run > b::after { background: var(--error); }
 .rel-qhead { color: var(--qk); font-weight: 600; }
 .rel-change.quick:not(.front) { background: color-mix(in srgb, var(--qk) 6%, var(--panel)); box-shadow: inset 3px 0 var(--qk); }
 .rel-change.quick.front { box-shadow: inset 3px 0 var(--qk); }
 .rel-change.quick.front .rel-pos { background: var(--qk); }
-@keyframes rel-qin { from { opacity: 0; transform: translateY(-3px); } }
-@keyframes rel-qpulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--error) 40%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
-@keyframes rel-qrun { from { left: -40%; } to { left: 100%; } }
-@media (prefers-reduced-motion: reduce) { .rel-quick, .rel-quick.red, .rel-qbar.run > b::after { animation: none; } .rel-qbar.run > b::after { left: 30%; } }

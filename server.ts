@@ -1728,7 +1728,9 @@ const releases = new Releases({
   lines: async () => {
     await landsInFlight.refresh();
     const own = deployState ? ownScheme()?.id : undefined;
-    quickNow = deployState && own != null ? { scheme: own, info: await readQuick(deployState, store.getSetting<FastState>(fastStateKey(own)) ?? undefined) } : null;
+    const repo = own != null ? store.getProject(own)?.repo_dir : undefined;
+    const onMain = (top: string) => new Promise<boolean>((done) => (repo ? execFile('git', ['-C', repo, 'merge-base', '--is-ancestor', top, 'refs/heads/main'], { timeout: 10_000 }, (err) => done(!err)) : done(true)));
+    quickNow = deployState && own != null ? { scheme: own, info: await readQuick(deployState, store.getSetting<FastState>(fastStateKey(own)) ?? undefined, onMain) } : null;
   },
   inFlight: (views, fresh) => {
     landsInFlight.attach(views, fresh);

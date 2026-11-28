@@ -641,7 +641,7 @@ function fastModeRow(p) {
       h(
         'p',
         { class: 'muted small settings-help' },
-        'Off for Citadel itself: every scheme runs on it (Cara, Nov 18: "Later"). Citadel\'s quick trains are not fast mode: only low-risk ships that touch nothing sensitive, on a quick check with the full tests run behind, and they are off until a person turns them on after the one-week recount (on or after Dec 4). Releases shows where they stand.',
+        'Off for Citadel itself: every scheme runs on it (Cara, Nov 18: "Later"). Citadel\'s quick trains are not fast mode: only low-risk ships that touch nothing sensitive, on a quick check with the full tests run behind, and they are off until a person turns them on after the one-week recount (on or after Dec 4, with #1896\'s failing test looked up). Releases shows where they stand.',
       ),
     settingsHelp(
       'Low and medium changes ship live on the smoke check alone, and the full suite runs on main behind them.',

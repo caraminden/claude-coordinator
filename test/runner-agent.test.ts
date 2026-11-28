@@ -652,14 +652,17 @@ test('a copy 25 days past its last good update drains the slots: no start meanwh
     assert.equal(jobs.busy, null);
     f.now += COPY_MAX_MS;
     await watch.tick();
-    assert.match(String(jobs.busy), /draining/);
-    assert.match((await jobs.handle(start(2))).output, /busy with draining/);
+    assert.match(String(jobs.draining), /draining/);
+    assert.match((await jobs.handle(start(2))).output, /draining slots/);
+    // Only starts wait: Citadel's other jobs still run.
+    assert.equal((await jobs.handle({ id: ID, op: 'list' })).ok, true);
     // The slot ends; the update takes the lock over, fails, and lets starts in until its next try.
     f.failUpdate = true;
     f.states = [{ repo: 'peek', slot: 1, running: false, exit: 0 }];
     await watch.tick();
     assert.deepEqual(f.ran.slice(-2), ['state', 'update']);
     assert.equal(jobs.busy, null);
+    assert.equal(jobs.draining, null);
     f.ran.length = 0;
     f.states = [];
     f.now += COPY_RETRY_MS - 1;

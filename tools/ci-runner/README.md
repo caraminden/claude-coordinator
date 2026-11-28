@@ -587,8 +587,8 @@ left as they are.
   Windows slots link `bin` and `externals` to it with junctions and copy its root files. Linux slots get `cp -al` hard
   links, made in a root-only folder and renamed in. SYSTEM and root never run or read a job-writable file as
   themselves. The config turns the runner's own self-update off; the agent updates the copy instead, a day apart and
-  only while no slot runs. A copy whose last good update is 25 days old holds the agent's job lock, so no new slot
-  starts, until the running ones end and it updates.
+  only while no slot runs. A copy whose last good update is 25 days old holds back new slot starts (the agent's other
+  jobs still run) until the running ones end and it updates.
 - **Watch.** Every 15 seconds the agent reads the state op for the slots it started (`slots.json` beside it). It tells
   Citadel when a runner took a job, ended (with the launcher's exit code) or was stopped: a runner with no job after
   2 minutes is stopped and its `.runner`, `.credentials` and `.credentials_rsaparams` wiped. A stop goes by the slot

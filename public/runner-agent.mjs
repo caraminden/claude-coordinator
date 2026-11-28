@@ -155,6 +155,8 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
 export class JobRunner {
   constructor({ dir, appUrl, token, run = runCommand, log = () => {}, os = defaultOs() }) {
     Object.assign(this, { dir, appUrl, token, run, log, os, busy: null });
+    /** Set while SlotWatch drains the slots for an update: only starts wait for it, Citadel's other jobs still run. */
+    this.draining = null;
     /** Told each checked job before it runs, and each that ran, with its exit code and output: SlotWatch's books. */
     this.before = () => {};
     this.done = () => {};
@@ -170,6 +172,7 @@ export class JobRunner {
       return { id: typeof raw?.id === 'string' ? raw.id : '', ok: false, output: `runner agent: ${err.message}` };
     }
     if (this.busy) return { id: job.id, ok: false, output: `runner agent: busy with ${this.busy}; try again when it ends` };
+    if (job.op === 'start' && this.draining) return { id: job.id, ok: false, output: `runner agent: ${this.draining}; try again when it ends` };
     const what = `${job.op}${job.scheme ? ` for scheme ${job.scheme}` : ''}${job.count ? `, ${job.count} runner(s)` : ''}${job.slot ? `, slot ${job.slot}` : ''}`;
     this.busy = what;
     this.log(`Job ${what}`);
@@ -337,10 +340,11 @@ export class SlotWatch {
       if (!this.copyDue()) return;
       const idle = !Object.keys(this.slots).length && !states.some((s) => s.running);
       if (idle) await this.update();
-      else if (this.now() - this.copied > COPY_MAX_MS && !this.jobs.busy) {
-        // No new start until the slots end and the copy updates: the lock holds while they drain.
+      else if (this.now() - this.copied > COPY_MAX_MS && !this.jobs.draining) {
+        // No new start until the slots end and the copy updates. shortcut: a slot task the agent doesn't track (its
+        // start lost) holds the drain until it ends or a person stops it; upgrade if one shows up.
         this.log(`The runner copy's last update was ${Math.floor((this.now() - this.copied) / 86_400_000)} days ago: draining the slots to update it.`);
-        this.jobs.busy = DRAINING;
+        this.jobs.draining = DRAINING;
       }
     } finally {
       this.ticking = false;
@@ -352,10 +356,11 @@ export class SlotWatch {
     return this.now() - this.copied > COPY_EVERY_MS && this.now() - this.tried > COPY_RETRY_MS;
   }
 
-  /** The runner copy at GitHub's newest release, under the job lock (taking over a drain's); tried again in 10 minutes if it fails. */
+  /** The runner copy at GitHub's newest release, under the job lock, ending a drain; tried again in 10 minutes if it fails. */
   async update() {
-    if (this.jobs.busy && this.jobs.busy !== DRAINING) return;
+    if (this.jobs.busy) return;
     this.jobs.busy = 'updating the runner copy';
+    this.jobs.draining = null;
     try {
       this.tried = this.now();
       const r = await this.run('update');

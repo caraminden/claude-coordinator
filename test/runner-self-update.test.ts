@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +13,7 @@ import { AGENT_FILES, filesVersion as serverVersion, runnerManifests, runnerUpda
 import { MachineRelay } from '../src/machines.ts';
 import { checkFiles, filesVersion, rollBack, SelfUpdate, sha256, supervise, UPDATE_DRAIN_MS, UPDATE_RETRY_MS, UPDATED } from '../public/runner-agent.mjs';
 import { Store } from '../src/db.ts';
-import { stopProcs } from './helpers.ts';
+import { fakeClaude, stopProcs } from './helpers.ts';
 import { until } from './wait.ts';
 
 const repo = join(import.meta.dirname, '..');
@@ -310,8 +310,7 @@ test('end to end: a supervised agent takes a new runner-agent.mjs from Citadel, 
   const root = mkdtempSync(join(tmpdir(), 'self-update-e2e-'));
   const ps = join(root, 'win', 'System32', 'WindowsPowerShell', 'v1.0');
   mkdirSync(ps, { recursive: true });
-  writeFileSync(join(ps, 'powershell.exe'), '#!/bin/sh\nexit 0\n');
-  chmodSync(join(ps, 'powershell.exe'), 0o755);
+  fakeClaude(ps, { name: 'powershell.exe' }); // keep-runners.ps1's stand-in: it ends at once
   const installed = join(root, 'agent');
   mkdirSync(installed);
   copyFileSync(join(repo, 'public', 'runner-agent.mjs'), join(installed, 'runner-agent.mjs'));

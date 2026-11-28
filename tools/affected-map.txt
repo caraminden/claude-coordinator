@@ -140,8 +140,10 @@ test/format-own.test.ts: test/fmt.test.ts
 **/*.ps1: test/ps1-lint.test.ts
 tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/runner-linux-scripts.test.ts test/runner-agent.test.ts
 .github/workflows/tests.yml: test/ci-runner-choice.test.ts
-# test/ci-leftovers.test.ts reads tests.yml's step order (effort retro #2254: #2209's step order was caught only on GitHub).
+# test/ci-leftovers.test.ts reads the step order of tests.yml, flake-proof.yml and citadel-heavy.yml (effort retro #2254: #2209's step order was caught only on GitHub).
 .github/workflows/tests.yml: test/ci-leftovers.test.ts
+.github/workflows/flake-proof.yml: test/ci-leftovers.test.ts
+.github/workflows/citadel-heavy.yml: test/ci-leftovers.test.ts
 .github/workflows/flake-proof.yml: test/ci-runner-choice.test.ts
 tools/own-check.sh: test/land-train-early.test.ts test/land-train-early-2.test.ts test/ci-runner-choice.test.ts
 tools/light-check.sh: test/land-train-early.test.ts test/land-train-early-2.test.ts

@@ -20,11 +20,12 @@ go in the same ship, not in follow-ups:
 - **An off switch a member can flip** without a deploy. It stops new work going there and says where that
   work runs instead. `CLOUD_OFF` in `src/cloud-pool.ts` and Pause all in `src/routes/machines.ts` are the
   existing examples.
-- **Questions reach people.** When the turn there asks a question, someone in the chat sees it as a card,
+- **Questions reach people** (a turn; a CI job asks none). When the turn there asks a question, someone in
+  the chat sees it as a card,
   and the answer goes back to the turn. If the place can't do that, stop the turn from asking. `src/cloud-turn.mjs`
   does both (#2191).
 - **What a stop or the switch does to work already running there.** Either it finishes, or it is brought
-  back and rerun on perigee. Say which, and test it.
+  back and rerun elsewhere (a turn on perigee, a CI job on the other runners). Say which, and test it.
 - **What reads where the work ran.** List every reader that assumes the old place and update it, or put it
   in your brief's Done when. For CI: the CI page (`src/ci-view.ts`), the desktop's hold and its busy counts
   (`src/ci-hold.ts`), land reds and fallbacks. A reader you leave as it is goes in a handoff in this ship,

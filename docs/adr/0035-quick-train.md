@@ -1,6 +1,6 @@
 # 0035: Quick train: low ships that touch nothing sensitive ship on a quick check
 
-Status: accepted, 2026-11-24, not built. Minion #1910. Design: shared folder, `specs/quick-train.md`; measured in
+Status: accepted, 2026-11-24; the gap train built and off, 2026-11-27 (#2243). Minion #1910. Design: shared folder, `specs/quick-train.md`; measured in
 `reports/quick-train-measured-2026-11-24.md`; five handoffs, `handoffs/quick-train-1` to `-5`.
 
 - **Josh, 2026-11-24:** "what if we had a low risk ship lane that didnt run tests or ran very limited tests?" and "The idea
@@ -17,3 +17,9 @@ Status: accepted, 2026-11-24, not built. Minion #1910. Design: shared folder, `s
   each. A red reopens the ship's minion. No auto-revert (#1006, M10). Nothing on perigee.
 - **Ruled out:** a separate lane that moves main under a full run; a low ship filling an empty seat on a full train
   (#1899: each rider has its own full check); splitting quick trains by front end and server.
+- **The gap train, built off (#2243, `tools/land/quick.sh`):** Cara, 2026-11-27: "Go, with both changes", the second
+  "Re-read this count after a week, with #1896's failing test looked up, before the quick lane skips CI for real." So it
+  ships switched off, and with it off the line ships exactly as before (`test/land-quick-train.test.ts`). A person turns
+  it on after that recount, on perigee: `touch "$(git -C ~/claude-coordinator rev-parse --absolute-git-dir)/cc-deploy/quick-train-on"`;
+  removing that file turns it off again, and `LAND_QUICK=0` turns it off for one ship. Until piece 4's full run behind
+  it, the only full suite over a quick top is the next full train's, and at most one quick train ships between full ones.

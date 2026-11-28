@@ -381,3 +381,10 @@ Nov 24, 8:29 PM PST) none ran at all, since only the own check calls one: 0 in t
   check (`check` kind, a light check's job too) while any ship's tests run (`shipsFirst`, `seen.ship`). Once the own
   check is back on, those, not the side runner, decide most skips. A quick train's check in the gap after a full train
   meets neither.
+
+### The gap train (#2243, quick train piece 3)
+
+Built and off by default: `tools/land/quick.sh`, how it runs and how a person turns it on in ADR 0035. Its quick check
+takes the light check's lock and side runner. With it on, a full train's front plans the gap train before any early next
+train, so the early run goes on the quick top instead, and the quick front takes a "quick" place in line, ranked as a
+Regenerate ship's hold, behind every ship a person placed.

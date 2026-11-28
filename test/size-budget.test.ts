@@ -108,12 +108,14 @@ export const SHIP_LIMITS = {
     'tools/land/gate.sh': 20_000,
     'tools/land/settings.sh': 10_000,
     'tools/land/ship.sh': 10_000,
+    'tools/land/quick.sh': 21_000, // #2243's gap train (PENDING: the go from its ship card goes here)
   } as Record<string, number>,
   // +2,500 for step 7's phase functions (their wrappers and indents); Cara, 2026-11-26: "Do steps 6 and 7"
   // +2,900 for #2212's main_red_hold; Cara, 2026-11-27, on its card: "Raise it 2.9 KB"
   // +5,800 for #2209, ship CI on GitHub with the desktop as its fallback (Cara, 2026-11-27: "github should actually be
   // the main CI? with my desktop as the fallback")
-  total: 228_000,
+  // +23,000 for #2243's gap train, tools/land/quick.sh and its hooks (PENDING: the go from its ship card goes here)
+  total: 251_000,
   longLines: 176,
 };
 

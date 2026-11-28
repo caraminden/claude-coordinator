@@ -269,7 +269,7 @@ export const CHECKS: Check[] = [
       const seen = new Map<string, number>();
       for (const r of rows) {
         const m = /^(Shipped|Merged) ([0-9a-f]{7,40})\b/.exec(r.text);
-        if (m) seen.set(`${r.ticket_id}:${m[1]}:${m[2]}`, (seen.get(`${r.ticket_id}:${m[1]}:${m[2]}`) ?? 0) + 1);
+        if (m && !/not pushed to origin/.test(r.text)) seen.set(`${r.ticket_id}:${m[1]}:${m[2]}`, (seen.get(`${r.ticket_id}:${m[1]}:${m[2]}`) ?? 0) + 1);
       }
       for (const [k, n] of seen) {
         if (n < 2) continue;

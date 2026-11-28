@@ -1,4 +1,4 @@
-// The monthly glossary drift check (#1774, kit/schedules/glossary-drift.md): every scheme gets one at boot, once, (seeded-once rule: standard-audit-schedules.test.ts).
+// The monthly glossary drift check (#1774, kit/schedules/glossary-drift.md): every scheme gets one at boot, once (the seeded-once rule is in standard-audit-schedules.test.ts).
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

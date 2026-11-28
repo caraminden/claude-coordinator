@@ -106,7 +106,7 @@ const measure = () =>
   return { href: location.href, wco: matchMedia('(display-mode: window-controls-overlay)').matches, inset: getComputedStyle(document.documentElement).getPropertyValue('--top-inset'),
     strip: tb && { x: tb.x, y: tb.y, w: tb.width, h: tb.height }, w: innerWidth, h: innerHeight, dpr: devicePixelRatio,
     topbar: R(document.querySelector('.topbar')), topbarBg: cs(document.querySelector('.topbar'), 'backgroundColor'), main: R(document.querySelector('main')), mainPadTop: cs(document.querySelector('main'), 'paddingTop'),
-    first: first && { tag: first.tagName + '.' + first.className, ...R(first) }, bodyBg: cs(document.body, 'backgroundColor'), htmlBg: cs(document.documentElement, 'backgroundColor'), scrollY };
+    first: first && { tag: first.tagName + '.' + first.className, ...R(first) }, bodyBg: cs(document.body, 'backgroundColor'), htmlBg: cs(document.documentElement, 'backgroundColor'), scrollY, under: [...document.querySelectorAll('main *')].filter((e) => { const r = e.getBoundingClientRect(); return tb && r.width && r.top < tb.height && r.bottom > 0 && r.right > tb.x + tb.width && !e.children.length && (e.textContent.trim() || e.matches('img,svg')); }).map((e) => e.tagName + ' ' + (e.textContent.trim().slice(0, 14))).slice(0, 8) };
 })()`);
 const dpr = await ev('devicePixelRatio');
 const shoot = async (name) => {

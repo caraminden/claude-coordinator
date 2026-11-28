@@ -339,14 +339,14 @@ test('an unknown or missing tag gets no header', () => {
   assert.equal(md('```\nx\n```'), '<pre><code>x</code></pre>');
 });
 
-test('copying a shell-tagged block ends in exactly one newline; other blocks copy unchanged', () => {
+test('copying a shell-tagged block ends with no newline, so a paste leaves the cursor at the end of the command; other blocks copy unchanged', () => {
   for (const tag of ['powershell-admin', 'powershell', 'wsl', 'fish', 'bash', 'cmd']) {
     const html = md('```' + tag + '\nls\n```');
     assert.match(html, /<pre class="cui-shell"/, tag);
-    assert.equal(copyPayload('ls', true), 'ls\n');
+    assert.equal(copyPayload('ls', true), 'ls');
   }
-  assert.equal(copyPayload('ls\n', true), 'ls\n');
-  assert.equal(copyPayload('a\nb\n\n', true), 'a\nb\n');
+  assert.equal(copyPayload('ls\n', true), 'ls');
+  assert.equal(copyPayload('a\nb\n\n', true), 'a\nb');
   assert.doesNotMatch(md('```js\nx\n```'), /cui-shell/);
   assert.doesNotMatch(md('```\nx\n```'), /cui-shell/);
   assert.equal(copyPayload('x', false), 'x');

@@ -686,10 +686,10 @@ const label = (b, text) => (b.setAttribute('aria-label', text), b);
 /** @type {WeakMap<HTMLElement, ReturnType<typeof setTimeout>>} */
 const copied = new WeakMap();
 /**
- * What Copy puts on the clipboard: a shell block (#898's tags) ends in exactly one newline so a paste runs without another Enter; other blocks copy as written.
+ * What Copy puts on the clipboard: a shell block (#898's tags) loses its trailing newlines, like a hand Ctrl+C: a pasted trailing newline leaves PowerShell's cursor on a blank line, so Enter wouldn't run it. Other blocks copy as written.
  * @type {typeof import('./markdown.js').copyPayload}
  */
-export const copyPayload = (text, shell) => (shell ? text.replace(/\n+$/, '') + '\n' : text);
+export const copyPayload = (text, shell) => (shell ? text.replace(/\n+$/, '') : text);
 /** @param {Event} e */
 async function onCopy(e) {
   const b = /** @type {HTMLElement} */ (/** @type {Element} */ (e.target).closest?.('.cui-copy'));

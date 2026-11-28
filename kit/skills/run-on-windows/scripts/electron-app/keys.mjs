@@ -100,7 +100,7 @@ const report = () => {
 addEventListener('load', report); addEventListener('resize', report);
 ${
   what === 'stuck'
-    ? `say('/hello');
+    ? `say('/hello?sw=' + !!navigator.serviceWorker?.controller);
 navigator.serviceWorker?.register('/sw.js').catch(() => {});
 const state = document.body.appendChild(document.createElement('b'));
 state.style.cssText = 'position:fixed;top:8px;left:8px;font:16px sans-serif';
@@ -122,6 +122,7 @@ self.addEventListener('fetch', (e) => {
 let held = true;
 const hung = []; // requests held, never answered
 const streams = []; // streams answered and open
+let fromWorker = false;
 let hellos = 0,
   connects = 0,
   asked = 0;
@@ -146,6 +147,7 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname === '/hello') {
     hellos++;
+    fromWorker = u.searchParams.get('sw') === 'true';
     layout = null;
   }
   if (u.pathname === '/connected') connects++;
@@ -331,7 +333,10 @@ if (what === 'stuck') {
         held = true;
         const a = asked;
         for (const s of streams.splice(0)) s.destroy();
-        if (!(await until(() => asked > a, 8000))) console.log('RIG? the page never asked again after the drop');
+        if (!(await until(() => asked > a, 8000))) {
+          fails++;
+          console.log('RIG? the page never asked again after the drop: the next line proves nothing');
+        }
       }
       // The boot window is over: the server answers again, but nothing on the page asks.
       held = false;
@@ -354,7 +359,9 @@ if (what === 'stuck') {
       const back = await until(() => connects > c0, 6000);
       const ok = still && focused && reloaded && back;
       if (!ok) fails++;
-      console.log(`${ok ? 'PASS' : 'FAIL'} stuck, focus ${where.padEnd(9)} (focused: ${f ?? 'unknown'}) ${name.padEnd(12)} -> ${reloaded ? 'reload' : 'no reload'}, ${back ? 'stream connected' : 'still not connected'}; ${hung.length} held so far${seen.length > s ? `; the page got ${seen.slice(s).join(', ')}` : ''}`);
+      console.log(
+        `${ok ? 'PASS' : 'FAIL'} stuck, focus ${where.padEnd(9)} (focused: ${f ?? 'unknown'}) ${name.padEnd(12)} -> ${reloaded ? `reload${fromWorker ? ' (page from the worker)' : ''}` : 'no reload'}, ${back ? 'stream connected' : 'still not connected'}; ${hung.length} held so far${seen.length > s ? `; the page got ${seen.slice(s).join(', ')}` : ''}`,
+      );
       if (!back) await input(`shot ${path.join(shots, `stuck-${where}-${name.replaceAll('+', '')}.png`)}`);
       if (reloaded) await ready();
     }

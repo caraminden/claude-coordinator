@@ -158,9 +158,9 @@ for (const [where, focusJs] of Object.entries(FOCUS)) {
     const asked = await until(() => hung.length > h0, 10000);
     const stuck = asked && (await until(chip, 8000));
     // The server is fine again; nothing on the page asks.
+    const a0 = answered;
     if (!keepHeld) held = false;
     await sleep(1500);
-    const a0 = answered;
     const stillStuck = (await chip()) && answered === a0;
     await ev(`window.__before = 1`);
     const focused = await ev(focusJs);

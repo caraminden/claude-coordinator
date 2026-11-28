@@ -486,6 +486,11 @@ export class CiLoad {
     return [...this.latest.values()].filter((s) => now - s.at <= STALE_MS).flatMap(sleptOf);
   }
 
+  /** One machine's runner agent for `os`'s newest sample, or null (none since the server started). */
+  newest(machineId: number, os: 'windows' | 'linux'): Sample | null {
+    return this.latest.get(`${machineId}:${os}`) ?? null;
+  }
+
   /** The repos (owner/name, lowercase) one machine's runner agent for `os` lists runners for, by its newest sample in the last 10 minutes (#2064). */
   reposOn(machineId: number, os: 'windows' | 'linux', now = Date.now()): Set<string> {
     const s = this.latest.get(`${machineId}:${os}`);

@@ -42,7 +42,7 @@ test("free memory under the next job's need is busy at once; unknown memory is n
   assert.equal(new BusyWatch().see(quiet(T0, { memFree: null }), 'Cara'), null);
 });
 
-test("it clears only after 5 quiet minutes, and anything busy in them starts the quiet over (no flicker)", () => {
+test('it clears only after 5 quiet minutes, and anything busy in them starts the quiet over (no flicker)', () => {
   const w = new BusyWatch();
   const since = w.see(quiet(T0, { front: 'game' }), 'Cara')!.since;
   assert.equal(since, T0);
@@ -136,4 +136,27 @@ test("a look reads the machine agent's front and the runner agent's sample, and 
   assert.equal(w.busy.anyway(7), true);
   assert.equal(offWords(w.busy.look(7, 4)), null);
   assert.equal(w.busy.anyway(8), false, 'a machine never seen is not busy');
+});
+
+test("the machine agent reads Windows' notification state as what is in front, and keeps its watcher up", async () => {
+  const { frontOf, watchFront } = await import('../public/machine-agent.mjs');
+  assert.deepEqual(['3', '2', '7', '4', '5', '1', '6', '?', ''].map(frontOf), ['game', 'fullscreen', 'fullscreen', 'presenting', null, null, null, undefined, undefined]);
+  const { EventEmitter } = await import('node:events');
+  const sent: unknown[] = [];
+  type Child = InstanceType<typeof EventEmitter> & { stdout: InstanceType<typeof EventEmitter>; kill(): void };
+  const children: Child[] = [];
+  const start = (): Child => {
+    const c = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), kill: () => {} });
+    children.push(c);
+    return c;
+  };
+  const stop = watchFront({ send: (f: unknown) => sent.push(f), log: () => {}, start, again: 0 });
+  // A line split over two reads is read once whole; a line it can't read sends nothing.
+  children[0].stdout.emit('data', '3\r\n5\r');
+  children[0].stdout.emit('data', '\n?\r\n2');
+  assert.deepEqual(sent, ['game', null]);
+  children[0].emit('close');
+  const { until } = await import('./wait.ts');
+  await until('the watcher started again', () => children.length === 2);
+  stop();
 });

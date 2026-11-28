@@ -13,6 +13,7 @@
 //   - The one thing GitHub decides: a runner made for job A may take job B of the same repo (P0, #2266). settle() keeps
 //     the books by the job each runner really took.
 // Pure but for RunnerPool, which reads ShipWatch's look (src/ci-ships.ts) and the store.
+import type { OwnerUse } from './owner-busy.ts';
 import { osOfLabel } from './ci-auto.ts';
 import { runnerLabel } from './ci-runner.ts';
 import { HEAVY_SIZES, heavyKind } from './heavy-place.ts';
@@ -279,6 +280,8 @@ export function settle(runners: readonly PoolRunner[], took: readonly Took[], no
 export interface PoolPc extends Omit<PoolMachine, 'free'> {
   /** Its runner agents' hostnames: a runner's name starts with one. */
   hosts: readonly string[];
+  /** Its pause and its owner's busy spell (src/owner-busy.ts, P4), for its card; `off` already says what they mean for starts. */
+  use?: OwnerUse | null;
 }
 
 /** One job in the line, as the CI page shows it. */
@@ -324,6 +327,8 @@ export interface PoolMachineView {
   used: number;
   free: number;
   off: string | null;
+  /** Its pause and its owner's busy spell (P4), for Pause and "Run CI anyway" on its card. */
+  use: OwnerUse | null;
   running: PoolRunning[];
 }
 
@@ -573,6 +578,7 @@ export class RunnerPool {
         used: after.get(m.id) ?? 0,
         free: Math.max(0, m.limit - (after.get(m.id) ?? 0)),
         off: m.off,
+        use: m.use ?? null,
         running: [
           ...[...open.values()].filter((o) => o.runner && o.ranOn === m.id).map((o) => ({ repo: o.repo, scheme: o.scheme, name: o.name, size: o.size, since: o.startedAt ?? now, pool: o.runner!.toLowerCase().startsWith('pool-'), starting: false })),
           ...[...this.started.values()].filter((r) => r.machine === m.id && !onJob.has(r.name)).map((r) => ({ repo: r.repo, scheme: r.scheme, name: r.jobName, size: r.size, since: r.at, pool: true, starting: true })),

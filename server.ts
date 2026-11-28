@@ -102,7 +102,8 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
-import { poolOn } from './src/runner-pool.ts';
+import { POOL as RUNNER_POOL, poolOn } from './src/runner-pool.ts';
+import { BUSY, OwnerBusy, offWords } from './src/owner-busy.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import { heavyNow } from './src/heavy-now.ts';
 import { appOwners } from './src/host-load.ts';
@@ -2310,6 +2311,15 @@ const heavyPlacer = new HeavyPlacer({
   log: (line) => console.log(line),
 });
 if (!BOOT_CHECK) every('heavy job leases', 15_000, () => heavyPlacer.expire());
+// Each CI machine's pause and its owner's busy spells (Build 11 P4, src/owner-busy.ts): the pool starts nothing new on one
+// that is paused or whose owner is in a game or working it hard, and says why in the job's reason.
+const ownerBusy = new OwnerBusy({
+  store,
+  now: Date.now,
+  // The Windows sample first: that is where the person is; a Linux one stands in on a plain Linux PC.
+  sample: (id) => ciLoad.newest(id, 'windows') ?? ciLoad.newest(id, 'linux'),
+  owner: (id) => store.getUser(store.getMachine(id)?.owner_id ?? -1)?.name ?? 'its owner',
+});
 // The runner pool, watching only (Build 11 P1, src/runner-pool.ts): each look's self-hosted jobs go in its books
 // (pool_jobs) and its line, and it logs where it would start each. Nothing on any PC changes until P3 turns it on.
 const runnerPool = new RunnerPool({
@@ -2325,6 +2335,10 @@ const runnerPool = new RunnerPool({
       if (!ci?.on || m.owner_id === null) return [];
       const os = (['windows', 'linux'] as const).filter((o) => machines.runnerHost(m.id, o));
       const threads = storedReport(m)?.threads ?? 0;
+      // Paused, or its owner busy (P4): the next job's memory need is that of the first waiting job of a scheme it lends to, at the last look.
+      const lends = projects.filter((p) => lendsCi(store, m, p)).map((p) => p.id);
+      const next = runnerPool.view().line.find((j) => !j.starting && lends.includes(j.scheme));
+      const use = ownerBusy.look(m.id, (next?.size ?? RUNNER_POOL.sizes.ci) * BUSY.memPerThreadGb);
       return [
         {
           id: m.id,
@@ -2334,10 +2348,11 @@ const runnerPool = new RunnerPool({
           os: os.length ? os : ['windows', 'linux'],
           // shortcut: a session is taken as there while the PC's own agent (which runs as the person) is connected; P2 proves the session start.
           session: os.includes('windows') && machines.isOnline(m.id),
-          schemes: projects.filter((p) => lendsCi(store, m, p)).map((p) => p.id),
+          schemes: lends,
           limit: Math.max(0, Math.min(ci.caps.threads ?? threads, threads - runner.turnLine.used(m.id) * COST.turn)),
-          off: os.length ? null : 'is offline',
+          off: os.length ? offWords(use) : 'is offline',
           hosts: os.map((o) => machines.runnerHost(m.id, o) ?? ''),
+          use,
         },
       ];
     });
@@ -2831,6 +2846,7 @@ const app: App = {
   runnerCap,
   heavy: heavyPlacer,
   pool: runnerPool,
+  ownerBusy,
   buildPlacer,
   heavyNow: (canSee, owns) =>
     heavyNow({

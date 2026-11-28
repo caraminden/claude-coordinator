@@ -305,3 +305,5 @@ button.link.mcard-open, .mcard button.link { align-self: flex-start; display: in
 .mcard-ci { display: grid; gap: var(--space-1); }
 .mcard-ci-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .mcard-ci-head .meter { flex: 1 1 12rem; }
+.mcard-ci-use { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.mcard-ci-use > span:first-child { flex: 1 1 16rem; }

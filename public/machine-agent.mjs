@@ -2490,7 +2490,7 @@ async function installService(name, argv) {
 // ---------- connect with a join code (Build 7 M2) ----------
 
 /** This agent's version, in its report. A row whose agent reports nothing is from before and offers Update. */
-export const AGENT_VERSION = 5;
+export const AGENT_VERSION = 6;
 
 /** A program's output, or null when it isn't there, fails or takes too long. Windows' wsl.exe writes UTF-16. */
 function probe(command, args, timeout = 8000) {
@@ -2605,6 +2605,50 @@ export const hypervNow = (run = probe) => run('powershell.exe', ['-NoProfile', '
 /** Whether Hyper-V's VMs changed since the report last sent, so a new VM links by discovery (Build 10 H4); an unread list changes nothing. */
 export const hypervMoved = (now, sent) => now !== null && JSON.stringify(now) !== JSON.stringify(sent ?? null);
 const HYPERV_EVERY_MS = 5 * 60_000;
+
+// ---- What is in front of this PC's person (Build 11 P4, specs/one-runner-pool.md section 6) ----
+// CI steps back while a full-screen game or app is in front. Windows tells programs this, per signed-in session
+// (SHQueryUserNotificationState), which is why this agent asks and the runner agent can't: it runs as SYSTEM in
+// session 0. One PowerShell stays up and prints the state every FRONT_EVERY_MS, so its C# is compiled once, not each look.
+export const FRONT_EVERY_MS = 30_000;
+export const FRONT_PS = `Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class CitadelFront { [DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state); }'
+while ($true) { $s = 0; if ([CitadelFront]::SHQueryUserNotificationState([ref]$s) -eq 0) { [Console]::Out.WriteLine($s) } else { [Console]::Out.WriteLine('?') }; Start-Sleep -Milliseconds ${FRONT_EVERY_MS} }`;
+
+/** One printed state as the server reads it: QUNS 3 is a Direct3D full-screen game, 2 and 7 another full-screen app, 4 presenting; undefined when it didn't read. */
+export function frontOf(line) {
+  const n = Number(String(line).trim());
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return n === 3 ? 'game' : n === 2 || n === 7 ? 'fullscreen' : n === 4 ? 'presenting' : null;
+}
+
+/** Keeps the PowerShell above up and sends each state it prints; started again a minute after it ends. Returns a stop. */
+export function watchFront({ send, log, start = () => spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', FRONT_PS], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }), again = 60_000 }) {
+  let child = null;
+  let stopped = false;
+  const up = () => {
+    if (stopped) return;
+    child = start();
+    let rest = '';
+    child.stdout.on('data', (d) => {
+      const lines = (rest + d).split(/\r?\n/);
+      rest = lines.pop() ?? '';
+      for (const l of lines) {
+        const front = frontOf(l);
+        if (front !== undefined) send(front);
+      }
+    });
+    child.on('error', (err) => log(`Couldn't watch for full-screen apps: ${err.message}`));
+    child.on('close', () => {
+      child = null;
+      if (!stopped) setTimeout(up, again).unref();
+    });
+  };
+  up();
+  return () => {
+    stopped = true;
+    child?.kill();
+  };
+}
 
 /**
  * Swap a join code for this machine's token (POST /api/machines/join), once: what came back is kept in `file` (only
@@ -2857,6 +2901,15 @@ async function main() {
   let reported = [];
   if (managed) setInterval(() => JSON.stringify(found()) !== JSON.stringify(reported) && sendInfo(), FOUND_EVERY_MS).unref();
   if (process.platform === 'win32') setInterval(async () => hypervMoved(await hypervNow(), sentHyperv) && sendInfo(), HYPERV_EVERY_MS).unref();
+  // Build 11 P4: what is in front of this PC's person, so CI starts nothing new here while they're in a game (src/owner-busy.ts).
+  if (process.platform === 'win32')
+    watchFront({
+      log,
+      send: (front) =>
+        fetch(new URL('/api/machines/front', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ front }) })
+          .then((res) => res.body?.cancel())
+          .catch(() => {}),
+    });
 
   /** A role's Set up or Test (Build 7 M4): its steps are role-setup-agent.mjs's, taken from the app at each press as the worker's are. */
   async function runRoleSetup(ask) {

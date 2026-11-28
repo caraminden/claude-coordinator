@@ -469,6 +469,11 @@ export interface CiPoolMachine {
   used: number;
   free: number;
   off: string | null;
+  /** Its pause and its owner's busy spell (src/owner-busy.ts OwnerUse, Build 11 P4). */
+  use?: {
+    pause: { until: number | null; by: string; at: number; words: string } | null;
+    busy: { why: string; since: number; anyway: boolean } | null;
+  } | null;
   running: CiPoolRunning[];
 }
 

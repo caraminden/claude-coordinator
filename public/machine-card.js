@@ -2,7 +2,9 @@
 // specs/one-kind-of-machine.md section 4): a header with what the PC has, a "For me" tile (Minion turns) and a "For my
 // schemes" tile (every shared role) each with a big switch, "Choose what it shares" one level down, and a bar of how its
 // threads split now from live numbers only. Every switch shows at once with its request behind (ui/optimistic.js).
-import { account, h, view } from './base.js';
+import { account, api, h, view } from './base.js';
+import { openMenu } from './ui/menu.js';
+import { optimistic } from './ui/optimistic.js';
 import { hueRow, meter, schemeTag, toneChip } from './look.js';
 import { cannot, capsLine, changeRole, managesRoles, orderLine, roleOf, schemeChips, sizeOfferPart, standing } from './machine-role-cards.js';
 import { heldCaps, signInPart, workerSection, workerState } from './machine-worker-row.js';
@@ -321,19 +323,95 @@ const forSpan = (since) => {
   return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
 };
 
+/** @typedef {NonNullable<CiPoolMachine['use']>} CiUse */
+
+/**
+ * Change a machine's pause or busy spell at once, the request behind; a failure puts it back with a toast and Retry.
+ * @param {CiPoolMachine} c @param {Redraw} redraw @param {string} path @param {unknown} body @param {(u: CiUse) => CiUse} next @param {string} label
+ */
+function changeUse(c, redraw, path, body, next, label) {
+  const was = { use: c.use, off: c.off };
+  optimistic({
+    key: `ci-use:${c.id}`,
+    apply: () => {
+      c.use = next(c.use ?? { pause: null, busy: null });
+      // The chip and the line say it at once; the server's own words come with its answer.
+      c.off = c.off === 'is offline' ? c.off : c.use.pause ? `is paused ${c.use.pause.words}` : c.use.busy && !c.use.busy.anyway ? `is stepping back: ${c.use.busy.why}` : null;
+      redraw();
+    },
+    send: () =>
+      api(`api/machines/${c.id}/${path}`, { method: 'POST', body }).then((/** @type {CiUse} */ u) => {
+        c.use = u;
+        redraw();
+      }),
+    undo: () => {
+      Object.assign(c, was);
+      redraw();
+    },
+    label,
+  });
+}
+
+const PAUSES = /** @type {const} */ ([
+  ['hour', 'For an hour', 'for an hour'],
+  ['tomorrow', 'Until tomorrow, 8 AM', 'until tomorrow morning'],
+  ['resumed', 'Until I resume', 'until resumed'],
+]);
+
+/**
+ * Pause, Resume and stepping back (Build 11 P4, spec section 6): paused, no new CI job starts here and running ones finish;
+ * while its owner is in a game or works it hard, the pool steps back and says why, with "Run CI anyway" for that spell.
+ * @param {CiPoolMachine} c @param {Redraw} redraw
+ */
+function ciUsePart(c, redraw) {
+  const { pause, busy } = c.use ?? { pause: null, busy: null };
+  const btn = (/** @type {string} */ label, /** @type {(e: MouseEvent) => void} */ onclick, title = '') => h('button', { type: 'button', class: 'secondary small', title, onclick }, label);
+  const resume = () => changeUse(c, redraw, 'ci-pause', { for: null }, (u) => ({ ...u, pause: null }), `resume CI on ${c.name}`);
+  const pick = (/** @type {MouseEvent} */ e) => {
+    const r = /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect();
+    openMenu(
+      {
+        kind: 'Pause CI',
+        name: c.name,
+        items: PAUSES.map(([kind, label, words]) => ({
+          label,
+          run: () => changeUse(c, redraw, 'ci-pause', { for: kind }, (u) => ({ ...u, pause: { until: null, by: account?.name ?? 'you', at: Date.now(), words } }), `pause CI on ${c.name}`),
+        })),
+        foot: 'Running jobs finish; no new one starts here.',
+      },
+      r.left,
+      r.bottom,
+    );
+  };
+  const anyway = () => changeUse(c, redraw, 'ci-anyway', {}, (u) => ({ ...u, busy: u.busy && { ...u.busy, anyway: true } }), `run CI anyway on ${c.name}`);
+  return h(
+    'div',
+    { class: 'mcard-ci-use' },
+    pause
+      ? [h('span', {}, h('b', {}, `Paused ${pause.words}`), h('span', { class: 'muted' }, ` by ${pause.by}: no new CI job starts here; running ones finish.`)), btn('Resume', resume)]
+      : busy && !busy.anyway
+        ? [h('span', {}, h('b', {}, `Stepping back: ${busy.why}.`), h('span', { class: 'muted' }, " No new CI job starts here until it's quiet again; running ones finish.")), btn('Run CI anyway', anyway, 'Start CI jobs here again until this clears'), btn('Pause', pick)]
+        : [busy ? h('span', { class: 'muted' }, `Running CI anyway while ${busy.why}.`) : null, h('span', { class: 'spacer' }), btn('Pause', pick, 'Start no new CI jobs here for a while')],
+  );
+}
+
+/** The CI chip: what the line says, in a word. @param {CiPoolMachine} c */
+const ciChip = (c) => (c.off === 'is offline' || !c.off ? null : c.use?.pause ? toneChip('neutral', 'Paused') : c.use?.busy ? toneChip('warn', 'Stepping back') : toneChip('neutral', c.off));
+
 /**
  * The CI jobs running on a machine lending CI, and its room in threads, from the runner pool (Build 11 P3, spec section 7):
  * a standing runner's job counts as used room too. Another scheme's job shows by its size only.
- * @param {CiPoolMachine | null} c
+ * @param {CiPoolMachine | null} c @param {Redraw} redraw
  */
-function ciPart(c) {
+function ciPart(c, redraw) {
   if (!c) return null;
   const names = new Map((view?.projects ?? []).map((p) => [p.id, p.name]));
   const room = `${c.used} of ${c.limit} threads used · ${c.free} free`;
   return h(
     'div',
     { class: 'mcard-ci' },
-    h('div', { class: 'mcard-ci-head' }, h('b', {}, 'CI jobs here'), c.off ? toneChip('neutral', c.off) : toneChip(c.running.length ? 'info' : 'ok', c.running.length ? `${c.running.length} running` : 'Idle'), meter(c.limit ? c.used / c.limit : 0, room)),
+    h('div', { class: 'mcard-ci-head' }, h('b', {}, 'CI jobs here'), c.off ? (ciChip(c) ?? toneChip('neutral', c.off)) : toneChip(c.running.length ? 'info' : 'ok', c.running.length ? `${c.running.length} running` : 'Idle'), meter(c.limit ? c.used / c.limit : 0, room)),
+    c.off === 'is offline' ? null : ciUsePart(c, redraw),
     ...c.running.map((r) => {
       const scheme = names.get(r.scheme);
       return hueRow(
@@ -376,7 +454,7 @@ export function machineCard(m, { live, redraw, tools, head = null, details }) {
     o.choose ? chooseRows(m, redraw, tools) : null,
     !o.choose && !gone && roles.some((r) => r.on) && offs.length ? h('div', { class: 'muted small' }, `${offs.map((r) => r.name).join(', ')} ${offs.length === 1 ? 'is' : 'are'} off. `, h('button', { type: 'button', class: 'link small', onclick: () => ((o.choose = true), redraw()) }, 'Change')) : null,
     splitBar(m, pc),
-    ciPart(live?.ci?.find((x) => x.id === m.id) ?? null),
+    ciPart(live?.ci?.find((x) => x.id === m.id) ?? null, redraw),
     details ? more : null,
   );
 }

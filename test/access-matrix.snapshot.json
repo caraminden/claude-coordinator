@@ -1049,6 +1049,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/machines/:m/ci-anyway": {
+  "anon": "401 Not logged in",
+  "person": "409 mx isn't stepping back now",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/machines/:m/ci-pause": {
+  "anon": "401 Not logged in",
+  "person": "400 for must be \"hour\", \"tomorrow\", \"resumed\" or null (resume)",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/machines/:m/contraption-session": {
   "anon": "401 Not a running contraption turn",
   "person": "401 Not a running contraption turn",
@@ -1210,6 +1230,16 @@
   "m2": "403 A minion may only update itself"
  },
  "GET /api/machines/connect": {
+  "anon": "401 Unknown machine token; make a new one in the Machines panel",
+  "person": "401 Unknown machine token; make a new one in the Machines panel",
+  "member": "401 Unknown machine token; make a new one in the Machines panel",
+  "outsider": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmA": "401 Unknown machine token; make a new one in the Machines panel",
+  "tmB": "401 Unknown machine token; make a new one in the Machines panel",
+  "m1": "401 Unknown machine token; make a new one in the Machines panel",
+  "m2": "401 Unknown machine token; make a new one in the Machines panel"
+ },
+ "POST /api/machines/front": {
   "anon": "401 Unknown machine token; make a new one in the Machines panel",
   "person": "401 Unknown machine token; make a new one in the Machines panel",
   "member": "401 Unknown machine token; make a new one in the Machines panel",

@@ -193,10 +193,7 @@ export class OwnerBusy {
     const f = this.fronts.get(machine);
     const s = this.d.sample(machine);
     const fresh = s && now - s.at < BUSY.sampleStaleMs ? s : null;
-    const busy = this.watch(machine).see(
-      { now, front: f && now - f.at < BUSY.frontStaleMs ? f.front : null, ownerCpu: fresh ? ownerCpu(fresh) : null, memFree: fresh ? fresh.mem_free : null, memNeed: memNeedGb * 1024 ** 3 },
-      this.d.owner(machine),
-    );
+    const busy = this.watch(machine).see({ now, front: f && now - f.at < BUSY.frontStaleMs ? f.front : null, ownerCpu: fresh ? ownerCpu(fresh) : null, memFree: fresh ? fresh.mem_free : null, memNeed: memNeedGb * 1024 ** 3 }, this.d.owner(machine));
     return { pause: this.pauseOf(machine, now), busy };
   }
 

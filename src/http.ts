@@ -1,6 +1,7 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
 import type { HeavyPlacer } from './heavy-place.ts';
 import type { RunnerPool } from './runner-pool.ts';
+import type { OwnerBusy } from './owner-busy.ts';
 import type { BuildPlacer } from './heavy-builds.ts';
 import type { HeavyNow } from './heavy-now.ts';
 import type { MachineCopies } from './machine-away.ts';
@@ -420,6 +421,8 @@ export interface App {
   heavy?: Pick<HeavyPlacer, 'doneRun' | 'agentAsk' | 'agentDone' | 'holds' | 'room'>;
   /** The runner pool's line (src/runner-pool.ts, Build 11 P1: watching only); absent in tests that don't need it. */
   pool?: Pick<RunnerPool, 'view'>;
+  /** Each CI machine's pause and its owner's busy spells (src/owner-busy.ts, Build 11 P4); absent in tests that don't need it. */
+  ownerBusy?: Pick<OwnerBusy, 'front' | 'pause' | 'resume' | 'anyway' | 'use'>;
   /** The heavy jobs each place holds or has waiting (src/heavy-now.ts, #2109); absent in tests that don't need it. */
   heavyNow?: (canSee: (projectId: number) => boolean, owns: (machineId: number) => boolean) => HeavyNow;
   /** Where citadel-heavy's heavy jobs go, and the Builds role's container jobs (src/heavy-builds.ts, H2); absent in tests that don't need it. */

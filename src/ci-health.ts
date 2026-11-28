@@ -1462,8 +1462,8 @@ ${text}`,
 
   /** The scheme's runners online, or for a pool scheme the machines that could take its jobs, as runners by name; null when the list can't be read. */
   private upFor(p: Project, runners: Runner[] | null): { name: string }[] | null {
-    if (this.deps.poolRefusals?.(p).length) return [];
     const able = this.deps.pool?.(p);
+    if (able && !able.length && this.deps.poolRefusals?.(p).length) return [];
     if (able?.length) return able.map((name) => ({ name }));
     return runners && onlineRunners(runners, p.name);
   }

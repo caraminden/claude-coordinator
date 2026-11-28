@@ -438,7 +438,7 @@ export class RunnerPool {
   refusals(scheme: number): { machine: string; why: string }[] {
     return this.d
       .machines()
-      .filter((m) => m.schemes.includes(scheme) && (this.refused.get(m.id)?.n ?? 0) >= POOL.refusedAfter)
+      .filter((m) => m.schemes.includes(scheme) && !m.off && (this.refused.get(m.id)?.n ?? 0) >= POOL.refusedAfter)
       .map((m) => ({ machine: m.name, why: this.refused.get(m.id)!.why }));
   }
 
@@ -650,9 +650,10 @@ export class RunnerPool {
     this.started.set(name, rec);
     this.lastStart.set(job.scheme, now);
     const key = `${job.repo}#${job.id}`;
-    const fail = (why: string) => {
+    const fail = (why: string, refusal = true) => {
       this.started.delete(name);
-      this.refused.set(machine, { n: (this.refused.get(machine)?.n ?? 0) + 1, why: why.slice(0, 200) });
+      // An agent that couldn't be reached is offline's business, not a refusal to start.
+      if (refusal) this.refused.set(machine, { n: (this.refused.get(machine)?.n ?? 0) + 1, why: why.slice(0, 200) });
       this.failed.set(key, { until: this.d.now() + POOL.startAgainMs, why: `its runner didn't start (${why.slice(0, 200)}); trying again shortly` });
       this.d.log(`Runner pool: couldn't start ${name} for ${job.repo} "${job.name}" (job ${job.id}): ${why}`);
     };
@@ -662,7 +663,7 @@ export class RunnerPool {
         if (r.ok) this.refused.delete(machine);
         else fail(r.output.trim().split('\n').at(-1) || 'the agent refused');
       },
-      (err: unknown) => fail(err instanceof Error ? err.message : String(err)),
+      (err: unknown) => fail(err instanceof Error ? err.message : String(err), false),
     );
     return rec;
   }

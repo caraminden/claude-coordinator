@@ -1001,7 +1001,7 @@ dialog.viewer #chat-cabal { display: none; }
 .cabal-rec, .cabal-answer { padding: 2px var(--space-2); border-left: 3px solid var(--done); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: color-mix(in srgb, var(--done) 8%, var(--panel)); }
 .cabal-rec > b { color: var(--done); }
 .cabal-answer { border-left-color: var(--running); background: color-mix(in srgb, var(--running) 7%, var(--panel)); }
-a.cabal-more { justify-self: start; color: var(--accent); }
+a.cabal-more { justify-self: start; display: inline-flex; align-items: center; min-height: 24px; color: var(--accent); }
 .cabal-more, .cabal-when { color: var(--muted); font-size: 0.85em; }
 .cabal-scroll { max-height: 40vh; overflow: auto; border-top: 1px solid var(--line); }
 .cabal-tools { padding: var(--space-2) var(--space-3) 0; }
@@ -1032,6 +1032,6 @@ a.cabal-more { justify-self: start; color: var(--accent); }
   .cabal-page { margin: var(--space-2); }
   .cabal-note-col { display: none; }
   .cabal-narrow { display: block; }
-  .cabal-acts a.small { min-height: 40px; }
+  .cabal-acts a.small, a.cabal-more { min-height: 40px; }
   #chat-cabal .cabal-scroll { max-height: 30vh; } /* the open ledger leaves the chat room above it */
 }

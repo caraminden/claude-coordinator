@@ -28,10 +28,10 @@ const snap = (s: Partial<Snapshot> = {}): Snapshot => ({ at: NOW, queued: {}, ap
 const check = (store: Store, dataDir: string, s: Partial<Snapshot> = {}, integrity = false) => runChecks({ db: store.db, dataDir, now: NOW, snap: snap(s), integrity });
 const only = (found: Finding[], name: string) => found.filter((f) => f.check === name);
 
-test('the named list holds the eight checks', () => {
+test('the named list holds the nine checks', () => {
   assert.deepEqual(
     CHECKS.map((c) => c.name),
-    ['turn-record', 'one-place', 'fired-once', 'handoff-process', 'shipped-live', 'app-turn-ended', 'closed-processes', 'db-integrity'],
+    ['turn-record', 'one-place', 'fired-once', 'handoff-process', 'shipped-live', 'ship-once', 'app-turn-ended', 'closed-processes', 'db-integrity'],
   );
 });
 
@@ -72,6 +72,7 @@ test('2: a message queued twice, and a delivery the runner keeps losing, are nam
 test('3: a due wake not fired, one given up on, one fired twice, and a schedule late or twice, are named', () => {
   const { store, project, dataDir, minion, sql } = setup();
   const t = minion();
+  sql('UPDATE tickets SET updated_at = ? WHERE id = ?', NOW - 3600_000, t.id); // its turn ended long ago
   const late = store.addDelivery({ project_id: project.id, kind: 'wake_at', to_kind: 'minion', to_id: t.id, when_kind: 'at', set_by: 'x', due: NOW - 20 * MIN });
   store.addDelivery({ project_id: project.id, kind: 'wake_at', to_kind: 'minion', to_id: t.id, when_kind: 'at', set_by: 'x', due: NOW - 5 * MIN }); // late, not that late
   const failed = store.addDelivery({ project_id: project.id, kind: 'wake_at', to_kind: 'minion', to_id: t.id, when_kind: 'at', set_by: 'x', state: 'failed' }, NOW - MIN);
@@ -145,6 +146,36 @@ test('5: "shipped, not live yet" for over an hour with nothing said is named', (
   assert.match(found[0].text, /has waited 120 min for its ship to go live/);
 });
 
+test('3b: a due delivery to a minion mid-turn, or whose turn just ended, is not flagged until 20 min after', () => {
+  const { store, project, dataDir, minion, sql } = setup();
+  const t = minion();
+  store.addDelivery({ project_id: project.id, kind: 'wake_at', to_kind: 'minion', to_id: t.id, when_kind: 'at', set_by: 'x', due: NOW - 40 * MIN });
+  store.updateTicket(t.id, { status: 'running' });
+  sql('UPDATE tickets SET updated_at = ? WHERE id = ?', NOW - 3600_000, t.id);
+  assert.deepEqual(only(check(store, dataDir), 'fired-once'), [], 'mid-turn');
+  sql("UPDATE tickets SET status = 'idle', updated_at = ? WHERE id = ?", NOW - 5 * MIN, t.id);
+  assert.deepEqual(only(check(store, dataDir), 'fired-once'), [], 'turn ended 5 min ago');
+  sql('UPDATE tickets SET updated_at = ? WHERE id = ?', NOW - 25 * MIN, t.id);
+  assert.equal(only(check(store, dataDir), 'fired-once').length, 1, 'still waiting 25 min after');
+});
+
+test('6b: two "Shipped" or "Merged" notes naming one commit are named; different commits are not', () => {
+  const { store, dataDir, minion } = setup();
+  const [a, b, c] = [minion('a'), minion('b'), minion('c')];
+  for (const [t, text] of [
+    [a, 'Shipped abc1234: x.'],
+    [a, 'Shipped abc1234: x.'],
+    [b, 'Merged abc1234 into Plot 3.'],
+    [b, 'Merged abc1234 into Plot 3.'],
+    [c, 'Shipped abc1234: x.'],
+    [c, 'Shipped def5678: y.'],
+  ] as const)
+    store.addEvent(t.id, 'note', { text });
+  const found = only(check(store, dataDir), 'ship-once');
+  assert.deepEqual(found.map((f) => f.ticket).sort(), [a.id, b.id].sort());
+  assert.match(found[0].text, /"(Shipped|Merged) abc1234" 2 times/);
+});
+
 test('6: an app turn row left open with no process is named', () => {
   const { store, project, dataDir } = setup();
   const user = store.createUser({ name: 'Cara', login: `cara${n}` });
@@ -164,6 +195,7 @@ test("7: a process in a closed minion's folders is named; an open minion's is no
   const { store, project, dataDir, minion } = setup();
   const [closed, open] = [minion('closed'), minion('open')];
   store.updateTicket(closed.id, { status: 'closed' });
+  store.db.prepare('UPDATE tickets SET closed_at = ? WHERE id = ?').run(NOW - 80 * MIN, closed.id);
   const procs = [
     { pid: 4242, ticketId: closed.id, projectId: project.id, command: 'npm run dev' },
     { pid: 4343, ticketId: open.id, projectId: project.id, command: 'vite' },
@@ -171,6 +203,9 @@ test("7: a process in a closed minion's folders is named; an open minion's is no
   const found = only(check(store, dataDir, { procs }), 'closed-processes');
   assert.equal(found.length, 1);
   assert.match(found[0].text, /is closed, but pid 4242 still runs in its folders: npm run dev/);
+  // Closed under 70 min: the hourly reaper hasn't had its go yet.
+  store.db.prepare('UPDATE tickets SET closed_at = ? WHERE id = ?').run(NOW - 30 * MIN, closed.id);
+  assert.deepEqual(only(check(store, dataDir, { procs }), 'closed-processes'), []);
 });
 
 test('8: a database that fails quick_check is named, only on an integrity pass', () => {

@@ -161,7 +161,7 @@ export const JUDGES: Judge[] = [
     replay: { notYet: 'each check reads live state (turn folders, the runner queue) that only a snapshot could replay' },
     acts: 'records a standing-check health reading, which the Status page shows',
     pins: [{ path: 'src/standing-checks.ts', symbols: ['CHECKS'] }],
-    callers: ['turn-record', 'one-place', 'fired-once', 'handoff-process', 'shipped-live', 'app-turn-ended', 'closed-processes', 'db-integrity'].map((c) => `standing-check:${c}`),
+    callers: ['turn-record', 'one-place', 'fired-once', 'handoff-process', 'shipped-live', 'ship-once', 'app-turn-ended', 'closed-processes', 'db-integrity'].map((c) => `standing-check:${c}`),
   },
   {
     id: 'compactions',

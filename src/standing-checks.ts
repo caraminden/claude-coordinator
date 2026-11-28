@@ -62,6 +62,10 @@ const UNREPORTED_MS = 10 * 60_000;
 const START_GRACE_MS = 60_000;
 /** "Shipped, not live yet" this long with nothing said to the minion since. */
 const NOT_LIVE_MS = 3600_000;
+/** A due delivery still waiting this long after its minion's turn ended is stuck (a mid-turn one is just waiting its turn). */
+const AFTER_TURN_MS = 20 * 60_000;
+/** The reaper sweeps hourly: a closed minion's process is only left over after its sweep has had its go. */
+const REAP_GRACE_MS = 70 * 60_000;
 /** An app turn's row this young may not be in the snapshot yet. */
 const APP_TURN_GRACE_MS = 60_000;
 /** The outbox's words for a handed message the runner no longer holds (src/outbox.ts). */
@@ -139,7 +143,13 @@ export const CHECKS: Check[] = [
       const since = now - LOOKBACK_MS;
       const target = (r: { to_kind: string; to_id: number }) => (r.to_kind === 'minion' ? name(r.to_id) : `the Taskmaster of scheme ${r.to_id}`);
       // Zero: due and not sent (the outbox ticks every few seconds), or given up on.
+      const turn = db.prepare('SELECT status, updated_at FROM tickets WHERE id = ?');
       for (const r of db.prepare("SELECT id, kind, to_kind, to_id, state, due FROM deliveries WHERE state IN ('waiting', 'sending') AND due IS NOT NULL AND due < ?").all(late) as { id: number; kind: string; to_kind: string; to_id: number; state: string; due: number }[]) {
+        // A minion mid-turn gets it when the turn ends: flagged only if still waiting 20 min after that.
+        if (r.to_kind === 'minion') {
+          const t = turn.get(r.to_id) as { status: string; updated_at: number } | undefined;
+          if (t && (t.status === 'running' || now - t.updated_at < AFTER_TURN_MS)) continue;
+        }
         out.push({ check: 'fired-once', key: `fired-once:delivery:${r.id}`, ticket: r.to_kind === 'minion' ? r.to_id : null, text: `${target(r)}: delivery #${r.id} (${r.kind}) was due ${minutes(now - r.due)} ago and is still ${r.state}.` });
       }
       for (const r of db.prepare("SELECT id, kind, to_kind, to_id, attempts, last_error FROM deliveries WHERE state = 'failed' AND updated_at >= ?").all(since) as { id: number; kind: string; to_kind: string; to_id: number; attempts: number; last_error: string | null }[]) {
@@ -251,6 +261,25 @@ export const CHECKS: Check[] = [
     },
   },
   {
+    name: 'ship-once',
+    promise: "A ship's hand-off settles once.",
+    run({ db, now }, name) {
+      const out: Finding[] = [];
+      const rows = db.prepare("SELECT ticket_id, json_extract(data, '$.text') AS text FROM events WHERE kind = 'note' AND (json_extract(data, '$.text') LIKE 'Shipped %' OR json_extract(data, '$.text') LIKE 'Merged %') AND created_at >= ?").all(now - LOOKBACK_MS) as { ticket_id: number; text: string }[];
+      const seen = new Map<string, number>();
+      for (const r of rows) {
+        const m = /^(Shipped|Merged) ([0-9a-f]{7,40})\b/.exec(r.text);
+        if (m) seen.set(`${r.ticket_id}:${m[1]}:${m[2]}`, (seen.get(`${r.ticket_id}:${m[1]}:${m[2]}`) ?? 0) + 1);
+      }
+      for (const [k, n] of seen) {
+        if (n < 2) continue;
+        const [id, verb, commit] = k.split(':');
+        out.push({ check: 'ship-once', key: `ship-once:${k}`, ticket: Number(id), text: `${name(Number(id))}: its chat says "${verb} ${commit}" ${n} times.` });
+      }
+      return out;
+    },
+  },
+  {
     name: 'app-turn-ended',
     promise: "An app turn's row is ended once its process is gone.",
     run({ db, snap }) {
@@ -262,9 +291,9 @@ export const CHECKS: Check[] = [
   {
     name: 'closed-processes',
     promise: "No process runs from a closed minion's folders.",
-    run({ db, snap }, name) {
-      const q = db.prepare("SELECT 1 FROM tickets WHERE id = ? AND project_id = ? AND kind <> 'coordinator' AND status = 'closed'");
-      return snap.procs.filter((p) => q.get(p.ticketId, p.projectId)).map((p) => ({ check: 'closed-processes', key: `closed-processes:${p.ticketId}:${p.pid}`, ticket: p.ticketId, text: `${name(p.ticketId)} is closed, but pid ${p.pid} still runs in its folders: ${p.command}` }));
+    run({ db, snap, now }, name) {
+      const q = db.prepare("SELECT 1 FROM tickets WHERE id = ? AND project_id = ? AND kind <> 'coordinator' AND status = 'closed' AND closed_at < ?");
+      return snap.procs.filter((p) => q.get(p.ticketId, p.projectId, now - REAP_GRACE_MS)).map((p) => ({ check: 'closed-processes', key: `closed-processes:${p.ticketId}:${p.pid}`, ticket: p.ticketId, text: `${name(p.ticketId)} is closed, but pid ${p.pid} still runs in its folders: ${p.command}` }));
     },
   },
   {

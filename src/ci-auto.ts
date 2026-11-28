@@ -74,6 +74,8 @@ export interface CiAutoDeps {
   card(project: Project, os: Os, could: Machine[]): void;
   /** Take back an open no-machine card, with a line in its chat saying why (server.ts settleCard). */
   settle(card: { ticket: number; question: string }, line: string): void;
+  /** The scheme is on the runner pool (src/runner-pool.ts poolOn, Build 11 P3): it gets no standing runners, and those it has come off. */
+  pooled?: (project: Project) => boolean;
   workflows?: (project: Project) => Promise<string[]>;
   now?: () => number;
   log?: (line: string) => void;
@@ -128,6 +130,8 @@ export class CiAuto {
     const asked = askedIn(project.name, await (this.d.workflows ?? workflowTexts)(project));
     if (asked.size) this.asking.add(slug);
     else this.asking.delete(slug);
+    // On the pool, one-job runners take its jobs: none standing (remove() takes off those it had); `asking` above still has ShipWatch read its jobs.
+    if (this.d.pooled?.(project)) return [];
     const out: string[] = [];
     for (const os of OSES) {
       if (!queued.has(os) && !asked.has(os)) continue;
@@ -158,7 +162,7 @@ export class CiAuto {
     return out;
   }
 
-  /** Runners on one PC's row (a runner agent joined it; a CI runner host's row is one since Build 10 H6) for a scheme its CI no longer lends to come off. */
+  /** Runners on one PC's row (a runner agent joined it; a CI runner host's row is one since Build 10 H6) for a scheme its CI no longer lends to, or a scheme on the runner pool, come off. */
   private async remove(): Promise<string[]> {
     const out: string[] = [];
     const projects = this.d.store.listProjects();
@@ -168,7 +172,7 @@ export class CiAuto {
         if (!ci?.on || !ci.setup?.runner_agent) continue;
         for (const repo of this.d.reposOn(m.id, os)) {
           const project = projects.find((p) => repoSlug(p.repo_url)?.toLowerCase() === repo);
-          if (!project || lendsCi(this.d.store, m, project)) continue;
+          if (!project || (lendsCi(this.d.store, m, project) && !this.d.pooled?.(project))) continue;
           const key = `remove:${project.id}:${os}:${m.id}`;
           if ((this.next.get(key) ?? 0) > this.now()) continue;
           this.next.set(key, this.now() + RETRY_MS);

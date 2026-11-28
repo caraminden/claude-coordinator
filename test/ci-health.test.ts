@@ -413,6 +413,24 @@ test('the CI page reads each scheme it may see: runners with their job, the queu
   );
 });
 
+test('a scheme on the runner pool with a machine that can take its jobs is fine: no stuck-runner item for its old runners (Build 11 P3)', async () => {
+  for (const able of [['cara-desktop'], []]) {
+    const w = world();
+    w.deps.pool = (p) => (p.id === w.peek.id ? able : null);
+    w.gh.runners = [desk('online')];
+    await w.health.tick(NOW);
+    waitingRun(w, NOW);
+    w.gh.runners = [desk('offline')];
+    await w.health.tick(NOW + WAIT_MS);
+    const [peek] = w.health.snapshot(() => true);
+    assert.equal(
+      peek.problems.some((x) => x.key.startsWith('stuck:')),
+      !able.length,
+      able.length ? 'a machine can take it: fine' : 'no machine can take it: still a problem',
+    );
+  }
+});
+
 test("#2239: runners a PC's agent keeps asleep read asleep on the CI page; the rest of the offline ones stay offline", async () => {
   const w = world();
   w.gh.runners = [desk('online', 'DESKTOP-G248IJ8-linux'), desk('offline', 'DESKTOP-G248IJ8-linux-2'), desk('offline', 'DESKTOP-G248IJ8-linux-3'), desk('offline', 'DESKTOP-G248IJ8-2')];

@@ -314,6 +314,8 @@ export interface CiHealthDeps {
   green?: (project: Project, runs: GreenRun[], branch: string) => void;
   /** The long jobs (citadel-heavy --long) on record: one running inside its deadline is not a hung runner. */
   longs?: () => LongJob[];
+  /** A scheme on the runner pool (Build 11 P3): the machines that could take its jobs now (src/runner-pool.ts able); null for a scheme on standing runners. With one, it has no runner to be offline: it's fine, and minions waiting on its runners wake. */
+  pool?: (p: Project) => string[] | null;
   /** #2231: a scheme's retro-log lines from `since` (its ship script's fallbacks); none, and no fallbacks show or ring. */
   retro?: (project: Project, since: number, now: number) => Promise<RetroLine[]>;
   /** #2231: each poll's ship runs' push-to-verdict, for the Numbers tab (CiNumbers.own); none, and they aren't kept. */
@@ -634,7 +636,8 @@ export class CiHealth {
     );
     for (const g of deadGroups(all)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
     // A runner list it can't read keeps the stuck items as they were: it can't tell, so it neither clears nor rings anew.
-    out.push(...(runners ? stuckProblems(runners, all, saved.offline, now) : (saved.problems ?? []).filter((x) => x.key.startsWith('stuck:'))));
+    // A pool scheme a machine can take jobs for has no runner whose being offline strands them: the pool's line says why each waits.
+    if (!this.deps.pool?.(p)?.length) out.push(...(runners ? stuckProblems(runners, all, saved.offline, now) : (saved.problems ?? []).filter((x) => x.key.startsWith('stuck:'))));
     out.push(...hungProblems(all, now, this.deps.longs?.() ?? []));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
@@ -1441,11 +1444,18 @@ ${text}`,
       });
   }
 
+  /** The scheme's runners online, or for a pool scheme the machines that could take its jobs, as runners by name; null when the list can't be read. */
+  private upFor(p: Project, runners: Runner[] | null): { name: string }[] | null {
+    const able = this.deps.pool?.(p);
+    if (able?.length) return able.map((name) => ({ name }));
+    return runners && onlineRunners(runners, p.name);
+  }
+
   /** The outbox's rows waiting on this scheme's runners: met once one is online, or when the list can't be read (they are told to ask). The outbox sends, retries and holds them for a dismissed minion. */
   private meetRunners(p: Project, runners: Runner[] | null) {
     const outbox = this.deps.outbox;
     if (!outbox) return;
-    const up = runners && onlineRunners(runners, p.name);
+    const up = this.upFor(p, runners);
     if (up && !up.length) return;
     const names = up?.map((r) => r.name).join(', ');
     for (const r of deliveriesOf(this.store, 'runners_back', { states: ['waiting'] })) {
@@ -1470,7 +1480,7 @@ ${text}`,
       const t = this.store.getTicket(w.ticket);
       return !t || t.status === 'closed';
     };
-    const up = runners && onlineRunners(runners, p.name);
+    const up = this.upFor(p, runners);
     const woken = (!up || up.length) && this.deps.wake ? all.filter((w) => mine(w) && !gone(w)) : [];
     if (!woken.length && !all.some(gone)) return;
     // Dropped before sending, so a send that throws can't wake anyone twice.

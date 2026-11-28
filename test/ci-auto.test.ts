@@ -25,6 +25,7 @@ function world() {
   const samples = new Map<string, Set<string>>();
   const queued = new Map<string, Set<string>>();
   const room = new Map<number, number>();
+  const pooled = new Set<number>();
   let workflows: Record<number, string[]> = {};
   let now = 1_000_000;
   const started: string[] = [];
@@ -47,6 +48,7 @@ function world() {
       const e = store.openCardsOf(card.ticket).find((q) => JSON.parse(q.data).id === card.question)!;
       store.setEventData(e.id, { ...JSON.parse(e.data), settled: { at: now, by: 'Citadel' } });
     },
+    pooled: (p) => pooled.has(p.id),
     workflows: async (p) => workflows[p.id] ?? [],
     now: () => now,
     log: () => {},
@@ -62,6 +64,7 @@ function world() {
     samples,
     queued,
     room,
+    pooled,
     started,
     cards,
     settled,
@@ -237,6 +240,29 @@ test("unticking a scheme on a PC's row takes its runners off there, a CI runner 
   assert.deepEqual(w.started.sort(), ['remove Delve linux cara-desktop-ci-runners', 'remove Delve linux josh-desktop']);
   await w.auto.pass();
   assert.equal(w.started.length, 2, 'once each, not each pass');
+});
+
+test('a scheme on the runner pool gets no standing runners and has those it had taken off; switched back, it gets them again (Build 11 P3)', async () => {
+  const w = world();
+  const desk = w.pc('cara-desktop', w.cara.id, [w.delve.id], { runner_agent: true });
+  w.up(desk);
+  w.setWorkflows({ [w.delve.id]: [LINUX_CI] });
+  w.samples.set(`${desk.id}:linux`, new Set(['caraminden/delve']));
+  w.pooled.add(w.delve.id);
+  await w.auto.pass();
+  assert.deepEqual(w.started, ['remove Delve linux cara-desktop'], 'its standing runner comes off, though the PC still lends it CI');
+  assert.ok(w.auto.asking.has('caraminden/delve'), 'ShipWatch still reads its jobs, for the pool');
+  // Gone from the sample: nothing is added back while it's on the pool, even with jobs queued.
+  w.samples.set(`${desk.id}:linux`, new Set());
+  w.queued.set('caraminden/delve', new Set(['self-hosted', 'delve-ci-linux']));
+  w.tick(RETRY_MS + 1);
+  await w.auto.pass();
+  assert.deepEqual(w.started, ['remove Delve linux cara-desktop']);
+  assert.deepEqual(w.cards, [], 'no no-machine card for a pool scheme');
+  // Off the pool: its standing runner comes back the old way.
+  w.pooled.delete(w.delve.id);
+  await w.auto.pass();
+  assert.deepEqual(w.started, ['remove Delve linux cara-desktop', 'add Delve linux cara-desktop']);
 });
 
 test("a scheme someone joins or makes later is lent their PCs' CI; one they unticked stays unticked", () => {

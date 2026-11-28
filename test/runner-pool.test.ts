@@ -365,6 +365,159 @@ test('the watcher keeps the books, counts running jobs as used room, and logs ea
   assert.equal(store.rows.find((r) => r.job_id === 1)!.ended_at, null);
 });
 
+// P3 (#2275): the pool starts one-job runners for a scheme switched to it; the rest it only watches.
+const TOC = 9;
+function poolWorld(o: { pooled?: Set<number>; standing?: Set<string>; limit?: number } = {}) {
+  const toc = 'caraminden/theory-of-crafting';
+  const peek = 'caraminden/peek-auras';
+  let now = NOW;
+  const logs: string[] = [];
+  const starts: { repo: string; slot: number; labels: string[]; job: number; machine: number; os: string }[] = [];
+  const answers: ((r: { ok: boolean; output: string } | Error) => void)[] = [];
+  const store = books();
+  const desk: PoolPc = { id: 1, name: 'cara-desktop', priority: null, os: ['windows', 'linux'], session: true, schemes: [TOC, PEEK], limit: o.limit ?? 8, off: null, hosts: ['DESK'] };
+  const pool = new RunnerPool({
+    scheme: (r) => (r === toc ? { id: TOC, name: 'Theory of Crafting' } : r === peek ? { id: PEEK, name: 'Peek Auras' } : null),
+    first: () => 'caraminden/claude-coordinator',
+    machines: () => [desk],
+    store,
+    log: (l) => logs.push(l),
+    now: () => now,
+    pooled: (id) => (o.pooled ?? new Set([TOC])).has(id),
+    standing: (r) => o.standing?.has(r) ?? false,
+    start: (ask) => {
+      starts.push({ repo: ask.repo, slot: ask.slot, labels: ask.labels, job: ask.job, machine: ask.machine, os: ask.os });
+      return new Promise((resolve, reject) => answers.push((r) => (r instanceof Error ? reject(r) : resolve({ name: '', ...r }))));
+    },
+  });
+  const j = (repo: string, id: number, o2: Partial<SeenJob> = {}): SeenJob => ({ repo, id, run: id, name: `job ${id}`, labels: repo === toc ? ['self-hosted', 'theory-of-crafting-ci-linux'] : ['self-hosted', 'peek-auras-ci'], ship: false, created: NOW - 60_000, status: 'queued', runner: null, ...o2 });
+  const sight = (jobs: SeenJob[]): PoolSight => {
+    const runs = new Set(jobs.map((x) => `${x.repo}#${x.run}`));
+    return { jobs, runs, known: new Set(runs), repos: new Set([toc, peek]) };
+  };
+  return { toc, peek, pool, starts, answers, logs, j, sight, tick: (ms: number) => (now += ms), desk };
+}
+
+test("a pool scheme's placed job gets a one-job runner in the lowest free slot, with its exact labels, booked so the next look starts no second (Build 11 P3)", async () => {
+  const w = poolWorld();
+  let v = w.pool.pass(w.sight([w.j(w.toc, 11), w.j(w.toc, 12), w.j(w.toc, 13)]));
+  assert.deepEqual(
+    w.starts.map((s) => [s.job, s.slot, s.os, s.machine]),
+    [
+      [11, 1, 'linux', 1],
+      [12, 2, 'linux', 1],
+    ],
+    'two fit in 8 threads, slots 1 and 2',
+  );
+  assert.deepEqual(w.starts[0].labels, ['self-hosted', 'theory-of-crafting-ci-linux'], 'the runner gets exactly the labels the job asks for');
+  assert.deepEqual(
+    v.line.map((x) => [x.id, x.place, x.starting, x.machine, x.pool]),
+    [
+      [11, 0, true, 'cara-desktop', true],
+      [12, 0, true, 'cara-desktop', true],
+      [13, 1, false, null, true],
+    ],
+  );
+  assert.match(v.line[2].why!, /^room on cara-desktop: needs 4 threads, 0 free/, 'the starting runners hold their room');
+  assert.deepEqual(
+    v.machines[0].running.map((r) => [r.name, r.starting, r.pool]),
+    [
+      ['job 11', true, true],
+      ['job 12', true, true],
+    ],
+  );
+  assert.equal(v.machines[0].used, 8);
+  // The same look again: nothing new is started.
+  w.tick(POOL.pollMs);
+  w.pool.pass(w.sight([w.j(w.toc, 11), w.j(w.toc, 12), w.j(w.toc, 13)]));
+  assert.equal(w.starts.length, 2);
+  // Job 11 runs on its runner: its room is counted once, from the running job. Job 12's runner ends without a job (the agent's report): its slot and room are free again, so job 12 starts again in slot 2, and 13 still has no room.
+  w.pool.onSlot({ runner: 'pool-m1-l2-j12', event: 'stopped' });
+  w.tick(POOL.pollMs);
+  v = w.pool.pass(w.sight([w.j(w.toc, 11, { status: 'in_progress', runner: 'pool-m1-l1-j11' }), w.j(w.toc, 12), w.j(w.toc, 13)]));
+  assert.deepEqual(
+    w.starts.slice(2).map((s) => [s.job, s.slot]),
+    [[12, 2]],
+  );
+  assert.equal(v.machines[0].used, 8);
+  assert.deepEqual(
+    v.machines[0].running.map((r) => [r.name, r.starting]),
+    [
+      ['job 11', false],
+      ['job 12', true],
+    ],
+  );
+  // Job 11 ends: its runner is forgotten with it, and job 13 starts in slot 1, the warm one.
+  w.tick(POOL.pollMs);
+  w.pool.pass(w.sight([w.j(w.toc, 12), w.j(w.toc, 13)]));
+  assert.deepEqual(w.starts.at(-1), { ...w.starts.at(-1)!, job: 13, slot: 1 });
+});
+
+test("a runner that doesn't start frees its room, says why on the job, and is tried again after a minute (Build 11 P3)", async () => {
+  const w = poolWorld();
+  w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  w.answers[0]({ ok: false, output: 'starting slot\nthe runner copy is 30 days old\n' });
+  await new Promise((r) => setImmediate(r)); // timing-ok: lets the start's answer settle
+  w.tick(POOL.pollMs);
+  let v = w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  assert.equal(w.starts.length, 1, 'not again within the minute');
+  assert.match(v.line[0].why!, /its runner didn't start \(the runner copy is 30 days old\)/);
+  assert.equal(v.machines[0].used, 0);
+  assert.ok(w.logs.some((l) => l.startsWith("Runner pool: couldn't start pool-m1-l1-j11")));
+  w.tick(POOL.startAgainMs);
+  v = w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  assert.equal(w.starts.length, 2);
+  assert.equal(v.line[0].starting, true);
+});
+
+test("a standing scheme's jobs are only watched and take none of the pool's room; standing runners' running jobs do (Build 11 P3)", () => {
+  const w = poolWorld();
+  // Peek's two waiting jobs are older but on standing runners: Theory of Crafting's job still starts. Taking turns, ToC's job
+  // comes between Peek's two, so to the watcher Peek's second has no room left.
+  const v = w.pool.pass(w.sight([w.j(w.peek, 1, { created: NOW - 5 * 60_000 }), w.j(w.peek, 2, { created: NOW - 4 * 60_000 }), w.j(w.toc, 11)]));
+  assert.deepEqual(
+    w.starts.map((s) => s.job),
+    [11],
+  );
+  assert.deepEqual(
+    v.line.filter((x) => !x.pool).map((x) => [x.id, x.machine]),
+    [
+      [1, 'cara-desktop'],
+      [2, null],
+    ],
+    'Peek still shows where the pool would start it',
+  );
+  assert.ok(w.logs.some((l) => /^Runner pool \(watching\): would start caraminden\/peek-auras "job 1"/.test(l)));
+  // Peek's standing runner on DESK runs job 1: 4 of the 8 threads, so with ToC's starting one the machine is full.
+  w.tick(POOL.pollMs);
+  const v2 = w.pool.pass(w.sight([w.j(w.peek, 1, { status: 'in_progress', runner: 'DESK-2' }), w.j(w.toc, 11), w.j(w.toc, 12)]));
+  assert.equal(w.starts.length, 1, "no room for ToC's second job");
+  assert.match(v2.line.find((x) => x.id === 12)!.why!, /0 free/);
+  assert.deepEqual(
+    v2.machines[0].running.map((r) => [r.repo, r.pool]),
+    [
+      [w.peek, false],
+      [w.toc, true],
+    ],
+  );
+});
+
+test('a pool scheme whose standing runners are still on a PC starts nothing yet, and says so (Build 11 P3)', () => {
+  const w = poolWorld({ standing: new Set(['caraminden/theory-of-crafting']) });
+  const v = w.pool.pass(w.sight([w.j(w.toc, 11)]));
+  assert.equal(w.starts.length, 0);
+  assert.match(v.line[0].why!, /standing runners are still being taken off/);
+  assert.equal(v.line[0].pool, true);
+});
+
+test("which machines could take a pool scheme's jobs: lending it CI and not off", () => {
+  const w = poolWorld();
+  assert.deepEqual(w.pool.able(TOC), ['cara-desktop']);
+  assert.deepEqual(w.pool.able(42), []);
+  w.desk.off = 'is offline';
+  assert.deepEqual(w.pool.able(TOC), []);
+});
+
 test("the pool's books in the real table: seen, placed, ran, ended, seen again, and each scheme's last start", () => {
   const store = new Store(':memory:');
   const seen = (job_id: number, project_id: number) => ({ repo: 'o/peek', job_id, run_id: 9, project_id, name: `job ${job_id}`, labels: '["self-hosted"]', size: 4, ship: 0, first_seen: NOW });

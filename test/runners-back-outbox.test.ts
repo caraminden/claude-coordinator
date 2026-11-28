@@ -36,7 +36,7 @@ const minion = () => {
   store.updateTicket(id, { status: 'idle' });
   return id;
 };
-function world() {
+function world(pool?: CiHealthDeps['pool']) {
   const sent: { id: number; text: string }[] = [];
   let events = 0;
   const runner = {
@@ -48,7 +48,7 @@ function world() {
   const outbox = new Outbox(store, runner as unknown as OutboxRunner, { author: 'Citadel', now: () => now.t });
   boxes.push(outbox);
   registerRunnersBack(store, outbox);
-  const health = new CiHealth(store, fake<CiHealthDeps>({ outbox }));
+  const health = new CiHealth(store, fake<CiHealthDeps>({ outbox, pool }));
   return { sent, outbox, health };
 }
 const runner = (online: boolean) => [{ name: 'DESKTOP', status: online ? 'online' : 'offline', labels: [{ name: 'peek-auras-ci' }] }] satisfies Runner[];
@@ -123,4 +123,20 @@ test('saved waits move into the table at boot in one go, none dropped, and the k
     w.sent.map((s) => s.id),
     [a, b],
   );
+});
+
+test('a scheme on the runner pool counts as back once a machine can take its jobs, with no runner of its own online (Build 11 P3)', async () => {
+  let able: string[] = [];
+  const w = world((p) => (p.id === project.id ? able : null));
+  await w.outbox.boot();
+  const id = minion();
+  addRunnerWaiter(store, id, 'run tools/land.sh again.', w.outbox);
+  w.health.wakeParked(project, []);
+  await w.outbox.poke({ type: 'tick' });
+  assert.equal(w.sent.length, 0, 'no machine can take it yet');
+  able = ['cara-desktop'];
+  w.health.wakeParked(project, []);
+  await w.outbox.poke({ type: 'tick' });
+  assert.equal(w.sent.length, 1);
+  assert.match(w.sent[0].text, /cara-desktop online/);
 });

@@ -491,10 +491,14 @@ export class RunnerPool {
       }
     }
     // CI's room in use on each machine: the jobs running there now by their size (standing runners' too), and the pool's runners not on one yet.
-    const used = new Map<number, number>();
-    const add = (m: number, n: number) => used.set(m, (used.get(m) ?? 0) + n);
-    for (const o of this.open.values()) if (o.runner && o.ranOn !== null) add(o.ranOn, o.size);
-    for (const r of this.started.values()) if (!onJob.has(r.name)) add(r.machine, r.size);
+    const usedNow = () => {
+      const used = new Map<number, number>();
+      const add = (m: number, n: number) => used.set(m, (used.get(m) ?? 0) + n);
+      for (const o of open.values()) if (o.runner && o.ranOn !== null) add(o.ranOn, o.size);
+      for (const r of this.started.values()) if (!onJob.has(r.name)) add(r.machine, r.size);
+      return used;
+    };
+    const used = usedNow();
     const machines = pcs.map(({ hosts: _, ...m }) => ({ ...m, free: Math.max(0, m.limit - (used.get(m.id) ?? 0)) }));
     const placed = place({ jobs: waiting.filter((j) => !covered.has(`${j.repo}#${j.id}`)), machines, now, lastStart: this.lastStart, warm: this.warm });
     const nameOf = (id: number | null) => (id === null ? null : (machines.find((m) => m.id === id)?.name ?? `machine ${id}`));
@@ -544,20 +548,21 @@ export class RunnerPool {
       pool: !j.standing || held.has(`${j.repo}#${j.id}`),
       ...o,
     });
+    const after = usedNow();
     const startingJobs = waiting.filter((j) => covered.has(`${j.repo}#${j.id}`));
     this.current = {
       at: now,
       watching: !this.d.start,
       line: [
         ...startingJobs.map((j) => lineJob(j, { place: 0, step: stepOf(j, now), machine: nameOf(covered.get(`${j.repo}#${j.id}`)!.machine), why: null, starting: true })),
-        ...placed.filter((p) => !covered.has(`${p.job.repo}#${p.job.id}`)).map((p) => lineJob(p.job, { place: p.place, step: p.step, machine: nameOf(p.machine), why: p.why, starting: false })),
+        ...placed.filter((p) => !covered.has(`${p.job.repo}#${p.job.id}`)).map((p, k) => lineJob(p.job, { place: k + 1, step: p.step, machine: nameOf(p.machine), why: p.why, starting: false })),
       ],
       machines: machines.map((m) => ({
         id: m.id,
         name: m.name,
         limit: m.limit,
-        used: used.get(m.id) ?? 0,
-        free: m.free,
+        used: after.get(m.id) ?? 0,
+        free: Math.max(0, m.limit - (after.get(m.id) ?? 0)),
         off: m.off,
         running: [
           ...[...open.values()].filter((o) => o.runner && o.ranOn === m.id).map((o) => ({ repo: o.repo, scheme: o.scheme, name: o.name, size: o.size, since: o.startedAt ?? now, pool: o.runner!.toLowerCase().startsWith('pool-'), starting: false })),

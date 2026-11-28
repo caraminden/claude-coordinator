@@ -33,6 +33,7 @@ import { cleanReport, agentIsOld, type MachineReport, storedReport } from './mac
 import { pausedRoles, setPaused } from './machine-pause.ts';
 import { legacyFromRoles, ROLE_NAMES, rolesCannot } from './machine-roles.ts';
 import { POOLED_WINDOWS, WindowsPool } from './machine-pick.ts';
+import type { RunnerManifest, RunnerUpdate } from './ci-runner.ts';
 
 /** A VM on a computer (Build 10 H4): it shows only on its host's card, and its owner is its host's. */
 export const isVm = (m: Pick<Machine, 'vm_of'>): boolean => m.vm_of != null;
@@ -412,7 +413,18 @@ const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : 'c
  * A CI runner agent's connection (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. Which runners
  * it adds (#510): Windows services, or Linux ones (in WSL or on plain Linux); an agent that doesn't say is a Windows one.
  */
-export type RunnerAgent = { res: ServerResponse; host: string; os: 'windows' | 'linux'; since: number };
+export type RunnerAgent = {
+  res: ServerResponse;
+  host: string;
+  os: 'windows' | 'linux';
+  since: number;
+  /** It updates itself (#2310): it said update=1 as it connected. One from before shows its row's update line. */
+  selfUpdate: boolean;
+  /** The files version last sent to it, so a reload that changed nothing sends nothing. */
+  sent?: string;
+  /** Where its update stands, as it last said. */
+  update?: RunnerUpdate;
+};
 
 export class MachineRelay {
   /** Each machine's agent (public/machine-agent.mjs). */
@@ -493,6 +505,7 @@ export class MachineRelay {
     const agent = this.agents.get(machine.id);
     const check = storedCheck(machine);
     const runnersHere = this.runnersOn(machine.id);
+    const oldRunners = runnersHere.filter((r) => !r.selfUpdate || this.runnerPlans.get(`${machine.id}:${r.os}`) === false);
     // Only its CI runner agents are connected, and its machine agent was never installed: it reads as CI alone. One that
     // reported before is offline as any PC is, whatever its SYSTEM runner agents do while its person is signed out.
     const runnersOnly = !agent && runnersHere.length > 0 && !storedReport(machine);
@@ -560,9 +573,12 @@ export class MachineRelay {
       /** Only its CI runner agents are connected now, no machine agent (Build 10 H6: no row is a "runner host" any more). */
       runners: runnersOnly,
       /** Its CI runner agents connected now, beside its agent (Build 7 M2b). */
-      runner_agents: runnersHere.map(({ os, host, since }) => ({ os, host, since })),
-      /** Its CI runner agents from before the balancer (M6b), which keep every runner up and the 30% ship squeeze: the row offers their update line. */
-      runner_update: runnersHere.some((r) => this.runnerPlans.get(`${machine.id}:${r.os}`) === false) ? { os: runnersHere.filter((r) => this.runnerPlans.get(`${machine.id}:${r.os}`) === false).map((r) => r.os), url: this.agentUrl } : null,
+      runner_agents: runnersHere.map(({ os, host, since, selfUpdate, update }) => ({ os, host, since, self_update: selfUpdate, update: update ?? null, latest: this.runnerFiles(os)?.version ?? null })),
+      /**
+       * Its CI runner agents that need their install run once more: from before the balancer (M6b; `plans`), which keep every
+       * runner up and the 30% ship squeeze, or from before they updated themselves (#2310). The row offers their update line.
+       */
+      runner_update: oldRunners.length ? { os: oldRunners.map((r) => r.os), url: this.agentUrl, plans: oldRunners.some((r) => this.runnerPlans.get(`${machine.id}:${r.os}`) === false) } : null,
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
       /** What marked minions may start there (T8), from its owner's config file on that PC; null while offline. */
@@ -682,8 +698,8 @@ export class MachineRelay {
   }
 
   /** A machine's agent connected: hold the stream open and send it its sessions' messages. */
-  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean; managed?: boolean; os?: 'windows' | 'linux' }) {
-    if (info.runners) return this.connectRunner(machine, res, info.host, info.os ?? 'windows');
+  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean; managed?: boolean; os?: 'windows' | 'linux'; selfUpdate?: boolean }) {
+    if (info.runners) return this.connectRunner(machine, res, info.host, info.os ?? 'windows', info.selfUpdate === true);
     // A newer connection wins: the old one is a laptop that dropped off without the server noticing.
     // Told so, the old one waits a while before it tries again: two agents with one token would otherwise drop each other at once, forever.
     const old = this.agents.get(machine.id);
@@ -719,7 +735,7 @@ export class MachineRelay {
    * A CI runner agent connected (#328). It sits beside the machine's agent (Build 7 M2b: one row per PC, one token);
    * a newer runner agent for the same OS on that row wins, as for agents.
    */
-  private connectRunner(machine: Machine, res: ServerResponse, host: string, os: 'windows' | 'linux') {
+  private connectRunner(machine: Machine, res: ServerResponse, host: string, os: 'windows' | 'linux', selfUpdate = false) {
     const key = `${machine.id}:${os}`;
     const old = this.runnerAgents.get(key);
     if (old) {
@@ -728,8 +744,9 @@ export class MachineRelay {
     }
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
-    const runner: RunnerAgent = { res, host, os, since: Date.now() };
+    const runner: RunnerAgent = { res, host, os, since: Date.now(), selfUpdate };
     this.runnerAgents.set(key, runner);
+    this.sendRunnerFiles(runner);
     const ships = this.shipsFor(host);
     if (ships.length) res.write(`data: ${JSON.stringify({ ships })}\n\n`);
     res.write(`data: ${JSON.stringify({ pool: this.poolFor(machine.id) })}\n\n`);
@@ -774,6 +791,31 @@ export class MachineRelay {
   readonly runnerPlans = new Map<string, boolean>();
   /** The address agents dial (MACHINES_URL), for an old CI runner agent's update line; null: the page's own. */
   agentUrl: string | null = null;
+
+  /** This server's runner agent files by OS (#2310), as it serves them now: set by server.ts, which reads them with the front end. */
+  runnerFiles: (os: 'windows' | 'linux') => RunnerManifest | null = () => null;
+
+  private sendRunnerFiles(r: RunnerAgent) {
+    const files = this.runnerFiles(r.os);
+    if (!files || files.version === r.sent) return;
+    r.sent = files.version;
+    r.res.write(`data: ${JSON.stringify({ files })}\n\n`);
+  }
+
+  /** After a deploy reloaded the files: each runner agent gets the new list, and one that updates itself fetches what changed. */
+  pushRunnerFiles() {
+    for (const r of this.runnerAgents.values()) this.sendRunnerFiles(r);
+  }
+
+  /** A runner agent's word on its update (#2310); false when no agent for that OS is connected on this machine. */
+  runnerUpdated(machineId: number, os: 'windows' | 'linux', update: RunnerUpdate): boolean {
+    const r = this.runnerAgents.get(`${machineId}:${os}`);
+    if (!r) return false;
+    const was = r.update;
+    r.update = update;
+    if (was?.state !== update.state || was.version !== update.version || was.why !== update.why) this.onChange();
+    return true;
+  }
 
   /** Its part of the balancer's plan, to a machine's CI runner agent for `os` (Build 7 M6b); one from before ignores it. */
   sendRunnerPlan(machineId: number, os: 'windows' | 'linux', plan: RunnerShare) {

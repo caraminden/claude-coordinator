@@ -18,7 +18,8 @@
 // PC needs no open port. It is a helper of the PC's machine agent (One kind of machine H2): pressing Set up on CI runners makes that
 // agent write its elevate script, which runs tools/ci-runner/install-runner-agent.ps1 (or .sh) as administrator; tools/ci-runner/README.md says more.
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, statfsSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, closeSync, copyFileSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statfsSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, hostname, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -317,7 +318,8 @@ export class SlotWatch {
 
   /** One look at every slot: took, ended, the 2-minute stop, then the copy's update when it's due and no slot runs. */
   async tick() {
-    if (this.ticking) return;
+    // Not while the agent swaps its own files (SelfUpdate): the state op runs one of them.
+    if (this.ticking || this.jobs.busy === UPDATING) return;
     // Nothing to watch and no update due: no script runs.
     if (!Object.keys(this.slots).length && !this.copyDue()) return this.flush();
     this.ticking = true;
@@ -401,6 +403,245 @@ export class SlotWatch {
     } finally {
       this.flushing = false;
     }
+  }
+}
+
+// ---- It updates itself (#2310; Cara, 2026-11-28: "Can we make it able to update itself?") ----
+// Citadel sends the SHA-256 of each file its install put here, as Citadel serves them now, on connect and after each
+// deploy. Files that differ are fetched from the address this agent already dials (/runner-agent.mjs, /ci-runner/<name>)
+// and checked against their hash, all of them before any is swapped; one that doesn't come or doesn't match leaves every
+// file as it was and says why on the Machines row. The swap waits for the agent's own jobs and the one-job runners it
+// watches to end (after UPDATE_DRAIN_MS no new one starts until it has run), keeps the old files as <name>.old, and
+// ends this process with UPDATED: the supervisor (supervise, below) starts it again on the new files. A new version that
+// stops before it connects is rolled back by the supervisor and not taken again. Standing runner services use none of
+// these files, so their jobs run on. It changes nothing about what may run: the job allowlist above is the code's own.
+export const UPDATED = 75;
+export const UPDATE_TICK_MS = 15_000;
+export const UPDATE_DRAIN_MS = 15 * 60_000;
+export const UPDATE_RETRY_MS = 5 * 60_000;
+const UPDATING = 'updating the runner agent';
+const UPDATE_DRAINING = 'draining slots to update the runner agent';
+/** Only a file of this folder: no path, and only the kinds an install puts here. */
+const UPDATE_NAME = /^[a-z][a-z0-9-]{0,40}\.(?:mjs|ps1|sh)$/;
+/** The update under way: which files it replaced and added, and the versions from and to, until the new version connects. */
+const UPDATE_FILE = 'update.json';
+/** A version the supervisor rolled back, so it isn't taken again. */
+const FAILED_FILE = 'update-failed.json';
+
+export const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+/** The files' version, as src/ci-runner.ts filesVersion makes it: what the Machines row shows. */
+export const filesVersion = (files) =>
+  sha256(
+    Object.keys(files)
+      .sort()
+      .map((n) => `${n} ${files[n]}\n`)
+      .join(''),
+  ).slice(0, 12);
+
+/** Citadel's file list, checked: names that can only be a file in this folder, 64-digit hashes, a version that is theirs. */
+export function checkFiles(raw) {
+  const files = raw?.files;
+  if (!files || typeof files !== 'object' || Array.isArray(files)) throw new Error('the file list has no files');
+  const names = Object.keys(files);
+  if (!names.includes('runner-agent.mjs') || names.length > 40) throw new Error('the file list must name runner-agent.mjs and at most 40 files');
+  for (const n of names) {
+    if (!UPDATE_NAME.test(n)) throw new Error(`the file list names ${JSON.stringify(n).slice(0, 60)}, which is not one of this folder's`);
+    if (typeof files[n] !== 'string' || !/^[0-9a-f]{64}$/.test(files[n])) throw new Error(`the file list's hash for ${n} is not a SHA-256`);
+  }
+  const clean = Object.fromEntries(names.map((n) => [n, files[n]]));
+  if (raw.version !== filesVersion(clean)) throw new Error("the file list's version doesn't match its files");
+  return { version: raw.version, files: clean };
+}
+
+const readJsonFile = (file) => {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+};
+
+export class SelfUpdate {
+  /** `report(body)` sends where the update stands to Citadel; `exit(code)` ends the process (a test's records it). */
+  constructor({ jobs, slots, report, supervised, exit = (code) => process.exit(code), get = globalThis.fetch, now = Date.now, log = () => {} }) {
+    Object.assign(this, { jobs, slots, report, supervised, exit, get, now, log, dir: jobs.dir, target: null, running: false, said: '', waitingSince: 0, retryAt: 0 });
+  }
+
+  /** The SHA-256 of each file the target names, as they are here now; '' for one that isn't here. */
+  local(names = Object.keys(this.target?.files ?? {})) {
+    return Object.fromEntries(
+      names.map((n) => {
+        try {
+          return [n, sha256(readFileSync(join(this.dir, n)))];
+        } catch {
+          return [n, ''];
+        }
+      }),
+    );
+  }
+
+  /** Tells Citadel, once per change, the version here and where its update stands. */
+  say(state, why = '') {
+    const version = this.target ? filesVersion(this.local()) : '';
+    const key = `${version} ${state} ${why}`;
+    if (!version || key === this.said) return;
+    this.said = key;
+    if (state !== 'current') this.log(`Update: ${state}${why ? `: ${why}` : ''}`);
+    void this.report({ os: this.jobs.os, version, state, why });
+  }
+
+  /** Connected (again): the new version is up, so the old files go, and Citadel, which forgot, hears the state again. */
+  connected() {
+    this.said = '';
+    const u = readJsonFile(join(this.dir, UPDATE_FILE));
+    if (!u) return;
+    for (const n of u.replaced ?? []) rmSync(join(this.dir, `${n}.old`), { force: true });
+    rmSync(join(this.dir, UPDATE_FILE), { force: true });
+    this.log(`Updated the runner agent from ${u.from} to ${u.to}.`);
+  }
+
+  /** Citadel's file list, as it connects and after a deploy. */
+  want(raw) {
+    try {
+      const next = checkFiles(raw);
+      if (next.version !== this.target?.version) this.retryAt = 0;
+      this.target = next;
+    } catch (err) {
+      return this.log(`Citadel sent a file list this agent won't take: ${err.message}`);
+    }
+    return this.check();
+  }
+
+  /** What a swap now would cut into, or null when nothing would. */
+  busy() {
+    if (this.jobs.busy) return this.jobs.busy;
+    const n = Object.keys(this.slots.slots).length;
+    if (n) return `${n} one-job runner${n === 1 ? '' : 's'} to end`;
+    if (this.slots.ticking) return "the slots' watch";
+    return null;
+  }
+
+  /** One look: up to date, or waiting on a job, or fetch, check and swap. */
+  async check() {
+    if (!this.target || this.running) return;
+    const have = this.local();
+    const stale = Object.keys(this.target.files).filter((n) => have[n] !== this.target.files[n]);
+    if (!stale.length) {
+      this.waitingSince = 0;
+      if (this.jobs.draining === UPDATE_DRAINING) this.jobs.draining = null;
+      return this.say('current');
+    }
+    const failed = readJsonFile(join(this.dir, FAILED_FILE));
+    if (failed?.version === this.target.version) return this.say('failed', `version ${failed.version} stopped before it connected (exit ${failed.code}), so it went back to ${failed.from}; it waits for a newer one`);
+    if (!this.supervised) return this.say('failed', 'it was started without --supervise, so it cannot start itself again: run its install once more');
+    if (this.now() < this.retryAt) return;
+    const busy = this.busy();
+    if (busy) {
+      this.waitingSince ||= this.now();
+      // A PC whose slots never all end at once still updates: after a while no new one starts.
+      if (this.now() - this.waitingSince > UPDATE_DRAIN_MS && !this.jobs.draining) this.jobs.draining = UPDATE_DRAINING;
+      return this.say('waiting', `version ${this.target.version} waits for ${busy}`);
+    }
+    this.running = true;
+    this.jobs.busy = UPDATING;
+    try {
+      await this.swap(stale, have);
+      this.log(`Swapped in version ${this.target.version} (${stale.join(', ')}): starting again on it.`);
+      this.exit(UPDATED);
+    } catch (err) {
+      this.retryAt = this.now() + UPDATE_RETRY_MS;
+      this.say('failed', `${err.message}; the old files run on, and it tries again in ${UPDATE_RETRY_MS / 60_000} minutes or at the next deploy`);
+    } finally {
+      this.jobs.busy = null;
+      this.running = false;
+      if (this.jobs.draining === UPDATE_DRAINING) this.jobs.draining = null;
+    }
+  }
+
+  /** Every stale file fetched and checked first, then swapped in, the old ones kept; any failure puts them all back. */
+  async swap(stale, have) {
+    const { version, files } = this.target;
+    this.say('updating', `to version ${version}`);
+    const part = (n) => join(this.dir, `${n}.new`);
+    try {
+      for (const n of stale) {
+        const url = new URL(n === 'runner-agent.mjs' ? '/runner-agent.mjs' : `/ci-runner/${n}`, this.jobs.appUrl);
+        let res;
+        try {
+          res = await this.get(url, { signal: AbortSignal.timeout(60_000) });
+        } catch (err) {
+          throw new Error(`couldn't download ${n}: ${err.message}`);
+        }
+        if (!res.ok) throw new Error(`couldn't download ${n}: Citadel answered ${res.status}`);
+        const body = Buffer.from(await res.arrayBuffer());
+        const got = sha256(body);
+        if (got !== files[n]) throw new Error(`${n} as downloaded doesn't match its SHA-256 (got ${got.slice(0, 12)}…, want ${files[n].slice(0, 12)}…)`);
+        writeFileSync(part(n), body, { mode: 0o600 });
+      }
+      const replaced = stale.filter((n) => have[n]);
+      for (const n of replaced) copyFileSync(join(this.dir, n), join(this.dir, `${n}.old`));
+      writeFileSync(join(this.dir, UPDATE_FILE), JSON.stringify({ from: filesVersion(have), to: version, replaced, added: stale.filter((n) => !have[n]), at: this.now() }));
+      const done = [];
+      try {
+        for (const n of stale) {
+          renameSync(part(n), join(this.dir, n));
+          done.push(n);
+        }
+      } catch (err) {
+        for (const n of done) replaced.includes(n) ? renameSync(join(this.dir, `${n}.old`), join(this.dir, n)) : rmSync(join(this.dir, n), { force: true });
+        rmSync(join(this.dir, UPDATE_FILE), { force: true });
+        throw new Error(`couldn't swap in the new files: ${err.message}`);
+      }
+    } finally {
+      for (const n of stale) rmSync(part(n), { force: true });
+    }
+  }
+}
+
+/**
+ * The update in UPDATE_FILE undone: each replaced file back from its .old, each added one gone, and that version marked
+ * so it isn't taken again. False when no update was under way.
+ */
+export function rollBack(dir, code) {
+  const u = readJsonFile(join(dir, UPDATE_FILE));
+  if (!u) return false;
+  for (const n of u.replaced ?? []) if (UPDATE_NAME.test(n) && existsSync(join(dir, `${n}.old`))) renameSync(join(dir, `${n}.old`), join(dir, n));
+  for (const n of u.added ?? []) if (UPDATE_NAME.test(n)) rmSync(join(dir, n), { force: true });
+  writeFileSync(join(dir, FAILED_FILE), JSON.stringify({ version: u.to, from: u.from, code }));
+  rmSync(join(dir, UPDATE_FILE), { force: true });
+  return true;
+}
+
+/**
+ * The process the SYSTEM task (or the systemd service) runs, with --supervise: it runs the agent as its child, from the
+ * file on disk each time, and starts it again when it ends with UPDATED. A child that ends any other way while an update
+ * is under way (it never connected) has that update rolled back and is started again on the old files; otherwise this
+ * ends as the child did, and the task's or service's own restart takes over. Kept small: it runs the code it started with.
+ */
+export async function supervise(args, { dir, log, start = (a) => spawn(process.execPath, a, { stdio: ['ignore', 'inherit', 'inherit', 'ipc'], windowsHide: true }) }) {
+  let stopping = false;
+  // systemd's stop reaches the child too, and Ctrl+C its whole group: this waits for the child's own wind-down.
+  for (const sig of ['SIGTERM', 'SIGINT'])
+    process.on(sig, () => {
+      stopping = true;
+      setTimeout(() => process.exit(0), 35_000).unref();
+    });
+  for (;;) {
+    const child = start([join(dir, 'runner-agent.mjs'), ...args, '--supervised']);
+    const code = await new Promise((resolve) => {
+      child.on('error', (err) => {
+        log(`Couldn't start the runner agent: ${err.message}`);
+        resolve(1);
+      });
+      child.on('exit', (c) => resolve(c ?? 1));
+    });
+    if (stopping) return code;
+    if (code === UPDATED) continue;
+    if (rollBack(dir, code)) {
+      log(`The new runner agent stopped before it connected (exit ${code}): back to the files it had, and that version is not taken again.`);
+      continue;
+    }
+    return code;
   }
 }
 
@@ -1065,6 +1306,25 @@ async function main() {
     const i = opts.indexOf(name);
     return i < 0 ? null : opts.splice(i, 2)[1];
   };
+  const flag = (name) => {
+    const i = opts.indexOf(name);
+    if (i >= 0) opts.splice(i, 1);
+    return i >= 0;
+  };
+  const dir = dirname(realpathSync(process.argv[1]));
+  // The task's or service's own process (#2310): it runs the agent and starts it again on its new files.
+  if (flag('--supervise')) {
+    const logAt = opts.indexOf('--log') >= 0 ? opts[opts.indexOf('--log') + 1] : null;
+    const say = (line) => {
+      console.log(line);
+      if (logAt)
+        try {
+          appendFileSync(logAt, `${new Date().toISOString()} ${line}\n`);
+        } catch {}
+    };
+    process.exit(await supervise(opts, { dir, log: say }));
+  }
+  const supervised = flag('--supervised');
   const tokenFile = option('--token-file');
   const logFile = option('--log');
   // Tests run a Windows agent on Linux; nothing else passes it.
@@ -1090,7 +1350,7 @@ async function main() {
       } catch {}
   };
   const auth = { Authorization: `Bearer ${token}` };
-  const jobs = new JobRunner({ dir: dirname(realpathSync(process.argv[1])), appUrl, token, log, os });
+  const jobs = new JobRunner({ dir, appUrl, token, log, os });
 
   async function answer(raw) {
     const reply = await jobs.handle(raw);
@@ -1121,6 +1381,21 @@ async function main() {
     },
   });
   setInterval(() => slots.tick().catch((err) => log(`Slot watch failed: ${err.message}`)), SLOT_TICK_MS);
+  const updater = new SelfUpdate({
+    jobs,
+    slots,
+    supervised,
+    log,
+    report: async (body) => {
+      try {
+        const res = await fetch(new URL('/api/machines/runner-update', appUrl), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) log(`Citadel didn't take the update's state: ${res.status}`);
+      } catch (err) {
+        log(`Couldn't send the update's state: ${err.message}`);
+      }
+    },
+  });
+  setInterval(() => updater.check().catch((err) => log(`Update check failed: ${err.message}`)), UPDATE_TICK_MS);
   const sampler = new Sampler({ os, dir: jobs.dir });
   // Runners awake (M6b): the plan's runners stay up.
   const wake = new RunnerWake({ os, dir: jobs.dir, log, windowsProcs: () => sampler.lastProcs });
@@ -1182,17 +1457,19 @@ async function main() {
     }
   };
   setInterval(() => wake.tick().catch((err) => log(`Couldn't wake the runners: ${err.message}`)), 10_000).unref();
-  // Stopped (systemd's stop, Ctrl+C): the runners it put to sleep wake first, as with no agent at all; at most 30 s.
-  for (const sig of ['SIGTERM', 'SIGINT'])
-    process.once(sig, () => {
-      log(`${sig}: waking the runners Citadel's plan had asleep, then stopping.`);
-      setTimeout(() => process.exit(0), 30_000).unref();
-      wake.plan = null;
-      wake
-        .next()
-        .catch((err) => log(`Couldn't wake the runners: ${err.message}`))
-        .finally(() => process.exit(0));
-    });
+  // Stopped (systemd's stop, Ctrl+C, or its supervisor gone): the runners it put to sleep wake first, as with no agent at all; at most 30 s.
+  const stop = (sig) => {
+    log(`${sig}: waking the runners Citadel's plan had asleep, then stopping.`);
+    setTimeout(() => process.exit(0), 30_000).unref();
+    wake.plan = null;
+    wake
+      .next()
+      .catch((err) => log(`Couldn't wake the runners: ${err.message}`))
+      .finally(() => process.exit(0));
+  };
+  for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => stop(sig));
+  // Its supervisor's pipe closes when that process is gone (the task ended, killed): this one goes too, or two would run.
+  if (supervised) process.once('disconnect', () => stop('its supervisor ended'));
   // Runners a restarted agent put to sleep before stay so only until Citadel's first plan or PLAN_HOLD_MS.
   setTimeout(() => wake.next().catch((err) => log(`Couldn't wake the runners: ${err.message}`)), PLAN_HOLD_MS).unref();
 
@@ -1208,6 +1485,8 @@ async function main() {
       url.searchParams.set('os', os);
       // It applies the balancer's plan (M6b): a Citadel that sees no plans=1 shows its row's Update CI agent line.
       url.searchParams.set('plans', '1');
+      // It updates itself (#2310), which only a supervised one can: a Citadel that sees no update=1 shows the row's update line.
+      if (supervised) url.searchParams.set('update', '1');
       const res = await fetch(url, { headers: { ...auth, Accept: 'text/event-stream' } });
       if (res.status === 401 || res.status === 403) {
         log(`Citadel refused this agent (${res.status}): ${(await res.json().catch(() => ({}))).error ?? ''} Make a new token on the Machines page and install again.`);
@@ -1218,6 +1497,9 @@ async function main() {
         if (msg.hello) {
           log(`Connected to ${new URL(appUrl).host} as "${msg.hello}": adds, lists and removes ${os === 'linux' ? 'Linux ' : ''}CI runners when Citadel asks.`);
           retry = 0;
+          updater.connected();
+        } else if (msg.files) {
+          updater.want(msg.files).catch((err) => log(`Update failed: ${err.message}`));
         } else if (msg.replaced) {
           // Another agent took over with this token: trying again at once would drop it, and it this one, forever.
           throw Object.assign(new Error(`another agent connected with this machine's token, from ${msg.by || 'another computer'}; run only one`), { replaced: true });

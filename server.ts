@@ -148,7 +148,7 @@ import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerCap, runnersBeside } from './src/runner-cap.ts';
-import { lendsCi, RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
+import { lendsCi, RunnerJobs, RunnerTokens, runnerLabel, runnerManifests } from './src/ci-runner.ts';
 import { RunnerSlots } from './src/runner-slots.ts';
 import { POOL } from './src/turn-line.ts';
 import { pressure } from './src/pressure.ts';
@@ -274,6 +274,33 @@ const MIME: Record<string, string> = {
 const COLOR_SCHEME_HINT = 'Sec-CH-Prefers-Color-Scheme';
 // The files as sent, headers and gzipped bodies made once (#1628): the front thread serves them, and serveStatic here.
 let STATICS: Statics | null = null;
+// The CI runner agent's installer and scripts (#328), which its install downloads and the agent updates itself to (#2310):
+// read from tools/ci-runner/ with the front end (loadAssets), so they are the live commit's. Nothing in them is secret.
+const RUNNER_FILES = new Set([
+  'install-runner-agent.ps1',
+  'add-runner.ps1',
+  'list-runners.ps1',
+  'remove-runner.ps1',
+  'start-runner.ps1',
+  'sample-load.ps1',
+  // The Linux agent in WSL (#510).
+  'install-runner-agent.sh',
+  'add-runner.sh',
+  'list-runners.sh',
+  'remove-runner.sh',
+  'keep-wsl-up.ps1',
+  'keep-runners.ps1',
+  // One-job runners in slot folders (runner pool P2, #2269).
+  'runner-slot.ps1',
+  'launch-slot.ps1',
+  'runner-slot.sh',
+  'launch-slot.sh',
+]);
+// The CI runner agent's scripts as served (#2310), read with the front end so they change with it: each runner agent is
+// sent their hashes (with runner-agent.mjs's) and updates itself to them, so what it fetches must be what was hashed.
+let RUNNER_BODIES = new Map<string, Buffer>();
+let RUNNER_MANIFESTS: ReturnType<typeof runnerManifests> = { windows: null, linux: null };
+let runnerFilesChanged: (() => void) | null = null;
 // Set once the front thread owns the port (below); declared here because loadAssets posts to it.
 let throughFront: ReturnType<typeof listenThroughFront> | null = null;
 async function loadAssets() {
@@ -297,12 +324,17 @@ async function loadAssets() {
   assets.set('index.html', Buffer.from(assets.get('index.html')!.toString('utf8').replace('%ASSET_VERSION%', version)));
   const hashes = new Map([...assets].map(([name, body]) => [name, createHash('sha256').update(body).digest('hex').slice(0, 16)]));
   const statics = await staticTable(assets, version, hashes, dark);
+  const runnerBodies = new Map<string, Buffer>();
+  for (const name of RUNNER_FILES) runnerBodies.set(name, await readFile(join(import.meta.dirname, 'tools', 'ci-runner', name)));
   // Swapped together after the last await: SIGHUP's caller sets liveCommit in the same tick, so /api/health never pairs the new version with the old commit (#1628).
   ASSETS = assets;
   ASSET_VERSION = version;
   ASSET_HASHES = hashes;
   STATICS = statics;
+  RUNNER_BODIES = runnerBodies;
+  RUNNER_MANIFESTS = runnerManifests((name) => (name === 'runner-agent.mjs' ? assets.get(name) : runnerBodies.get(name)));
   throughFront?.statics(STATICS);
+  runnerFilesChanged?.();
 }
 // The commit this server's code came from, so a deploy can tell whether the change it ships is
 // front end only. null outside a git checkout.
@@ -817,6 +849,8 @@ if (!BOOT_CHECK) {
   every('runner pool flag', 30_000, sendPool);
 }
 machines.agentUrl = MACHINES_URL?.origin ?? null;
+machines.runnerFiles = (os) => RUNNER_MANIFESTS[os];
+runnerFilesChanged = () => machines.pushRunnerFiles();
 // Where citadel-heavy sends a job whose files come back, or in a scheme with no CI (H2, src/heavy-builds.ts): a machine's Builds role, else perigee's line.
 const buildsRole = (id: number) => store.machineRoles(id).find((r) => r.role === 'builds');
 const buildPlacer = new BuildPlacer({
@@ -2820,28 +2854,6 @@ function darkManifest(assets: Map<string, Buffer>) {
   const manifest = JSON.parse(assets.get('manifest.webmanifest')!.toString());
   return Buffer.from(JSON.stringify({ ...manifest, ...manifest.color_scheme_dark }, null, 2));
 }
-// The CI runner agent's installer and scripts (#328), which Cara's one-time install downloads: read from tools/ci-runner/
-// at each request, so they are always the deployed checkout's. Nothing in them is secret.
-const RUNNER_FILES = new Set([
-  'install-runner-agent.ps1',
-  'add-runner.ps1',
-  'list-runners.ps1',
-  'remove-runner.ps1',
-  'start-runner.ps1',
-  'sample-load.ps1',
-  // The Linux agent in WSL (#510).
-  'install-runner-agent.sh',
-  'add-runner.sh',
-  'list-runners.sh',
-  'remove-runner.sh',
-  'keep-wsl-up.ps1',
-  'keep-runners.ps1',
-  // One-job runners in slot folders (runner pool P2, #2269).
-  'runner-slot.ps1',
-  'launch-slot.ps1',
-  'runner-slot.sh',
-  'launch-slot.sh',
-]);
 // The same for the Android emulator's distro on that desktop (#533): deploy/desktop/android/setup.sh and what it downloads.
 const ANDROID_FILES: Record<string, string> = { 'setup.sh': 'deploy/desktop/android/setup.sh', 'citadel-android': 'tools/citadel-android', 'install-sdk.sh': 'tools/android/install-sdk.sh' };
 // And a minion worker's on a person's own PC (Build 7 T5): its installers, and the build files of its image.
@@ -2857,7 +2869,7 @@ async function serveRunnerFile(res: ServerResponse, path: string) {
         ? await imageFile(name)
         : Object.hasOwn(ANDROID_FILES, name) && ANDROID_FILES[name];
   if (!file) throw new HttpError(404, 'Not found');
-  const body = await readFile(join(import.meta.dirname, file));
+  const body = (path.startsWith('/ci-runner/') && RUNNER_BODIES.get(name)) || (await readFile(join(import.meta.dirname, file)));
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': body.length });
   res.end(body);
 }

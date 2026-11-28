@@ -4,6 +4,7 @@
 // needs a runner registration token, which only a repo admin can mint, so Citadel mints it with the scheme
 // owner's linked GitHub login and hands back just the token: it lasts about an hour and is never stored.
 // The caller is a machine's agent key (the Machines page), the same credential that PC already uses.
+import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { lendsRole, ownerAsked } from './access.ts';
 import type { Machine, Project, Store } from './db.ts';
@@ -337,6 +338,56 @@ export type RunnerOp = 'add' | 'list' | 'remove';
 export type RunnerOs = 'windows' | 'linux';
 /** GitHub runs one job per runner, and Josh picked four of them for Peek Auras' builds. */
 export const MAX_RUNNERS = 4;
+
+// ---- The runner agent updates itself (#2310; Cara, 2026-11-28: "Can we make it able to update itself?") ----
+// Citadel sends each runner agent the SHA-256 of every file its install put in its folder, as this server serves them;
+// the agent fetches the ones that differ over the address it already dials, checks each hash, and swaps them between
+// jobs (public/runner-agent.mjs SelfUpdate).
+
+/** What each OS's agent keeps in its folder: install-runner-agent.ps1's and .sh's download lists, which test/runner-self-update.test.ts pins. */
+export const AGENT_FILES: Record<RunnerOs, readonly string[]> = {
+  windows: ['runner-agent.mjs', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'sample-load.ps1', 'keep-runners.ps1', 'runner-slot.ps1', 'launch-slot.ps1', 'start-runner.ps1'],
+  linux: ['runner-agent.mjs', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh', 'runner-slot.sh', 'launch-slot.sh'],
+};
+
+/** One OS's files by name, each its SHA-256, and their version: what the Machines row shows (public/runner-agent.mjs filesVersion makes the same). */
+export type RunnerManifest = { version: string; files: Record<string, string> };
+
+export const filesVersion = (files: Record<string, string>) =>
+  createHash('sha256')
+    .update(
+      Object.keys(files)
+        .sort()
+        .map((n) => `${n} ${files[n]}\n`)
+        .join(''),
+    )
+    .digest('hex')
+    .slice(0, 12);
+
+/** Each OS's manifest from the bodies as served; null for an OS with a file missing, which no agent should chase. */
+export function runnerManifests(body: (name: string) => Buffer | undefined): Record<RunnerOs, RunnerManifest | null> {
+  const one = (os: RunnerOs): RunnerManifest | null => {
+    const files: Record<string, string> = {};
+    for (const name of AGENT_FILES[os]) {
+      const b = body(name);
+      if (!b) return null;
+      files[name] = createHash('sha256').update(b).digest('hex');
+    }
+    return { version: filesVersion(files), files };
+  };
+  return { windows: one('windows'), linux: one('linux') };
+}
+
+/** Where an agent's update stands, as it reports it (POST /api/machines/runner-update), checked. */
+export type RunnerUpdate = { version: string; state: 'current' | 'waiting' | 'updating' | 'failed'; why: string; at: number };
+const UPDATE_STATES = new Set(['current', 'waiting', 'updating', 'failed']);
+
+export function runnerUpdate(body: { version?: unknown; state?: unknown; why?: unknown }, now = Date.now()): RunnerUpdate {
+  if (typeof body.version !== 'string' || !/^[0-9a-f]{12}$/.test(body.version)) throw new HttpError(400, 'version must be 12 hex digits');
+  if (typeof body.state !== 'string' || !UPDATE_STATES.has(body.state)) throw new HttpError(400, 'state must be current, waiting, updating or failed');
+  const why = typeof body.why === 'string' ? body.why.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 300) : '';
+  return { version: body.version, state: body.state as RunnerUpdate['state'], why, at: now };
+}
 /** What a runner is for (#1934): which of its scheme's jobs it takes, by its labels (tools/ci-runner/README.md, "Runner roles"). */
 const ROLES = ['land', 'side', 'long', 'check'] as const;
 export type RunnerRole = (typeof ROLES)[number];

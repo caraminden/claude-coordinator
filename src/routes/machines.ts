@@ -9,7 +9,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsRole, lendsToEveryone, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { readLongJobsA } from '../long-jobs.ts';
-import { runnerAsk } from '../ci-runner.ts';
+import { runnerAsk, runnerUpdate } from '../ci-runner.ts';
 import { heldRows } from '../ci-hold.ts';
 import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
@@ -357,7 +357,15 @@ export const agentRoutes: Route[] = [
     const info = (k: string) => (url.searchParams.get(k) ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
     // Whether a CI runner agent applies the balancer's plan (Build 7 M6b): one from before shows its row's update line.
     if (url.searchParams.get('kind') === 'runners') app.machines.runnerPlans.set(`${machine.id}:${url.searchParams.get('os') === 'linux' ? 'linux' : 'windows'}`, url.searchParams.get('plans') === '1');
-    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners', managed: url.searchParams.get('v') === '2', os: url.searchParams.get('os') === 'linux' ? 'linux' : 'windows' });
+    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners', managed: url.searchParams.get('v') === '2', os: url.searchParams.get('os') === 'linux' ? 'linux' : 'windows', selfUpdate: url.searchParams.get('update') === '1' });
+  }),
+  // A CI runner agent's update (#2310): the files version it runs and whether it is updating, waiting on a job, or failed and why.
+  agent('POST', '/api/machines/runner-update', async ({ req, res, app }, machine) => {
+    const body = await readJson(req, 10_000);
+    const os = body.os === 'linux' ? 'linux' : body.os === 'windows' ? 'windows' : null;
+    if (!os) throw new HttpError(400, 'os must be windows or linux');
+    if (!app.machines.runnerUpdated(machine.id, os, runnerUpdate(body))) throw new HttpError(409, 'Connect first');
+    return json(res, 202, {});
   }),
   agent('POST', '/api/machines/send', async ({ req, res, app }, machine) => {
     // Room for screenshots, which MCP servers send as base64 images.

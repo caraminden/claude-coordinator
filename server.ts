@@ -102,7 +102,7 @@ import { serverWorkWatch } from './src/server-work.ts';
 import { every, stopAll, type Job } from './src/every.ts';
 import { HeavyPlacer } from './src/heavy-place.ts';
 import { type PoolPc, RunnerPool } from './src/runner-pool.ts';
-import { POOL as RUNNER_POOL, poolOn } from './src/runner-pool.ts';
+import { poolOn } from './src/runner-pool.ts';
 import { BUSY, OwnerBusy, offWords } from './src/owner-busy.ts';
 import { BuildPlacer, buildRoom, buildsReady } from './src/heavy-builds.ts';
 import { heavyNow } from './src/heavy-now.ts';
@@ -2339,7 +2339,7 @@ const runnerPool = new RunnerPool({
       const lends = projects.filter((p) => lendsCi(store, m, p)).map((p) => p.id);
       const next = runnerPool.view().line.find((j) => !j.starting && lends.includes(j.scheme));
       // shortcut: a job new since the last pass is checked against a plain CI job's need for that one pass; a per-job memory fit in place() is the upgrade.
-      const look = ownerBusy.look(m.id, (next?.size ?? RUNNER_POOL.sizes.ci) * BUSY.memPerThreadGb);
+      const look = ownerBusy.look(m.id, (next?.size ?? COST.ci) * BUSY.memPerThreadGb);
       // Pause and stepping back hold only the pool's starts: a scheme still on standing runners takes jobs here regardless.
       const standing = lends.filter((id) => !poolOn(store, id));
       const use = standing.length < lends.length ? look : null;
@@ -2352,9 +2352,11 @@ const runnerPool = new RunnerPool({
           os: os.length ? os : ['windows', 'linux'],
           // shortcut: a session is taken as there while the PC's own agent (which runs as the person) is connected; P2 proves the session start.
           session: os.includes('windows') && machines.isOnline(m.id),
-          schemes: lends,
+          schemes: projects.filter((p) => lendsCi(store, m, p)).map((p) => p.id),
           limit: Math.max(0, Math.min(ci.caps.threads ?? threads, threads - runner.turnLine.used(m.id) * COST.turn)),
-          off: !os.length ? 'is offline' : use ? offWords(use) : null,
+          off: os.length ? null : 'is offline',
+          // Paused or stepping back (P4): the pool's reason for starting nothing here.
+          ...(os.length && use ? { off: offWords(use) } : {}),
           hosts: os.map((o) => machines.runnerHost(m.id, o) ?? ''),
           use,
           standing,

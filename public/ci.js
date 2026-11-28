@@ -31,7 +31,7 @@ import { DOT as STATUS_DOT, RANK as STATUS_RANK, statusPane, WORD as STATUS_WORD
 
 /**
  * What the Overview's blocks need of the open page: its Host load read, and the opened queue groups and runners row.
- * @typedef {{ host: HostLoad | null; queueOpen: Set<string>; toggleQueue: (id: string) => void; hostedOpen: boolean; toggleHosted: () => void; openPc: (host: string) => void; pool: CiPool | null }} CiUi
+ * @typedef {{ host: HostLoad | null; queueOpen: Set<string>; toggleQueue: (id: string) => void; hostedOpen: boolean; toggleHosted: () => void; openPc: (host: string) => void; pool: CiPool | null; redraw: () => void }} CiUi
  */
 
 /** @typedef {number | 'all'} Scope */
@@ -432,33 +432,98 @@ function waitingBlock(s, now, ui) {
   return block(null, n ? 'waiting' : 'done', 'ci-waiting', row);
 }
 
-// ---------- the runner pool's line (Build 11 P1, specs/one-runner-pool.md section 7: watching only) ----------
+// ---------- the runner pool (Build 11, specs/one-runner-pool.md section 7; P3: the per-scheme switch) ----------
 
 /** @param {CiPoolJob} j */
 const poolItem = (j) =>
   hueRow(
-    { hue: j.machine ? 'running' : 'waiting', lead: `${j.place}`, meta: ago(j.since) },
+    { hue: j.starting ? 'running' : j.machine ? 'accent' : 'waiting', lead: j.starting ? 'now' : `${j.place}`, meta: ago(j.since) },
     h('span', { title: `${j.name}: ${j.size} threads, on ${j.labels.filter((l) => l !== 'self-hosted').join(', ')}${j.ship ? ', a ship' : ''}` }, ext(`https://github.com/${j.repo}/actions/runs/${j.run}`, j.name)),
     j.ship ? h('span', { class: 'muted' }, ' · ship') : '',
     ' · ',
-    j.machine ? `would start on ${j.machine}` : h('span', { class: 'muted' }, j.why ?? 'waiting'),
+    j.starting ? `its runner is starting on ${j.machine}` : j.machine ? (j.pool ? `starts on ${j.machine}` : `would start on ${j.machine}; a standing runner takes it`) : h('span', { class: 'muted' }, j.why ?? 'waiting'),
   );
 
+/** id → the switch a click asked for, shown until the save settles (a failed one rolls back with a toast and Retry). */
+/** @type {Map<number, boolean>} */
+const poolAsked = new Map();
+
 /**
- * The scheme's jobs in the pool's one line across every scheme, each with its place and where it would start or why it waits.
+ * @param {CiScheme} s
+ * @param {CiPool} pool
+ * @param {() => void} redraw
+ */
+const poolSwitch = (s, pool, redraw) => {
+  const on = poolAsked.get(s.id) ?? pool.pooled.includes(s.id);
+  return h(
+    'label',
+    { class: 'ci-pool-switch' },
+    h('button', {
+      type: 'button',
+      class: 'rules-switch',
+      role: 'switch',
+      'aria-checked': String(on),
+      'aria-label': `Run ${s.name}'s CI jobs on the runner pool`,
+      onclick: () =>
+        optimistic({
+          label: `put ${s.name} on ${on ? 'its standing runners' : 'the runner pool'}`,
+          key: `ci-pool:${s.id}`,
+          sets: `ci-pool:${s.id}`,
+          apply: () => {
+            poolAsked.set(s.id, !on);
+            redraw();
+          },
+          send: () => api(`api/projects/${s.id}/ci-pool`, { method: 'PATCH', body: { on: !on } }),
+          undo: () => {
+            poolAsked.delete(s.id);
+            redraw();
+          },
+        }).then(
+          () => {
+            pool.pooled = !on ? [...pool.pooled, s.id] : pool.pooled.filter((x) => x !== s.id);
+            poolAsked.delete(s.id);
+            redraw();
+          },
+          () => {},
+        ),
+    }),
+    h('span', {}, 'Run its jobs on the runner pool'),
+  );
+};
+
+/**
+ * The scheme's switch between the pool and its standing runners, and its jobs in the pool's one line across every scheme,
+ * each with its place and where it starts or why it waits.
  * @param {CiScheme} s
  * @param {CiPool | null} pool
+ * @param {() => void} redraw
  */
-function poolBlock(s, pool) {
-  const mine = (pool?.line ?? []).filter((j) => j.scheme === s.id);
-  if (!pool || !mine.length) return '';
-  const would = mine.filter((j) => j.machine).length;
+function poolBlock(s, pool, redraw) {
+  if (!pool) return '';
+  const mine = pool.line.filter((j) => j.scheme === s.id);
+  const on = poolAsked.get(s.id) ?? pool.pooled.includes(s.id);
+  const waiting = mine.filter((j) => !j.starting && !j.machine).length;
+  const hue = waiting ? 'waiting' : on ? 'done' : 'muted';
+  const prose = pool.watching
+    ? 'Watching only here: the pool shows where it would start each job and why the rest wait, and starts none.'
+    : on
+      ? "The pool starts a one-job runner for each of this scheme's jobs on a machine with room, and the runner is gone once its job ends. Its standing runners are off."
+      : "This scheme's standing runners take its jobs. On the pool, Citadel starts a one-job runner for each job on a machine with room instead, and takes the standing runners off.";
   const [row] = settingsRow(
-    { key: `ci-pool-${s.id}`, icon: 'rows', hue: 'waiting', title: "The runner pool's line", summary: [toneChip('warn', `${mine.length} in line`), `${would} would start · ${pool.total} in all`] },
-    h('p', { class: 'look-prose' }, "Watching only: the pool shows where it would start each job and why the rest wait. This scheme's runners still take them."),
-    showFirst({ key: `ci-pool-${s.id}`, items: mine.map(poolItem), n: 6, noun: 'jobs', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows) }),
+    {
+      key: `ci-pool-${s.id}`,
+      icon: 'rows',
+      hue,
+      title: 'The runner pool',
+      summary: [on ? toneChip('ok', 'On the pool') : toneChip('neutral', 'Standing runners'), mine.length ? `${mine.length} in line · ${pool.total} in all` : `nothing in line · ${pool.total} in all`],
+    },
+    poolSwitch(s, pool, redraw),
+    h('p', { class: 'look-prose' }, prose),
+    mine.length
+      ? showFirst({ key: `ci-pool-${s.id}`, items: mine.map(poolItem), n: 6, noun: 'jobs', wrap: (rows) => h('div', { class: 'hue-rows' }, ...rows) })
+      : emptyCard('Nothing of this scheme in line', pool.total ? `${pool.total} jobs of other schemes are in line.` : 'Jobs show here while they wait for a machine.'),
   );
-  return block(null, 'waiting', 'ci-pool', row);
+  return block(null, hue, 'ci-pool', row);
 }
 
 // ---------- ship CI on GitHub's runners (#2231; Cara, 2026-11-27, picked "Its own block, with a shard strip" and "Ships on top") ----------
@@ -696,7 +761,7 @@ function historyTab(s) {
  * @param {CiUi} ui
  */
 function overview(s, pcs, now, ui) {
-  return [problemsBlock(s), verdictsBlock(s.view), shipBlock(s, now), runningBlock(s, now, ui), fallbacksBlock(s), waitingBlock(s, now, ui), poolBlock(s, ui.pool), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
+  return [problemsBlock(s), verdictsBlock(s.view), shipBlock(s, now), runningBlock(s, now, ui), fallbacksBlock(s), waitingBlock(s, now, ui), poolBlock(s, ui.pool, ui.redraw), runsOn(s, pcs, ui), pcs.length ? '' : hostLoadBlock(ui.host)];
 }
 
 // ---------- the Releases page (#1423) ----------
@@ -1044,6 +1109,7 @@ export function releasesShell() {
         ? overview(s, ciRead.pcs, Date.now(), {
             host: hostRead,
             pool: ciRead.pool ?? null,
+            redraw: draw,
             queueOpen,
             toggleQueue: (id) => {
               queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id);

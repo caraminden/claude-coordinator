@@ -110,12 +110,12 @@ export function machinesPage(main = {}) {
 let live = null;
 let liveTimer = 0;
 
-/** Read the live numbers now and every 30 s while the page is open: the CI PCs' load (api/ci-desktop) and the worker pools (api/workers). */
+/** Read the live numbers now and every 30 s while the page is open: the CI PCs' load (api/ci-desktop), the worker pools (api/workers) and the runner pool's machines (api/ci/pool). */
 function watchLive() {
   clearInterval(liveTimer);
   const read = () =>
-    Promise.all([api('api/ci-desktop').catch(() => null), api('api/workers').catch(() => null)]).then(([d, w]) => {
-      live = { pcs: d?.pcs ?? [], pool: w?.machines ?? [] };
+    Promise.all([api('api/ci-desktop').catch(() => null), api('api/workers').catch(() => null), api('api/ci/pool').catch(() => null)]).then(([d, w, c]) => {
+      live = { pcs: d?.pcs ?? [], pool: w?.machines ?? [], ci: c?.machines ?? [] };
       renderMachineList();
     });
   // The page isn't in the document yet on this first read; a later tick finding it gone means it was left.

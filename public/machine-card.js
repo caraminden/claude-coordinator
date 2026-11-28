@@ -3,7 +3,7 @@
 // schemes" tile (every shared role) each with a big switch, "Choose what it shares" one level down, and a bar of how its
 // threads split now from live numbers only. Every switch shows at once with its request behind (ui/optimistic.js).
 import { account, h, view } from './base.js';
-import { toneChip } from './look.js';
+import { hueRow, meter, schemeTag, toneChip } from './look.js';
 import { cannot, capsLine, changeRole, managesRoles, orderLine, roleOf, schemeChips, sizeOfferPart, standing } from './machine-role-cards.js';
 import { heldCaps, signInPart, workerSection, workerState } from './machine-worker-row.js';
 import { setupPart } from './role-setup-card.js';
@@ -12,7 +12,8 @@ import { lastRun } from './role-setup.js';
 /** @import { MachineRole, MachineRoleKey, MachineRow, WorkerMachine } from './types.js' */
 /** @typedef {() => void} Redraw */
 /** @typedef {{ cores: number, cpu: number, runners: number, wsl: number | null, vms: Record<string, number> }} PcNow one PC's load now (src/ci-load.ts PcView.now) */
-/** @typedef {{ pcs: { host: string, now: PcNow | null }[], pool: WorkerMachine[] }} Live what api/ci-desktop and api/workers last said */
+/** @typedef {import('./types/ci.js').CiPoolMachine} CiPoolMachine */
+/** @typedef {{ pcs: { host: string, now: PcNow | null }[], pool: WorkerMachine[], ci?: CiPoolMachine[] }} Live what api/ci-desktop, api/workers and api/ci/pool last said */
 
 /** The roles a PC lends to its owner's schemes, in the page's order (spec section 3). @type {MachineRoleKey[]} */
 export const SHARED_ROLES = ['ci', 'builds', 'screen', 'gpu', 'tools'];
@@ -314,6 +315,36 @@ function splitBar(m, pc) {
   return h('div', { class: 'mcard-split-wrap' }, bar, h('div', { class: 'muted small' }, `${total} threads. Citadel shares them out as the work comes${caps.length ? `; your caps: ${caps.join(', ')}` : ''}.`));
 }
 
+/** A span in minutes or hours, from `since` (ms) to now. @param {number} since */
+const forSpan = (since) => {
+  const min = Math.max(0, Math.round((Date.now() - since) / 60_000));
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
+};
+
+/**
+ * The CI jobs running on a machine lending CI, and its room in threads, from the runner pool (Build 11 P3, spec section 7):
+ * a standing runner's job counts as used room too. Another scheme's job shows by its size only.
+ * @param {CiPoolMachine | null} c
+ */
+function ciPart(c) {
+  if (!c) return null;
+  const names = new Map((view?.projects ?? []).map((p) => [p.id, p.name]));
+  const room = `${c.used} of ${c.limit} threads used · ${c.free} free`;
+  return h(
+    'div',
+    { class: 'mcard-ci' },
+    h('div', { class: 'mcard-ci-head' }, h('b', {}, 'CI jobs here'), c.off ? toneChip('neutral', c.off) : toneChip(c.running.length ? 'info' : 'ok', c.running.length ? `${c.running.length} running` : 'Idle'), meter(c.limit ? c.used / c.limit : 0, room)),
+    ...c.running.map((r) => {
+      const scheme = names.get(r.scheme);
+      return hueRow(
+        { hue: r.starting ? 'waiting' : 'running', lead: r.starting ? 'starting' : forSpan(r.since), meta: `${r.size} threads` },
+        ...(scheme ? [schemeTag(scheme), ' ', r.name] : [h('span', { class: 'muted' }, "another scheme's job")]),
+        h('span', { class: 'muted' }, r.pool ? ' · one-job runner' : ' · standing runner'),
+      );
+    }),
+  );
+}
+
 /**
  * One computer's card.
  * @param {MachineRow} m
@@ -345,6 +376,7 @@ export function machineCard(m, { live, redraw, tools, head = null, details }) {
     o.choose ? chooseRows(m, redraw, tools) : null,
     !o.choose && !gone && roles.some((r) => r.on) && offs.length ? h('div', { class: 'muted small' }, `${offs.map((r) => r.name).join(', ')} ${offs.length === 1 ? 'is' : 'are'} off. `, h('button', { type: 'button', class: 'link small', onclick: () => ((o.choose = true), redraw()) }, 'Change')) : null,
     splitBar(m, pc),
+    ciPart(live?.ci?.find((x) => x.id === m.id) ?? null),
     details ? more : null,
   );
 }

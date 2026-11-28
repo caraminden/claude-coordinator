@@ -249,3 +249,7 @@
   .flow-river svg, .flow-river .thread { animation: none; }
   .flow-river .ribbon, .flow-river .thread, .flow-node .bar, .flow-node text { transition: none; }
 }
+.ci-pool-switch { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; cursor: pointer; }
+/* Keep the switch's shape on a phone (style.css gives every button the control height); the whole label is its target. */
+.ci-pool-switch .rules-switch { min-height: 1.3rem; }
+@media (max-width: 800px) { .ci-pool-switch { min-height: var(--control-h); } }

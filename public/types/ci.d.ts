@@ -444,6 +444,32 @@ export interface CiPoolJob {
   step: number;
   machine: string | null;
   why: string | null;
+  /** Its scheme is on the pool, which starts it; false: its standing runners take it. */
+  pool: boolean;
+  /** Its runner is starting (place 0). */
+  starting: boolean;
+}
+
+/** A job running on a machine (src/runner-pool.ts PoolRunning); another scheme's has no repo, scheme 0. */
+export interface CiPoolRunning {
+  repo: string;
+  scheme: number;
+  name: string;
+  size: number;
+  since: number;
+  pool: boolean;
+  starting: boolean;
+}
+
+/** A machine lending CI: its room in threads and what runs there (src/runner-pool.ts PoolMachineView). */
+export interface CiPoolMachine {
+  id: number;
+  name: string;
+  limit: number;
+  used: number;
+  free: number;
+  off: string | null;
+  running: CiPoolRunning[];
 }
 
 export interface CiPool {
@@ -452,5 +478,9 @@ export interface CiPool {
   line: CiPoolJob[];
   /** Every job in the line, seen or not. */
   total: number;
-  watching: true;
+  machines: CiPoolMachine[];
+  /** Nothing can be started: the line only says what would be. */
+  watching: boolean;
+  /** The schemes the viewer sees that are on the pool. */
+  pooled: number[];
 }

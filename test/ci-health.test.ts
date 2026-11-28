@@ -1,6 +1,9 @@
 // CI health (src/ci-health.ts, #368): the four rules on GitHub answers shaped like Peek Auras' real ones, and the
 // poller putting and clearing admins' Mandate alerts.
 import { withoutHeld } from '../src/ci-hold.ts';
+import { ONE_JOB_RUNNER } from '../src/ci-runner.ts';
+import { perigeeRunner } from '../src/runner-fallback.ts';
+import { poolName } from '../src/runner-slots.ts';
 import type { Slept } from '../src/ci-load.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -2633,10 +2636,29 @@ test('the chat search for a red reads events by id, not minion by minion, and in
 test("a scheme's standing runners as GitHub last listed them, the runner pool's one-job runners left out (Build 11 P3: the pool starts nothing while any is there)", async () => {
   const w = world();
   assert.deepEqual(w.health.standingRegistered(w.peek.id), [], 'unread: none known');
-  w.gh.runners = [desk('offline'), desk('online', 'pool-m1-l1-j42')];
+  // perigee's fallback runner (src/runner-fallback.ts) is one-job too: counted as standing, it held the pool's whole repo.
+  w.gh.runners = [desk('offline'), desk('online', 'pool-m1-l1-j42'), desk('online', 'perigee-7')];
   await w.health.tick(NOW);
   assert.deepEqual(w.health.standingRegistered(w.peek.id), ['DESKTOP-G248IJ8-desktop']);
   w.gh.runners = [];
   await w.health.tick(NOW + 60_000);
   assert.deepEqual(w.health.standingRegistered(w.peek.id), []);
+});
+
+test("ONE_JOB_RUNNER matches the names the pool and perigee's fallback really give their runners (a rename on either side turns this red)", async () => {
+  let named = '';
+  const perigee = perigeeRunner({
+    pressure: () => 0,
+    jit: async (_repo, name) => ((named = name), { id: 1, config: '' }),
+    run: () => ({ done: Promise.resolve(), stop() {} }),
+    runner: async () => null,
+    remove: async () => {},
+    wait: async () => {},
+    log() {},
+  });
+  const job = { repo: 'caraminden/peek-auras', id: 77, run: 1, name: 'build', scheme: 5, ship: true, first: false, since: NOW, needs: { os: 'linux' as const, session: false, size: 4 } };
+  await (await perigee.start(job, ['self-hosted'])).done;
+  assert.equal(named, 'perigee-77');
+  for (const n of [named, poolName(3, 'linux', 2, 77), poolName(3, 'windows', 1)]) assert.match(n, ONE_JOB_RUNNER);
+  for (const n of ['DESKTOP-G248IJ8-desktop', 'DESKTOP-G248IJ8-linux-2', 'peek-auras-ci']) assert.doesNotMatch(n, ONE_JOB_RUNNER);
 });

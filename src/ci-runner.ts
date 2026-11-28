@@ -66,6 +66,13 @@ export function schemeLabels(schemeName: string): string[] {
 export const poolKey = (scheme: number) => `ci_pool:${scheme}`;
 export const poolOn = (store: { getSetting<T>(key: string): T | null }, scheme: number) => store.getSetting<boolean>(poolKey(scheme)) === true;
 
+/**
+ * Citadel's own one-job runners, by name: the runner pool's (src/runner-slots.ts poolName, `pool-m…`) and perigee's CI
+ * fallback (src/runner-fallback.ts perigeeRunner, `perigee-<job>`). They come and go per job, so they never count as a
+ * scheme's standing runners. A new kind of one-job runner adds its prefix here.
+ */
+export const ONE_JOB_RUNNER = /^(?:pool|perigee)-/i;
+
 /** The scheme a caller names: its id, its name (any case) or its label's slug. Throws a 409 when that names more than one. */
 export function findScheme(store: Store, ref: unknown): Project | undefined {
   if (typeof ref === 'number' || (typeof ref === 'string' && /^\d+$/.test(ref))) return store.getProject(Number(ref));

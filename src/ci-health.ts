@@ -52,7 +52,7 @@ import { breather } from './breathe.ts';
 import { briefNumbers } from './ci-brief.ts';
 import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
-import { runnerLabel, schemeLabels } from './ci-runner.ts';
+import { ONE_JOB_RUNNER, runnerLabel, schemeLabels } from './ci-runner.ts';
 import { deliveriesOf, type Outbox } from './outbox.ts';
 import type { Project, Store, Ticket, User } from './db.ts';
 import type { GreenRun } from './last-green.ts';
@@ -715,9 +715,9 @@ export class CiHealth {
   }
 
   /** Every scheme with CI that `canSee` allows, with its last view and its open problems (the land gate's in the live checkout's scheme), for GET /api/ci. */
-  /** The scheme's standing runners GitHub listed at the last read (the runner pool's one-job ones left out); [] when unread. */
+  /** The scheme's standing runners GitHub listed at the last read (Citadel's own one-job runners left out: ONE_JOB_RUNNER); [] when unread. */
   standingRegistered(projectId: number): string[] {
-    return (this.registered.get(projectId) ?? []).filter((n) => !/^pool-/i.test(n));
+    return (this.registered.get(projectId) ?? []).filter((n) => !ONE_JOB_RUNNER.test(n));
   }
 
   snapshot(canSee: (projectId: number) => boolean) {

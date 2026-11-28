@@ -3129,7 +3129,7 @@ export class Runner {
         name: `${ticket.id}-${Date.now()}`,
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir },
         codex: codex ? { thread: same || null } : null,
-        worker,
+        worker: worker && { ...worker, github: this.pools!.github(worker.id) },
         reach,
       });
     } catch (err) {

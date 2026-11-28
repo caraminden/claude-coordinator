@@ -31,7 +31,7 @@ import { budgetFor, turnLine } from './minion-budget.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFilesLater, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
 import { warmKey } from './turn-keys.ts';
-import type { TurnGithub } from './github-link.ts';
+import { onWorker, type TurnGithub } from './github-link.ts';
 import type { MinionJobs } from './minion-jobs.ts';
 import type { CoordinatorEnv } from './runner.ts';
 
@@ -127,8 +127,8 @@ export class TurnLaunches {
       codex: { thread: string | null } | null;
       github?: number | null;
       side?: boolean;
-      /** The machine it is placed on (startPlace). */
-      worker?: { id: number; name: string } | null;
+      /** The machine it is placed on (startPlace), and whether a GitHub login is signed in on its worker (null: not known). */
+      worker?: { id: number; name: string; github?: boolean | null } | null;
       /** The machine's name when this turn reaches its host (T8): run_on_host and the /host folders. */
       reach?: string | null;
     },
@@ -261,7 +261,10 @@ export class TurnLaunches {
       const coordinator = { ...this.d.coordinatorEnv(ticket), ...(hold?.warm ? { CITADEL_TOOL_HOLD: '1' } : {}) };
       const heavy = this.d.heavyEnv(ticket, person);
       // The person's own GitHub token (or none, so it can't push), and a line saying whose it is. Its empty gh folder made here, off the thread (#1808).
-      const github = this.d.githubFor(f.github === undefined ? person : f.github, dir, true) ?? null;
+      const githubPerson = f.github === undefined ? person : f.github;
+      const linked = this.d.githubFor(githubPerson, dir, true) ?? null;
+      // On a machine the person's token never goes (machineEnv): the line says what that worker has instead (#2318).
+      const github = linked && f.worker ? onWorker(linked, f.worker.name, f.worker.github ?? null, (githubPerson !== null && this.d.store.getUser(githubPerson)?.name) || 'Nobody') : linked;
       if (github?.env.GH_CONFIG_DIR) await mkdir(github.env.GH_CONFIG_DIR, { recursive: true, mode: 0o700 });
       const typer = f.typedBy ? this.d.store.getUser(f.typedBy) : undefined;
       const homeOf = this.d.store

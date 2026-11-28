@@ -354,8 +354,8 @@ export class TurnEvents {
       const kind = this.d.pushCalls.get(b.tool_use_id!)!;
       this.d.pushCalls.delete(b.tool_use_id!);
       const turn = this.d.store.getSetting<TurnState>(turnKey(ticketId));
-      // Absent: GitHub linking isn't set up, and the box's own login pushes as before.
-      if (turn?.github === undefined) continue;
+      // Absent: GitHub linking isn't set up, and the box's own login pushes as before. On a machine, that worker's own login pushes (#2318).
+      if (turn?.github === undefined || turn.machine) continue;
       const who = turn.person ? (this.d.store.getUser(turn.person)?.name ?? 'Its person') : 'Nobody';
       if (turn.github && !b.is_error) this.d.emit(ticketId, 'note', { text: kind === 'pr' ? `Opened a pull request as @${turn.github} (${who}'s GitHub)` : `Pushed as @${turn.github} (${who}'s GitHub)` });
       else if (!turn.github && b.is_error) this.d.emit(ticketId, 'note', { text: `Couldn't ${kind === 'pr' ? 'open a pull request' : 'push'}: this turn runs for ${who}, who hasn't linked GitHub. Link it in Settings → Your account.` });

@@ -182,6 +182,11 @@ export class WorkerJoin {
     return f ? f.folders.filter((x) => x.write).map((x) => x.path) : null;
   }
 
+  /** Whether a GitHub login is signed in in its worker's home (gh there, #2318), while it is here; null while away or not said. */
+  github(machineId: number): boolean | null {
+    return this.here(machineId) ? (this.facts.get(machineId)?.github ?? null) : null;
+  }
+
   host(machineId: number): string {
     return this.here(machineId) ? (this.facts.get(machineId)?.host ?? '') : '';
   }

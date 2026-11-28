@@ -368,6 +368,21 @@ export class GithubLink {
 }
 
 /**
+ * What a turn placed on a connected machine is told of GitHub (#2318). Its env goes without the person's token (machineEnv,
+ * by design): gh and git push there use whatever login is signed in in that worker's home, which only the worker reports.
+ * `login` is null: Citadel's link isn't what pushes there, so the chat's push notes don't name it.
+ */
+export function onWorker(github: TurnGithub, machine: string, signedIn: boolean | null, who: string): TurnGithub {
+  if (signedIn) return { ...github, login: null, line: `GitHub: this turn runs for ${who} on ${machine}, so gh and git push use the GitHub login signed in there, not the one linked in Citadel.` };
+  const there = signedIn === false ? `no GitHub login is signed in on ${machine}` : `Citadel can't tell whether a GitHub login is signed in on ${machine}`;
+  return {
+    ...github,
+    login: null,
+    line: `GitHub: this turn runs for ${who} on ${machine}, and ${there}, so it can't push, open pull requests, dispatch workflows or read CI logs unless \`gh auth status\` shows a login. Commit on your branch: hand_off_land still ships it, as the server pushes. If this turn needs GitHub itself (a flake proof, a pull request, a CI log), say so in your reply: ${who} can sign in to GitHub on ${machine} (its Sign-ins there, on the Machines page) or set this minion to run on perigee. Never push from another account or login to get round it.`,
+  };
+}
+
+/**
  * gh and git env for work the server does for a non-admin `person` (#195: making or cloning their
  * scheme's repo): their own token when linked, otherwise no login at all, never the box's.
  */

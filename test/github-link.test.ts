@@ -10,6 +10,7 @@ import { GithubLink, personGithub, appSlug } from '../src/github-link.ts';
 import { asEnv } from '../src/scheme-repo.ts';
 import { newToken } from '../src/machines.ts';
 import { hideTokens } from '../src/hide-tokens.ts';
+import type { MachinePools } from '../src/machine-pools.ts';
 import { pushKind, Runner, slimEvent } from '../src/runner.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -432,6 +433,51 @@ test('a turn runs for its sender: their token, a line in its prompt, a note on e
   assert.deepEqual(env(t.dir), { token: null, author: 'Cara' });
   assert.match(notes(t.id).at(-1)!, /runs for Cara, who hasn't linked GitHub/);
   await finish(r, t);
+});
+
+test("a turn the line puts on a machine is told what that worker's GitHub sign-in is, never that it pushes as the person's link (#2318)", async () => {
+  const t = newTicket();
+  const r = runner();
+  // The line has it on machine 7 (w1), whose worker says whether gh is signed in there. The person's token never goes there (machineEnv).
+  let signedIn: boolean | null = false;
+  (r.turnLine as { placeOf: (id: number) => number }).placeOf = () => 7;
+  const pools: Partial<MachinePools> = { accountsAt: () => [1], nameOf: () => 'w1', github: (id) => (id === 7 ? signedIn : null) };
+  r.pools = pools as MachinePools;
+  const githubLine = async () => {
+    const dir = await until('the turn placed on w1', () => (r.isRunning(t.id) && store.getSetting<{ dir?: string }>(`turn:${t.id}`)?.dir) || null);
+    const prompt = await until('its prompt', () => existsSync(join(dir, 'prompt.jsonl')) && readFileSync(join(dir, 'prompt.jsonl'), 'utf8'));
+    return { dir, line: /GitHub: [^\\]*/.exec(prompt)?.[0] ?? '' };
+  };
+  const end = async (dir: string) => {
+    writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
+    await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
+  };
+  try {
+    r.send(t.id, 'Josh', 'push now');
+    const none = await githubLine();
+    assert.doesNotMatch(none.line, /go out as @joshdev/, "Josh's linked login isn't what a push there uses");
+    assert.match(none.line, /runs for Josh on w1, and no GitHub login is signed in on w1, so it can't push/);
+    // A push there gets no "Pushed as @joshdev" note: that login was never in the turn.
+    const ev = (o: unknown) => `${JSON.stringify(o)}\n`;
+    writeFileSync(
+      join(none.dir, 'stream.jsonl'),
+      ev({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu9', name: 'Bash', input: { command: 'git push origin HEAD' } }] } }) +
+        ev({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu9', is_error: false, content: 'ok' }] } }) +
+        ev({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'after the push' }] } }),
+      { flag: 'a' },
+    );
+    await until('the stream read past the push', () => store.listEvents(t.id).some((e) => e.data.includes('after the push')));
+    assert.ok(!notes(t.id).some((n) => n.startsWith('Pushed as')), notes(t.id).join('\n'));
+    await end(none.dir);
+
+    signedIn = true;
+    r.send(t.id, 'Josh', 'again');
+    const there = await githubLine();
+    assert.match(there.line, /runs for Josh on w1, so gh and git push use the GitHub login signed in there/);
+    await end(there.dir);
+  } finally {
+    await stopTurns(root);
+  }
 });
 
 test("a land the server runs for a minion (hand_off_land, the land tool) pushes as the person the minion's turn runs for (#911)", async () => {

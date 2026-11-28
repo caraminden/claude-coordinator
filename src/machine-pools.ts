@@ -64,6 +64,8 @@ export interface MachinePoolsDeps {
   ships: (machineId: number) => boolean;
   /** Why its worker takes no turns now (src/worker-join.ts), or null. */
   hold?: (machineId: number) => string | null;
+  /** Whether a GitHub login is signed in on its worker (src/worker-join.ts github), or null: not known. */
+  github?: (machineId: number) => boolean | null;
   /** The balancer's plan for the machine (Build 7 M6), or null. */
   room?: (machineId: number) => { workers: number; why: string | null } | null;
   /** Which of a person's Claude accounts a worker holding these sign-ins runs turns on, and whether one is ready (ClaudeLink.accountsThere). */
@@ -93,6 +95,11 @@ export class MachinePools {
     this.d = d;
     this.seen = d.store.getSetting<Record<string, number>>(SEEN) ?? {};
     this.began = d.now();
+  }
+
+  /** Whether a GitHub login is signed in on machine `machineId`'s worker; null: not known (#2318). */
+  github(machineId: number): boolean | null {
+    return this.d.github?.(machineId) ?? null;
   }
 
   /** The machines whose owner switched Minion turns on. */

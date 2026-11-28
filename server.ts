@@ -940,6 +940,7 @@ runner.pools = new MachinePools({
   info: workerInfo,
   ships: (id) => machines.shipsAtWorker(id),
   hold: (id) => workers.hold(id),
+  github: (id) => workers.github(id),
   room: (id) => {
     const plan = balancer.current(id);
     return plan && { workers: plan.workers, why: plan.why };

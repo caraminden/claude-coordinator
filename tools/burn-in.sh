@@ -27,13 +27,14 @@
 # --ship run, to BURN_IN_CPUS / the copies running at a time.
 # --ship fits the runner (#2290): each file's 10 copies all run and must all pass, but a heavy file's run at most k at a
 # time, each next copy starting as one ends. One copy runs alone first and is weighed (weigh, below): k = BURN_IN_CPUS
-# (nproc) x BURN_IN_LOAD (2.5) / the CPUs that copy kept busy, from 2 to all 10. A file that reads BURN_IN_INNER is
+# (nproc) x BURN_IN_LOAD (3) / the CPUs that copy kept busy, from 2 to all 10. A file that reads BURN_IN_INNER is
 # not weighed: its in-file concurrency is capped instead (fit). Why weigh, not a flat nproc: GitHub's runners have 4 CPUs.
 # On Nov 28 ten copies at once there of test/list-reads.test.ts (1.7 to 2 CPUs a copy, 3 servers) ran a load of 40 to
 # 88, left 0.8 to 2.2 GB of 16 free and failed 7 to 10 of 10 copies on a 20 s boot wait (#2286); but #1327's
 # fresh-session race (about 1 CPU a copy) was caught in 9 of 10 copies at 10 at once, 3 runs of 3, and in no copy of 3
-# runs at 4 at a time: a light file's race needs all its copies at once. 2.5 x 4 CPUs runs it 10 at once, list-reads 5,
-# cabal-card-browser (3.1) 3. A 16-CPU runner (the desktop) runs every file lighter than 4 CPUs 10 at once, as before.
+# runs at 4 at a time: a light file's race needs all its copies at once. 3 x 4 CPUs runs a file of up to 1.2 CPUs 10 at
+# once, list-reads 6, cabal-card-browser (3.1) 3. A 16-CPU runner (the desktop) runs every file of up to 4.8 CPUs 10 at
+# once, as before. The weighing run doesn't come out of the limit (at most 60 s a file, on top of it).
 set -uo pipefail
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 copies=${BURN_IN_COPIES:-10}
@@ -163,22 +164,28 @@ fit() {
   return 0
 }
 
-# <file> <seconds>: one copy run alone before a ship's copies, setting weight (the CPUs it kept busy on average: its
-# processes' own CPU time over its wall time, the servers it starts included, so other jobs on a shared runner don't
-# count) and weigh_note (a note when that run failed: the copies still decide). BURN_IN_WEIGHT skips the run (tests).
+# <file> <seconds>: one copy run alone before a ship's copies, setting weight (the CPUs it kept busy on average, over
+# its wall time) and weigh_note (a note when that run failed: the copies still decide). BURN_IN_WEIGHT skips the run
+# (tests). What counts as busy, BURN_IN_WEIGH_BY: on GitHub's own runners (machine), the whole machine's busy time, as
+# the job has it to itself and a test's Chromium or systemd units aren't its child processes (test/cabal-card-browser
+# kept 3.1 CPUs busy there and 0.5 in its own processes, Nov 28); elsewhere (tree), the run's own processes' CPU time,
+# the servers it starts included, so other jobs on a shared runner (the desktop's) don't count.
+busy_ticks() { awk '/^cpu / { print $2 + $3 + $4 + $7 + $8 + $9 }' /proc/stat 2>/dev/null || echo 0; }
 weigh() {
-  local file=$1 limit=$2 dir t0 t1 out rc
+  local file=$1 limit=$2 dir t0 t1 out rc b0 b1 by=${BURN_IN_WEIGH_BY:-}
+  [ -n "$by" ] || { [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ] && by=machine || by=tree; }
   weigh_note='' weight=${BURN_IN_WEIGHT:-}
   [ -z "$weight" ] || return 0
   dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/burn-in-weigh.XXXXXX") || { weight=$cpus weigh_note="; it couldn't be weighed (no temp folder), so it counts as filling the runner"; return 0; }
-  t0=$(date +%s%N)
+  b0=$(busy_ticks) t0=$(date +%s%N)
   # times: this subshell's waited-for children, so the test run and everything under it.
   out=$({ TMPDIR=$dir timeout -k 10 "$limit" "${nice_cmd[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" --test-reporter=spec "$file" >"$dir/run.log" 2>&1; echo "rc $?"; times; })
-  t1=$(date +%s%N)
+  t1=$(date +%s%N) b1=$(busy_ticks)
   rm -rf "$dir"
   rc=$(awk '$1 == "rc" { print $2 }' <<<"$out")
   [ "$rc" = 0 ] || weigh_note="; that run alone failed (exit $rc), and its copies still decide"
-  weight=$(awk -v ns=$((t1 - t0)) 'function s(x) { split(x, a, /[ms]/); return a[1] * 60 + a[2] } $1 != "rc" { n++; if (n == 2) cpu = s($1) + s($2) } END { w = ns > 0 ? cpu / (ns / 1e9) : 0; printf "%.2f", w }' <<<"$out")
+  # The whole machine's ticks are USER_HZ, 100 a second on Linux.
+  weight=$(awk -v ns=$((t1 - t0)) -v by="$by" -v ticks=$((b1 - b0)) 'function s(x) { split(x, a, /[ms]/); return a[1] * 60 + a[2] } $1 != "rc" { n++; if (n == 2) cpu = s($1) + s($2) } END { if (by == "machine" && ticks / 100 > cpu) cpu = ticks / 100; w = ns > 0 ? cpu / (ns / 1e9) : 0; printf "%.2f", w }' <<<"$out")
 }
 
 if [ "${1:-}" = --importers ]; then
@@ -214,7 +221,7 @@ if [ "${1:-}" != --ship ]; then
 fi
 
 base=${2:?usage: burn-in.sh --ship <base>}
-limit=${BURN_IN_LIMIT:-150} mapped_max=${BURN_IN_MAPPED:-3} cpus=${BURN_IN_CPUS:-$(nproc 2>/dev/null || echo 4)} load=${BURN_IN_LOAD:-2.5}
+limit=${BURN_IN_LIMIT:-150} mapped_max=${BURN_IN_MAPPED:-3} cpus=${BURN_IN_CPUS:-$(nproc 2>/dev/null || echo 4)} load=${BURN_IN_LOAD:-3}
 [[ $cpus =~ ^[1-9][0-9]*$ ]] || { echo "burn-in: BURN_IN_CPUS must be a whole number, not $cpus"; exit 1; }
 [[ $load =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "burn-in: BURN_IN_LOAD must be a number, not $load"; exit 1; }
 git rev-parse -q --verify "$base^{commit}" >/dev/null || { echo "burn-in: SKIPPED: no commit $base to compare with, so nothing was burned in"; exit 0; }
@@ -266,7 +273,7 @@ keep_time() {
   [ "$(wc -l <"$times" 2>/dev/null || echo 0)" -le 4000 ] || { tail -n 2000 "$times" >"$times.$$" && mv -f "$times.$$" "$times"; }
 }
 # Every file runs, past a red one (#1564): a train with three racy riders hears of all three in one red run, not one a run.
-deadline=$((SECONDS + limit)) skipped=() slow=() nov=() red=()
+deadline=$((SECONDS + limit)) start=$SECONDS skipped=() slow=() nov=() red=()
 for f in "${files[@]}"; do
   left=$((deadline - SECONDS))
   [ "$left" -ge 15 ] || { skipped+=("$f"); continue; }
@@ -281,12 +288,14 @@ for f in "${files[@]}"; do
   if honours_inner "$f"; then
     fit "$f" "$copies" "$cpus" # its in-file concurrency is capped to fit the CPUs (#2073)
   else
-    weigh "$f" "$left"
+    # Its weighing run is on top of the limit, the copies keeping all the time left (at most a minute: a file alone for
+    # longer can't finish its copies anyway).
+    weigh "$f" "$((left < ${BURN_IN_WEIGH_LIMIT:-60} ? left : ${BURN_IN_WEIGH_LIMIT:-60}))"
+    deadline=$((deadline + SECONDS - t0)) t0=$SECONDS
     read -r weight fit_k < <(awk -v c="$cpus" -v l="$load" -v w="$weight" -v n="$copies" 'BEGIN { k = w > 0.05 ? int(c * l / w) : n; if (k > n) k = n; if (k < 2) k = 2; printf "%.1f %d\n", w, k }')
     echo "burn-in: $f: one copy alone kept $weight of this runner's $cpus CPUs busy, so $([ "$fit_k" -ge "$copies" ] && echo "all $copies copies run at once" || echo "its $copies copies run at most $fit_k at a time") (a load of up to $load x its CPUs)${weigh_note}"
   fi
   [ "$fit_k" -ge 2 ] || [ "$copies" -lt 2 ] || fit_k=2 # copies one at a time can't race each other
-  left=$((left - (SECONDS - t0)))
   if [ -n "$fit_inner" ]; then BURN_IN_INNER=$fit_inner burn_one "$f" "$copies" "$left" "$fit_k" || rc=$?
   else burn_one "$f" "$copies" "$left" "$fit_k" || rc=$?; fi
   took=$((SECONDS - t0))
@@ -297,7 +306,7 @@ done
 [ ${#slow[@]} = 0 ] || echo "burn-in: NO VERDICT on ${slow[*]}: not started, as their last burn-in took longer than the time left (the full suite runs them next)"
 [ ${#nov[@]} = 0 ] || echo "burn-in: NO VERDICT on ${nov[*]}: stopped at the ${limit} s limit (the full suite runs it next, with its own hang limit)"
 [ ${#skipped[@]} = 0 ] || echo "burn-in: SKIPPED ${skipped[*]}: the ${limit} s limit ran out before they could start"
-echo "burn-in: done in $((limit - (deadline - SECONDS))) s"
+echo "burn-in: done in $((SECONDS - start)) s"
 for f in "${red[@]}"; do
   case ${alone_of[$f]:-} in
     failed) echo "burn-in: refused: $f: alone: failed too, after every copy failed: a plain red or a fault of CI's own environment, not a race (its output is above); fix that" ;;

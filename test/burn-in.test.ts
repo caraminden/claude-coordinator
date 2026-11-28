@@ -353,7 +353,7 @@ test('on CI the file runs at its own concurrency: no cap', () => {
 });
 
 // #2290: a ship's burn-in fits its runner. All 10 copies still run and must pass, but a heavy file's at most
-// BURN_IN_CPUS x BURN_IN_LOAD (2.5) / its weight at a time, each next one starting as one ends: ten copies at once of a
+// BURN_IN_CPUS x BURN_IN_LOAD (3) / its weight at a time, each next one starting as one ends: ten copies at once of a
 // server-booting file on GitHub's 4-CPU runners failed boots on load alone (#2286), while a light file's race needs all
 // ten at once (#1327's fresh-session). The weight is what one copy run alone kept busy; BURN_IN_WEIGHT sets it here.
 // Each copy holds a marker in a shared folder and records how many it saw, so the peak is the most copies at once.
@@ -382,12 +382,12 @@ function paced(files: Record<string, string>, env: Record<string, string>) {
   return { r, peak: Math.max(0, ...read('peaks').map(Number)), ran: read('ran').length };
 }
 
-test('a heavy file on a small runner runs all 10 copies, at most CPUs x 2.5 / its weight at a time, and says so', () => {
+test('a heavy file on a small runner runs all 10 copies, at most CPUs x 3 / its weight at a time, and says so', () => {
   const { r, peak, ran } = paced({ 'test/held.test.ts': held }, { BURN_IN_CPUS: '2', BURN_IN_WEIGHT: '2.5' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(ran, 10, 'every copy ran');
   assert.ok(peak >= 1 && peak <= 2, `peak ${peak} copies at once`);
-  assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: one copy alone kept 2\.5 of this runner's 2 CPUs busy, so its 10 copies run at most 2 at a time \(a load of up to 2\.5 x its CPUs\)$/m);
+  assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: one copy alone kept 2\.5 of this runner's 2 CPUs busy, so its 10 copies run at most 2 at a time \(a load of up to 3 x its CPUs\)$/m);
   assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: 10 of 10 copies at once \(at most 2 at a time\) passed, in \d+ s$/m);
 });
 
@@ -428,6 +428,36 @@ test("one copy is weighed alone first, its child processes' CPU time counted: a 
   assert.equal(spins.status, 0, spins.stdout + spins.stderr);
   const heavy = weighed(spins, 'test/burns\\.test\\.ts');
   assert.ok(heavy.weight > 0.25 && heavy.k < 10, `two spinning threads weighed ${heavy.weight}, ran ${heavy.k} at a time`);
+});
+
+// A process the test leaves to run on (a Chromium, a systemd unit) isn't its child: the run's own CPU time misses it,
+// the whole machine's busy time doesn't (GitHub's runners, where the job has the machine to itself).
+const ESCAPES = [
+  "import { test } from 'node:test';",
+  "import { spawnSync } from 'node:child_process';",
+  "import { setTimeout as sleep } from 'node:timers/promises';",
+  "test('starts a server it leaves to run', async () => {",
+  "  const spin = 'const t = Date.now(); while (Date.now() - t < 10000) { const u = process.cpuUsage(); if (u.user + u.system > 1.5e6) break }';",
+  "  const grand = `const { Worker } = require('node:worker_threads'); for (let i = 0; i < 2; i++) new Worker(${JSON.stringify(spin)}, { eval: true });`;",
+  "  const child = `const c = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grand)}], { detached: true, stdio: 'ignore' }); console.log(c.pid); c.unref(); process.exit(0);`;",
+  "  const pid = Number(spawnSync(process.execPath, ['-e', child], { encoding: 'utf8' }).stdout);",
+  '  const alive = () => { try { process.kill(pid, 0); return true } catch { return false } };',
+  '  while (alive()) await sleep(50); // timing-ok: waits for the left-behind spinner to finish',
+  '});',
+  '',
+].join('\n');
+
+test("on GitHub's runners the whole machine's busy time weighs a file, so what it leaves running counts too", () => {
+  const tree = weighed(ship(repo({ 'test/escapes.test.ts': ESCAPES }), { BURN_IN_WEIGHT: '', BURN_IN_WEIGH_BY: 'tree' }), 'test/escapes\\.test\\.ts');
+  const machine = weighed(ship(repo({ 'test/escapes.test.ts': ESCAPES }), { BURN_IN_WEIGHT: '', BURN_IN_WEIGH_BY: 'machine' }), 'test/escapes\\.test\\.ts');
+  assert.ok(machine.weight - tree.weight > 0.3, `left-behind spinners: the run's own CPU time weighed ${tree.weight}, the machine's ${machine.weight}`);
+});
+
+test("the weighing run doesn't come out of the limit: the copies still get all of it", () => {
+  const { r, ran } = paced({ 'test/held.test.ts': held }, { BURN_IN_WEIGHT: '', BURN_IN_HOLD: '9000', BURN_IN_LIMIT: '16' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(ran, 11, 'the weighing copy and all 10 ran to the end, about 20 s against a 16 s limit');
+  assert.match(r.stdout, /^burn-in: test\/held\.test\.ts: 10 of 10 copies at once passed/m);
 });
 
 test('a race failing 1 copy in 10 is still refused when its copies run 3 at a time, in the line land.sh reads', () => {

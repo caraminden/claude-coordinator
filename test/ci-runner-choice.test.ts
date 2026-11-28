@@ -120,7 +120,8 @@ test("a ship's run burns in its new and changed tests before the full suite, in 
   assert.match(read('tools/own-check.sh'), /"\+\$m:refs\/heads\/check-base\/\$branch"/, 'and the base the own check pushes');
   assert.match(body, /tools\/burn-in\.sh --ship "\$base"/);
   const own = Number(read('tools/burn-in.sh').match(/limit=\$\{BURN_IN_LIMIT:-(\d+)\}/)?.[1]);
-  assert.ok(own > 0 && own + 30 <= burn, `its ${own} s limit (plus the last copies' kill) fits land.sh's ${burn} s extension`);
+  const room = Number(read('tools/burn-in.sh').match(/weigh_room=\$\{BURN_IN_WEIGH_ROOM:-(\d+)\}/)?.[1]);
+  assert.ok(own > 0 && room >= 0 && own + room + 30 <= burn, `its ${own} s limit, ${room} s of weighing room and the last copies' kill fit land.sh's ${burn} s extension`);
 });
 
 // A ship's own check (#1567; Cara, 2026-11-22, A "Gated, after C and B"): check/<branch> runs on the one runner with the

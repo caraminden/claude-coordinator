@@ -3,7 +3,7 @@
 // carries them out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { nextRetries, outcome, RETRIES, retriesOf, type EndedTurn, type TurnEnd } from '../src/turn-outcome.ts';
+import { nextRetries, outcome, RETRIES, retriesOf, type EndedTurn, type Retries, type TurnEnd } from '../src/turn-outcome.ts';
 
 const ok = { error: false, text: 'done' };
 const end = (over: Partial<TurnEnd> & { turn?: EndedTurn | null } = {}): TurnEnd => ({
@@ -57,9 +57,18 @@ const rows: [string, TurnEnd, Partial<ReturnType<typeof outcome>>][] = [
   ['the same words on stderr only', end({ turn: {}, exit: { code: 1, signal: null }, stderr: ['No conversation found with session ID: abc-1'] }), { kind: 'no-session', noSession: 'abc-1' }],
   ['a warm-up that found no conversation just fails', end({ turn: { keepalive: true, result: { error: true, text: 'No conversation found with session ID: abc-1' } } }), { kind: 'failed' }],
   ['a fresh start that found no conversation just fails', end({ turn: { fresh: 'step', result: { error: true, text: 'No conversation found with session ID: abc-1' } } }), { kind: 'failed' }],
-  ['failed', end({ turn: { result: { error: true, text: 'boom' } } }), { kind: 'failed', reason: 'boom' }],
-  ['exited with no result', end({ turn: {}, exit: { code: 0, signal: null } }), { kind: 'failed' }],
-  ['could not start', end({ turn: null, exit: { code: null, signal: null, error: 'ENOENT' } }), { kind: 'failed', reason: 'Could not start claude: ENOENT' }],
+  ['failed: retried once (#2258)', end({ turn: { result: { error: true, text: 'boom' } } }), { kind: 'failed', reason: 'boom', retry: { via: 'fail', retries: { fail: 1 } } }],
+  ['exited with no result: retried once', end({ turn: {}, exit: { code: 0, signal: null } }), { kind: 'failed', retry: { via: 'fail', retries: { fail: 1 } } }],
+  ['failed again after its retry: stops, spent', end({ turn: { result: { error: true, text: 'boom' }, retries: { fail: 1 } } }), { kind: 'failed', retry: undefined, spent: { via: 'fail', tries: 1 } }],
+  ["a failed turn's retry carries the kill and restart counts", end({ turn: { result: { error: true, text: 'boom' }, retries: { kill: 1, restart: 1, net: 2 } } }), { retry: { via: 'fail', retries: { fail: 1, kill: 1, restart: 1 } } }],
+  ['a failed Codex turn is not retried', end({ turn: { codex: true, result: { error: true, text: 'boom' } } }), { kind: 'failed', retry: undefined, spent: undefined }],
+  ['a failed warm-up is not retried', end({ turn: { keepalive: true, result: { error: true, text: 'boom' } } }), { kind: 'failed', retry: undefined, spent: undefined }],
+  ['a failed fresh step is not retried', end({ turn: { fresh: 'step', result: { error: true, text: 'boom' } } }), { kind: 'failed', retry: undefined, spent: undefined }],
+  ['a failed turn set to close is not retried', end({ turn: { closing: 'done', result: { error: true, text: 'boom' } } }), { kind: 'failed', retry: undefined, spent: undefined }],
+  ['an expired sign-in is not retried', end({ turn: { person: 7, account: 2, result: { error: true, text: 'API Error: 401 authentication_error' } }, account: null }), { kind: 'failed', authFailed: true, retry: undefined, spent: undefined }],
+  ['a stopped turn is not retried', end({ turn: { stopped: true, result: { error: true, text: 'boom' } }, exit: { code: 1, signal: null } }), { kind: 'stopped', retry: undefined }],
+  ['an account error is not retried', end({ turn: { result: { error: true, text: 'API Error: 400 Identity verification is required to continue.' } } }), { kind: 'account-error', retry: undefined }],
+  ['could not start', end({ turn: null, exit: { code: null, signal: null, error: 'ENOENT' } }), { kind: 'failed', reason: 'Could not start claude: ENOENT', retry: undefined }],
   ['a restart cut it off', end({ turn: { resumes: 1, killTries: 1 }, cut: { rerun: false } }), { kind: 'killed', retry: { via: 'restart', retries: { restart: 2, kill: 1 } } }],
   ['a restart cut off a turn people started', end({ turn: null, cut: { rerun: false } }), { kind: 'killed', retry: { via: 'restart', retries: { restart: 1 } } }],
   ['a restart cut it off, twice in a row already', end({ turn: { retries: { restart: 2 } }, cut: { rerun: false } }), { kind: 'killed', spent: { via: 'restart', tries: 2 } }],
@@ -85,16 +94,17 @@ test('every kind has a row', () => {
 });
 
 test("today's caps are unchanged, and an account switch has one", () => {
-  assert.deepEqual(Object.fromEntries(Object.entries(RETRIES).map(([k, v]) => [k, v.cap])), { restart: 2, kill: 1, limit: 3, net: 3, switch: 3 });
+  assert.deepEqual(Object.fromEntries(Object.entries(RETRIES).map(([k, v]) => [k, v.cap])), { restart: 2, kill: 1, limit: 3, net: 3, switch: 3, fail: 1 });
 });
 
 test('a resume carries only the counts its row keeps', () => {
-  const r = { restart: 1, kill: 1, limit: 2, net: 1, switch: 1 };
+  const r: Retries = { restart: 1, kill: 1, limit: 2, net: 1, switch: 1 };
   assert.deepEqual(nextRetries(r, 'restart'), { restart: 2, kill: 1 });
   assert.deepEqual(nextRetries(r, 'kill'), { kill: 2, restart: 1 });
   assert.deepEqual(nextRetries(r, 'limit'), { limit: 3 });
   assert.deepEqual(nextRetries(r, 'net'), { net: 2 });
   assert.deepEqual(nextRetries(r, 'switch'), { switch: 2, limit: 2 });
+  assert.deepEqual(nextRetries({ ...r, fail: 1 }, 'fail'), { fail: 2, restart: 1, kill: 1 });
 });
 
 test('a row saved before the retries record reads its four counters', () => {

@@ -2621,7 +2621,11 @@ export function frontOf(line) {
   return n === 3 ? 'game' : n === 2 || n === 7 ? 'fullscreen' : n === 4 ? 'presenting' : null;
 }
 
-/** Keeps the PowerShell above up and sends each state it prints; started again a minute after it ends. Returns a stop. */
+/**
+ * Keeps the PowerShell above up and sends each state it prints; started again a minute after it ends. Returns a stop.
+ * @typedef {{ stdout: { on(event: 'data', fn: (chunk: unknown) => void): unknown }, on(event: string, fn: (err: Error) => void): unknown, kill(): unknown }} FrontChild
+ * @param {{ send: (front: string | null) => void, log: (line: string) => void, start?: () => FrontChild, again?: number }} o
+ */
 export function watchFront({ send, log, start = () => spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', FRONT_PS], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }), again = 60_000 }) {
   let child = null;
   let stopped = false;

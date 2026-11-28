@@ -135,41 +135,35 @@ Code: `pending-deploy`, `deploy`
 **Released**:
 A build people install (an APK, a desktop app) that its people can now get. Shipped is not released.
 
-**Build**, **Major build**:
-A branch where a cabal's work collects before it ships together, named by its number ("Build 7").
-Code: `build/<n>`
-_Avoid_: train, epic
-
 **Merge**:
-Only a cabal member's work going into a build ("merged into Build 3"), or a raw git step. Onto main is ship.
+Only a Plot member's work going into the Plot's branch ("merged into Plot 3"), or a raw git step. Onto main is ship.
 
-### Cabals
+### Plots
 
-**Cabal**:
-A group of minions working toward one aim under one Overseer, from one board. A build cabal has a build; a goal cabal
-has none, and each member ships itself.
-Code: `cabal`, `effortName`, `build`
-_Avoid_: crew, team, feeders
+**Plot**:
+A group of minions working toward one aim under one Overseer, from one board, named by one number or name ("Plot 11"). A Plot may have its own branch where its work collects before it ships together, or none, and then each member ships itself.
+Code: `cabal`, `effortName`, `build`, `build/<n>`
+_Avoid_: cabal, build, major build, crew, team, feeders
 
 **Overseer**:
-The lead minion of a cabal, one per cabal, always named by it: "Build 7's Overseer", never "the Overseer" alone.
+The lead minion of a Plot, one per Plot, always named by it: "Plot 7's Overseer", never "the Overseer" alone.
 Code: `lead`, `build_owner`, `citadel:cabal`
 _Avoid_: Foreman, build minion
 
-**Cabal member**:
-A minion on a cabal's roster, started by its Overseer.
+**Plot member**:
+A minion on a Plot's roster, started by its Overseer.
 Code: `cabal`
 
-**Cabal board**:
-The shared page of a cabal's state: its roster, each member's state and note, asks, and its Overseer's log.
+**Plot board**:
+The shared page of a Plot's state: its roster, each member's state and note, asks, and its Overseer's log.
 Code: `cabal_board`
 
 **Roster**:
-A cabal's planned members, approved together on its forming card.
+A Plot's planned members, approved together on its forming card.
 Code: cabal rows
 
 **Fixer**:
-The cabal member who takes small fixes across the cabal, started once a fix needs it.
+The Plot member who takes small fixes across the Plot, started once a fix needs it.
 Code: `role: fixer`
 
 **Shift change**:
@@ -259,9 +253,11 @@ A Grunt that judges finished work blind against a scheme's rubric.
 Never in text people read. The Citadel-wide wording check sends some of them back.
 
 **Land** _(retired)_: say ship.
-**Fold** _(retired)_: say ship for main, merge into the build for a cabal member, collapsed section for UI.
-**Merge** _(restricted)_: only into a build or as a raw git step; onto main is ship.
-**Feeder** _(retired)_: say cabal member.
+**Fold** _(retired)_: say ship for main, merge into the Plot for a Plot member, collapsed section for UI.
+**Merge** _(restricted)_: only into a Plot's branch or as a raw git step; onto main is ship.
+**Feeder** _(retired)_: say Plot member.
+**Cabal**, **Build** _(for a group of minions, retired)_: say Plot ("Plot 11", "merged into Plot 11"); "build" for compiling stays, an APK build or "build the feature".
+**Major build** _(retired)_: say Plot.
 **Parked** _(retired)_: say sealed; unpark is unseal.
 **Coordinator** _(retired)_: say Taskmaster.
 **Ticket**, **Thread** _(retired)_: say minion.

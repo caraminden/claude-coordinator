@@ -196,7 +196,7 @@ function groupHeading(group) {
 function buildHeading(s) {
   const b = openView().builds?.find((x) => x.build === s.build);
   return [
-    'Build ',
+    'Plot ',
     s.build,
     s.current ? h('span', { class: 'muted' }, ' current') : '',
     b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`, openView().buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',

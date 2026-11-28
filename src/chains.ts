@@ -107,10 +107,10 @@ export function chainsOf(input: ChainInput): Chain[] {
     if (owner) into = nodeOf(owner);
     else {
       into = `build:${b.build}`;
-      nodes.set(into, { key: into, id: null, project: feeders[0].project_id, number: null, title: `Build ${b.build}`, status: 'build', state: null, col: 0 });
+      nodes.set(into, { key: into, id: null, project: feeders[0].project_id, number: null, title: `Plot ${b.build}`, status: 'build', state: null, col: 0 });
     }
     // The build minion waits on its feeders: they sit left of it.
-    for (const f of feeders) edge(into, nodeOf(f), 'build', `Build ${b.build}`);
+    for (const f of feeders) edge(into, nodeOf(f), 'build', `Plot ${b.build}`);
   }
 
   // Join them into chains (union-find over the edges).

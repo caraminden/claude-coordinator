@@ -116,8 +116,8 @@ export function effortsDue(tickets: Ticket[], effortOf: Map<number, string>, sin
     const [lead, led] = most(members, (t) => cabalOf(t)?.lead ?? null);
     const cabal = lead != null && led * 2 > members.length ? members.map(cabalOf).find((c) => c?.lead === lead) : null;
     if (cabal?.retro === 'due') continue;
-    if (top != null && n * 2 > members.length) out.push({ name, members, act: 'skip', why: `${n} of its ${members.length} minions are Build ${top}, whose retro covers them` });
-    else if (cabal?.retro === 'written') out.push({ name, members, act: 'skip', why: `${led} of its ${members.length} minions are one led cabal, whose lead wrote its retro` });
+    if (top != null && n * 2 > members.length) out.push({ name, members, act: 'skip', why: `${n} of its ${members.length} minions are Plot ${top}, whose retro covers them` });
+    else if (cabal?.retro === 'written') out.push({ name, members, act: 'skip', why: `${led} of its ${members.length} minions are one led Plot, whose lead wrote its retro` });
     else out.push({ name, members, act: 'start', why: `${members.length} minions, the last closed ${pacific(last)}` });
   }
   return out;

@@ -91,8 +91,8 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, redraw 
         ...counts,
         // Only what waits on people, in words: members' questions to the Overseer stay on its board (Cara, 2026-11-26: "Im not
         // sure I care if the minions are asking the overseer questions?").
-        yours ? h('b', { class: 'cabal-asks', title: 'Minions of this cabal with a card waiting on you' }, `${yours} waiting on you`) : '',
-        waiting > yours ? h('span', { title: 'Minions of this cabal with a card waiting on someone else' }, `${waiting - yours} waiting on others`) : '',
+        yours ? h('b', { class: 'cabal-asks', title: 'Minions of this Plot with a card waiting on you' }, `${yours} waiting on you`) : '',
+        waiting > yours ? h('span', { title: 'Minions of this Plot with a card waiting on someone else' }, `${waiting - yours} waiting on others`) : '',
         h('span', {}, money(c.spend)),
       ),
     ),

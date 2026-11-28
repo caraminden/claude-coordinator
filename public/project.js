@@ -208,7 +208,7 @@ function renderCrumbs(main) {
                   : main.kind === 'chains'
                     ? [projectLink, ' / ', main.focus ? h('a', { href: `#/p/${project.id}/chains` }, 'Chains') : 'Chains']
                     : main.kind === 'cabal'
-                      ? [projectLink, ' / ', `Cabal of #${main.focus}`]
+                      ? [projectLink, ' / ', `Plot of #${main.focus}`]
                       : main.kind === 'schedules'
                         ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
                         : main.kind === 'shared'
@@ -317,7 +317,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     personNotes: person_notes ?? {}, // ticket id -> people's note on it { text, by, at } (#146)
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
     builds: builds ?? [], // build branches' headers: { build, merged, open, behind } (src/builds.ts)
-    cabals: cabals ?? [], // open cabals' cards (src/cabal-cards.ts)
+    cabals: cabals ?? [], // open Plots' cards (src/cabal-cards.ts)
     buildPreviews: !!build_previews, // this server runs the scheme's code, so each build branch has a preview (src/previews.ts)
     artifacts: artifacts ?? [],
     shared: shared ?? [],

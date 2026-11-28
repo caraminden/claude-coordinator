@@ -693,7 +693,7 @@ export function previewCopies(store: Store, d: { own: () => Project | null; runn
   if (own) {
     for (const n of d.builds(own.id)) {
       const r = d.running(`build-${n}`);
-      add(own.id, { kind: 'build-preview', target: CITADEL_TARGET, name: `Build ${n}`, path: buildPreviewPath(n), build: n, running: !!r, commit: r?.commit ?? null });
+      add(own.id, { kind: 'build-preview', target: CITADEL_TARGET, name: `Plot ${n}`, path: buildPreviewPath(n), build: n, running: !!r, commit: r?.commit ?? null });
     }
   }
   return out;

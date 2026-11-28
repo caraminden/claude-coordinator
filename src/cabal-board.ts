@@ -221,7 +221,7 @@ const askOf = (store: Store, leadScheme: number, a: CabalAsk, row: CabalMemberRo
 });
 
 /** A build's cabal is always "Build 7" (Josh, 2026-11-25: "Build 7's Overseer"); a name only names a goal cabal. */
-export const cabalName = (store: Store, lead: Ticket, name: string) => (lead.build != null ? `Build ${lead.build}` : name || String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title);
+export const cabalName = (store: Store, lead: Ticket, name: string) => (lead.build != null ? `Plot ${lead.build}` : name || String(store.props.forTarget('minion', lead.id)[EFFORT_KEY] ?? '') || lead.title);
 
 /** People's name for the lead: "Build 7's Overseer", "Worker machines' Overseer". */
 export const overseerOf = (board: Pick<Board, 'name'>) => `${board.name}${/s$/i.test(board.name) ? "'" : "'s"} Overseer`;
@@ -240,7 +240,7 @@ const waited = (ms: number) => (ms < 3_600_000 ? `${Math.round(ms / 60_000)} min
 export function timelineText(store: Store, seen: Board): string {
   const lead = store.getTicket(seen.lead.id)!;
   const rows = new Map(store.cabalRows(lead.id).map((r) => [r.id, r]));
-  const out = [`${seen.name} cabal timeline (Pacific). Board: #/p/${seen.lead.project_id}/cabal/${seen.lead.number} · ${overseerOf(seen)} spent ${money(seen.lead.spend)}, the cabal ${money(seen.counts.spend)}`, 'Members:'];
+  const out = [`${seen.name} Plot timeline (Pacific). Board: #/p/${seen.lead.project_id}/cabal/${seen.lead.number} · ${overseerOf(seen)} spent ${money(seen.lead.spend)}, the Plot ${money(seen.counts.spend)}`, 'Members:'];
   for (const m of seen.members) {
     const row = rows.get(m.row);
     const t = row?.ticket_id != null ? store.getTicket(row.ticket_id) : undefined;

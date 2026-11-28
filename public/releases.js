@@ -1201,7 +1201,7 @@ export function releaseChip(t) {
           opening();
         },
       },
-      h('span', { class: 'muted' }, `merged into Build ${t.build}`),
+      h('span', { class: 'muted' }, `merged into Plot ${t.build}`),
       h('span', { 'aria-hidden': 'true' }, '›'),
     );
   }

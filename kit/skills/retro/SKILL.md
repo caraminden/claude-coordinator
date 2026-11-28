@@ -1,6 +1,6 @@
 ---
 name: retro
-description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them. Use when a milestone PR is ready for review, when a major build is ready for its go card, for a scheduled monthly or effort retro, or when someone asks how the process went.
+description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them. Use when a milestone PR is ready for review, when a Plot is ready for its go card, for a scheduled monthly or effort retro, or when someone asks how the process went.
 ---
 
 # Retro
@@ -19,17 +19,17 @@ Create either file when it is first needed.
   ready, and that reply carries the top three findings, even when it is meant to be short:
   they are part of the result.
 - Someone asks how the work went.
-- A major build whose build minion leads no cabal is ready for its go card (its step 5). The retro is committed to the build
+- A Plot with a branch whose build minion leads no Plot is ready for its go card (its step 5). The retro is committed to the build
   branch, in the retro folder CLAUDE.md's Project facts name; there is no milestone PR.
-- A cabal's lead, once its build is live or its last member is dismissed (`citadel:cabal`, "Closing"): the one
-  retro for that cabal, written from the board's timeline.
+- A Plot's lead, once its build is live or its last member is dismissed (`citadel:cabal`, "Closing"): the one
+  retro for that Plot, written from the board's timeline.
 - A scheduled monthly retro (its brief names the window). It ships by the scheme's usual route for a
   doc change; there is no milestone PR.
 - An effort retro: the server starts one when every minion of an effort (the `effortName` property: 3
   or more minions, or 4 in an unnamed start_after chain) has closed and stayed closed for 6 hours, in any
   scheme. Its brief lists the minions; the retro asks what went wrong across them (the split, the order,
   briefs that left the next minion guessing) and writes `effort-<slug>.md` in the retro folder. An effort
-  that is mostly one major build or one led cabal gets none: that one's retro covers it.
+  that is mostly one Plot gets none: that one's retro covers it.
 - A trouble post-mortem: the server starts a `citadel:post-mortem` minion (Sonnet medium, read-only) for a
   closed minion that went past four times its budget or whose model a Taskmaster stepped up (a fix that didn't
   hold). It is one minion, not the process's retro: it proposes one fix on a card to the minion's owner.

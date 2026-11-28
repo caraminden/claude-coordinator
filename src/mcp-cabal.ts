@@ -9,9 +9,9 @@ export const CABAL_BOARD = {
   inputSchema: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['read', 'timeline', 'note', 'ask', 'answer', 'row', 'log', 'red', 'form'], description: 'read (default); timeline: the starts, ships, ask waits, reds and spend a cabal retro is written from; a member: note, ask; the lead: answer, row, log, red, form' },
+      action: { type: 'string', enum: ['read', 'timeline', 'note', 'ask', 'answer', 'row', 'log', 'red', 'form'], description: 'read (default); timeline: the starts, ships, ask waits, reds and spend a Plot retro is written from; a member: note, ask; the lead: answer, row, log, red, form' },
       note: { type: ['string', 'null'], maxLength: 200, description: 'note, or row: one line ("built, in review", "blocked on M1\'s table"); null clears' },
-      files: { type: ['array', 'null'], items: { type: 'string' }, description: 'note, or row: the repo paths it expects to touch (a folder ends in /). A goal cabal has no claims file, so the board flags a file two members list' },
+      files: { type: ['array', 'null'], items: { type: 'string' }, description: 'note, or row: the repo paths it expects to touch (a folder ends in /). A Plot has no claims file, so the board flags a file two members list' },
       text: { type: ['string', 'null'], maxLength: 2000, description: 'ask: the question or request; answer: your answer; log: the line; red: what is red (null clears it)' },
       blocking: { type: 'boolean', description: 'ask: true only when you cannot go on without the answer (wakes the lead)' },
       ask: { type: 'integer', description: 'answer: the ask id the board shows' },
@@ -42,7 +42,7 @@ const ROW_KEYS = ['row', 'minion', 'scheme', 'label', 'title', 'lane', 'after', 
 export const CABAL_START = {
   name: 'cabal_start',
   description:
-    "Start a member of your cabal from a row on your board that people approved on its forming card (cabal_board action form). It starts from the row's handoff on the row's model and effort, in your build and Goal, with you as parent and lead, chained on the row's after; the Taskmaster hears of it. A feature row nobody approved is refused: add it with a card; a fixer row (role: fixer) starts with none. Past your width it waits as next up and starts by itself once a member merges, is dismissed or is sealed.",
+    "Start a member of your Plot from a row on your board that people approved on its forming card (cabal_board action form). It starts from the row's handoff on the row's model and effort, in your build and Goal, with you as parent and lead, chained on the row's after; the Taskmaster hears of it. A feature row nobody approved is refused: add it with a card; a fixer row (role: fixer) starts with none. Past your width it waits as next up and starts by itself once a member merges, is dismissed or is sealed.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -57,7 +57,7 @@ export const CABAL_START = {
 export const CABAL_MESSAGE_TASKMASTER = {
   name: 'message_taskmaster',
   description:
-    "For your cabal's rows in other schemes only: ask that scheme's Taskmaster to start the row's member (a row that scheme's people approved on the forming card), or to unseal, stop or seal the member it started. You never start or touch minions there yourself. The server writes the ask; the start ask carries the row's handoff into that scheme's shared folder, and the Taskmaster starts it with cabal \"<your scheme>#<your #N>\", which puts it on your board with its scheme's name. A started row holds a place in your width while the ask waits. In a build cabal a member there ships to its own main, never into your build: when it must not go live first, ask seal now and unseal once the build is live. Any other use is refused: other work for a scheme goes to your Taskmaster with message_coordinator.",
+    "For your Plot's rows in other schemes only: ask that scheme's Taskmaster to start the row's member (a row that scheme's people approved on the forming card), or to unseal, stop or seal the member it started. You never start or touch minions there yourself. The server writes the ask; the start ask carries the row's handoff into that scheme's shared folder, and the Taskmaster starts it with Plot \"<your scheme>#<your #N>\", which puts it on your board with its scheme's name. A started row holds a place in your width while the ask waits. In a Plot a member there ships to its own main, never into your build: when it must not go live first, ask seal now and unseal once the build is live. Any other use is refused: other work for a scheme goes to your Taskmaster with message_coordinator.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -102,7 +102,7 @@ export async function runCabalTool(name: string, args: Record<string, unknown>):
   const path = `/api/tickets/${C().TICKET}/cabal`;
   if (action === 'read' || action === 'timeline') {
     const r = await call<{ text: string | null }>('GET', `${path}?${action === 'read' ? 'text' : 'timeline'}=1`);
-    return r.text ?? 'You are not on a cabal board and lead none.';
+    return r.text ?? 'You are not on a Plot board and lead none.';
   }
   const pick = (keys: readonly string[]) => Object.fromEntries(keys.filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
   const body = { action, ...(action === 'row' ? pick(ROW_KEYS) : action === 'form' ? pick(['width']) : pick(['note', 'files', 'text', 'blocking', 'ask'])) };

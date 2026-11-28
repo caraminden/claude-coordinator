@@ -703,8 +703,8 @@ CREATE TABLE IF NOT EXISTS time_log_explains (
   data TEXT NOT NULL,
   at INTEGER NOT NULL
 );
--- Cabal boards (#2090, src/db/cabals.ts, src/cabal-board.ts): one per lead minion (a cabal's Overseer). Only what is written
--- lives here: the roster rows (a member's own row once it is started with cabal), notes, asks, the lead's log and its red-run
+-- Cabal boards (#2090, src/db/cabals.ts, src/cabal-board.ts): one per lead minion (a Plot's Overseer). Only what is written
+-- lives here: the roster rows (a member's own row once it is started with Plot), notes, asks, the lead's log and its red-run
 -- line. Each member's state, merges, claims, start_after, spend and risk are read from facts when the board is read.
 CREATE TABLE IF NOT EXISTS cabals (
   lead_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,

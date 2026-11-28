@@ -147,7 +147,9 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
     // A member in another scheme ships to its own main: it never merges into this repo's build branch (#2094).
     const where = t?.project_id ?? r.project_id ?? lead.project_id;
     const scheme = where === lead.project_id ? null : (store.getProject(where)?.name ?? `scheme ${where}`);
-    const state = await stateOf(t, ship?.kind ?? null, scheme ? null : ref, repoDir, asks, deps);
+    // A Plot's branch that shipped to main is deleted: its members' merges can't be read from git, but their own Merged notes still say so (#2327).
+    const branchGone = !scheme && lead.build != null && !ref;
+    const state = await stateOf(t, ship?.kind ?? null, scheme ? null : ref, repoDir, asks, deps, branchGone);
     members.push({
       row: r.id,
       label: r.label,
@@ -196,14 +198,14 @@ export async function readBoard(store: Store, leadId: number, deps: BoardDeps): 
   };
 }
 
-async function stateOf(t: Ticket | undefined, ship: 'shipped' | 'merged' | null, ref: string | null, repoDir: string | null, asks: CabalAsk[], deps: BoardDeps): Promise<MemberState> {
+async function stateOf(t: Ticket | undefined, ship: 'shipped' | 'merged' | null, ref: string | null, repoDir: string | null, asks: CabalAsk[], deps: BoardDeps, branchGone = false): Promise<MemberState> {
   if (!t) return 'roster';
   const merged = !!(ref && repoDir && (await mergedInto(repoDir, t, ref)));
   const open = t.status !== 'closed';
   // A merged commit isn't finished work: a member still at work, blocked or sealed keeps that state (#2302).
   const live = open && asks.some((a) => a.ticket_id === t.id && a.blocking) ? 'blocked' : open && t.status === 'running' ? 'running' : open && deps.parked(t) ? 'sealed' : null;
   if (merged && !live) return 'merged';
-  if (ship === 'shipped') return 'shipped';
+  if (ship === 'shipped' || (branchGone && ship === 'merged' && !live)) return 'shipped';
   if (t.status === 'closed') return 'closed';
   if (live) return live;
   return 'idle';

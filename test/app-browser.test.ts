@@ -369,6 +369,10 @@ test('an open modal dialog dims the window controls and closing it puts the colo
   assert.equal(await page.eval(meta), '#123456', 'closing puts the contraption bar colour back');
   await page.eval(`(tint(null), 1)`);
   assert.equal(await page.eval(meta), plain, 'and leaving it, the plain colour');
+  await page.eval(`(tint(null, 'rgb(0 0 0 / 0.4)'), 1)`);
+  assert.equal(await page.eval(meta), '#939391', 'a contraption modal over a page with no bar dims the plain colour');
+  await page.eval(`(tint(null), 1)`);
+  assert.equal(await page.eval(meta), plain);
 });
 
 // The header's cost chip (#1913; Josh, 2026-11-24: "about $12 so far of about $15" while a turn runs): finished turns plus the running turn's estimate.

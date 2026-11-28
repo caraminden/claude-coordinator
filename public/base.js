@@ -499,7 +499,8 @@ export function icon(name) {
 
 /**
  * In the desktop app (#637) the window controls sit on the page's theme colour (index.html's metas), so a
- * contraption's top bar colours them (frames.js, with its computed background colour); null puts the plain colour back.
+ * contraption's top bar colours them (frames.js, with its computed background colour); null puts the plain colour back,
+ * dimmed by any backdrop that is up (a contraption's modal over no bar dims the plain colour too).
  * A canvas pixel turns any CSS colour into the hex a theme colour surely takes; a see-through one keeps the plain colour (#694).
  * `over`, a modal's backdrop (#772), is laid over the colour, so the controls dim with the page under it.
  * Citadel's own modal dialogs do the same by themselves (syncModalTint, below).

@@ -552,3 +552,22 @@ test('a turn of only words leaves a line only for a minion that has worked, its 
   p.turnActions = 2;
   assert.equal(progressLine(p, false, true), 'Finished · 2 actions', 'a turn with actions reads as before');
 });
+
+test('a minion idle on an open card never reads "Paused at" a step that will not run (#2273)', () => {
+  // The plan was redone after a compaction: step 4 (ship) kept its old title and stayed todo, the change went live, a card waits.
+  const c = chat([['build'], ['test'], ['review'], ['ship', 'Ship through the pipeline lane']]);
+  for (const s of ['edit', 'test', 'review', 'ship']) c[s]();
+  c.call('mcp__thread__ask_question', { questions: [] });
+  c.over();
+  assert.doesNotMatch(progressLine(c.p, false), /Paused/);
+  assert.match(progressLine(c.p, false), /^Waiting on you · /);
+  // Any other leftover step reads the same while a card is open.
+  const d = chat([['build'], ['test']]);
+  d.edit();
+  d.call('mcp__thread__ask_question', { questions: [] });
+  d.over();
+  assert.match(progressLine(d.p, false), /^Waiting on you · /);
+  // The card's answer starts a turn; its init clears the wait.
+  d.turn();
+  assert.doesNotMatch(progressLine(d.p, false), /Waiting on you/);
+});

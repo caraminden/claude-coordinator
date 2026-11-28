@@ -74,7 +74,7 @@ export function cabalCard(c, { rows, mine, tickets, build, preview, row, badge, 
         'div',
         { class: 'cabal-top' },
         // The name opens the Overseer's chat as its row does; only the arrow opens and shuts the box (Cara, 2026-11-27: "Name opens its chat").
-        h(leadTicket ? 'a' : 'span', { class: 'cabal-name', ...(leadTicket ? { href: threadHref(leadTicket), title: `Open ${c.overseer}'s chat` } : {}) }, h('span', { class: 'cabal-tag' }, c.overseer), h('span', { class: 'cabal-title' }, h('b', {}, c.title), ' ', h('span', { class: 'num' }, `#${c.number}`))),
+        h(leadTicket ? 'a' : 'span', { class: 'cabal-name', ...(leadTicket ? { href: threadHref(leadTicket), title: "Open the Overseer's chat" } : {}) }, h('span', { class: 'cabal-tag' }, 'Overseer'), h('span', { class: 'cabal-title' }, h('b', {}, c.title), ' ', h('span', { class: 'num' }, `#${c.number}`))),
         h('button', { type: 'button', class: 'cabal-toggle', 'aria-expanded': String(open), 'aria-label': open ? 'Shut the box of members' : 'Open the box of members', title: open ? 'Shut the box of members' : 'Open the box of members', onclick: toggle }, h('span', { class: 'cabal-arrow', 'aria-hidden': 'true' })),
       ),
       leadTicket

@@ -82,7 +82,8 @@
 .cabal-build { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 0.75rem; color: var(--muted); }
 .cabal-build a { position: relative; z-index: 1; display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--space-1); } /* tap target: Preview sits apart from the toggle, and over the row that starts inside its box */
 .cabal-build:has(a) { margin-top: calc(-1 * var(--space-2)); margin-bottom: -7px; padding-bottom: 0; } /* the tall link brings its own room; the same open or shut, or a toggle shifts the list by it (#2197) */
-.cabal-members { border-top: 1px solid var(--line); padding-left: var(--space-2); }
+.cabal-members { border-top: 1px solid var(--line); padding: 0 var(--space-2); }
+.cabal-members > .thread-row:last-child { border-bottom-color: transparent; } /* the card's own edge closes the list */
 .cabal-planned.opening { animation: cabal-open 0.15s ease-out; } /* the click that opens it only: the list redraws on every tick (#2181) */
 .cabal-lead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: 0.75rem; }
 .cabal-state { display: inline-flex; align-items: center; gap: 4px; font-weight: 650; color: var(--muted); }
@@ -92,8 +93,8 @@
 @media (prefers-reduced-motion: reduce) { .cabal-state i { animation: none !important; } }
 /* Not started (Cara, 2026-11-27: "a little more visible"): a soft held-violet tint and a dashed edge, so it reads as planned, not as a row. */
 .cabal-members .thread-row.active { border-color: transparent transparent color-mix(in srgb, var(--gc) 30%, transparent); box-shadow: inset 3px 0 0 var(--accent); } /* the card's own edge is the border: a boxed row beside it read as two (#2277) */
-.cabal-planned { margin: var(--space-1) var(--space-2) var(--space-1) 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; border: 1px dashed color-mix(in srgb, var(--held) 45%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--held) 10%, var(--panel)); }
-.cabal-planned .muted { color: var(--held); font-weight: 600; }
+.cabal-planned { margin: var(--space-1) 0; padding: var(--space-1) var(--space-2); font-size: 0.8rem; overflow-wrap: anywhere; border: 1px dashed color-mix(in srgb, var(--held) 45%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--held) 10%, var(--panel)); }
+.cabal-planned .muted { color: var(--held); font-weight: 600; white-space: nowrap; }
 @keyframes cabal-open { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .cabal-card { transition: none; } .cabal-planned.opening { animation: none; } }
 .g-build > h3 { color: var(--gc); }

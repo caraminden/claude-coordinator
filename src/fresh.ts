@@ -156,7 +156,7 @@ export class Fresh {
     if (!leadsCabal(this.d.store, ticket)) return handoff;
     // The turn goes on without it: the lead can read the board itself.
     const board = await readBoard(this.d.store, ticket.id, { parked: (t) => this.d.parked(t) }).catch((err) => void console.error(`Minion ${ticket.id}: its board could not be read:`, err));
-    return `${handoff}\n\n${board ? `Your cabal's board now (cabal_board):\n${boardText(board, ticket)}` : "Your cabal's board could not be read: read it with cabal_board."}`;
+    return `${handoff}\n\n${board ? `Your Plot's board now (cabal_board):\n${boardText(board, ticket)}` : "Your Plot's board could not be read: read it with cabal_board."}`;
   }
 
   /** Whether Citadel starts this chat fresh by itself: a Taskmaster, or a cabal's lead that isn't sealed, asleep or waiting only to go live. */

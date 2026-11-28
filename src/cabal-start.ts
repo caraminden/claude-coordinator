@@ -135,7 +135,7 @@ export async function postForming(app: App, lead: Ticket, width: unknown): Promi
       cabalForm: { lead: lead.id, width: w, rows: theirs.map((r) => ({ id: r.id, sig: rowSig(r) })) },
       questions: [
         {
-          header: 'Start cabal members',
+          header: 'Start Plot members',
           question:
             `${overseerOf({ name: nm })}, #${lead.number} in ${own}, leads a Plot there and asks to start ${theirs.length} of its members in ${project.name}, about ${money(sum)}:\n\n${rosterLines(theirRoster)}` +
             `\n\nThey run and ship here, to ${project.name}'s own main${lead.build != null ? `, never into ${own}'s Plot ${lead.build}` : ''}. Your ${AGENT_NAME} starts each when ${overseerOf({ name: nm })} asks, and their notes and asks go to the Plot's board. Only a ${project.name} member's go starts them.`,
@@ -294,7 +294,7 @@ async function startRow(app: App, lead: Ticket, r: CabalMemberRow, extra: string
   const after = chainOf(app, lead, r);
   const leadProps = store.props.forTarget('minion', lead.id);
   const type = leadProps.type;
-  const message = [extra, `Your brief is the handoff ${handoff}: read it first and work from it.`, `You are a member of ${nm}'s cabal, row ${rowName(r)}. Its lead is ${overseerOf({ name: nm })}, #${lead.number}: read your cabal_board at each wake, set your note there at milestones, and send your asks there.`]
+  const message = [extra, `Your brief is the handoff ${handoff}: read it first and work from it.`, `You are a member of ${nm}'s Plot, row ${rowName(r)}. Its lead is ${overseerOf({ name: nm })}, #${lead.number}: read your cabal_board at each wake, set your note there at milestones, and send your asks there.`]
     .filter(Boolean)
     .join('\n\n');
   const body = {
@@ -361,7 +361,7 @@ const filling = new Set<number>();
 /** A member's turn ended, it was sealed or stopped, or it was dismissed: a place may be free, so its lead's next-up rows start. */
 export function fillFor(app: App, ticketId: number): void {
   const lead = app.store.cabalRowOf(ticketId)?.lead_id;
-  if (lead != null) void fillCabal(app, lead).catch((err) => console.error(`Starting cabal #${lead}'s next up failed:`, err));
+  if (lead != null) void fillCabal(app, lead).catch((err) => console.error(`Starting Plot #${lead}'s next up failed:`, err));
 }
 
 /** After a member closes, is sealed or ends a turn: next-up rows start, oldest first, while the width has room. A failed start is held mail to the lead. */
@@ -508,7 +508,7 @@ export async function cabalTaskmaster(app: App, lead: Ticket, body: Record<strin
       : action === 'stop'
         ? `stop your #${t.number} "${t.title}"'s turn (stop_ticket)`
         : `seal your #${t.number} "${t.title}" (update_ticket, state sealed) so it doesn't ship yet${lead.build != null ? `: it must not go live before ${schemeName(app, lead.project_id)}'s Plot ${lead.build}. ${overseerOf({ name: nm })} asks you to unseal it once Plot ${lead.build} is live` : ''}`;
-  const r2 = await askTaskmaster(app, lead, r, 'ask', () => `${overseerOf({ name: nm })} asks you to ${what}. It is a member of ${nm}'s cabal in ${schemeName(app, lead.project_id)} (row ${rowName(r)}).${extra ? `\n\n${overseerOf({ name: nm })} adds: ${extra}` : ''}`);
+  const r2 = await askTaskmaster(app, lead, r, 'ask', () => `${overseerOf({ name: nm })} asks you to ${what}. It is a member of ${nm}'s Plot in ${schemeName(app, lead.project_id)} (row ${rowName(r)}).${extra ? `\n\n${overseerOf({ name: nm })} adds: ${extra}` : ''}`);
   store.addCabalLog(lead.id, `#${lead.number}`, `Asked ${there}'s ${AGENT_NAME} to ${action} ${there} #${t.number}${r2.held ? ' (held by the loop guard)' : ''}`);
   cabalChanged(app, lead.id);
   const later = action === 'seal' && lead.build != null ? ` Once Plot ${lead.build} is live, ask again with action unseal; relay_when_live to ${there} on your build's ship can queue that note now.` : '';

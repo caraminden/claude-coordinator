@@ -365,7 +365,7 @@ export async function createMinion(app: App, project: Project, body: Awaited<Ret
   const owner = body.build_owner === true; // the build's own minion (specs/build-branches.md): it keeps the list and ships the build
   if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
   const leads = owner || body.lead === true; // a Plot's Overseer (#2095): its board exists from its first turn, so it gets the Plot tools
-  if (leads && body.cabal != null) throw new HttpError(400, "A cabal's Overseer can't be on another cabal: leave out cabal, or lead and build_owner");
+  if (leads && body.cabal != null) throw new HttpError(400, "A Plot's Overseer can't be on another cabal: leave out cabal, or lead and build_owner");
   if (body.cabal != null) cabalLead(store, project.id, body.cabal, null, typeof body.title === 'string' ? body.title : ''); // refused before anything is made
   // Where its turns run (Build 7 T4), checked as the person who asked: only a machine's owner picks it.
   const runsOn = body.runs_on == null ? null : runsOnPick(app, project.id, body.runs_on, caller && !picked ? caller.person_id : (session.uid ?? null));

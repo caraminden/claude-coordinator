@@ -5,7 +5,7 @@ import { C, call, NOT_HERE } from './mcp-call.ts';
 export const CABAL_BOARD = {
   name: 'cabal_board',
   description:
-    "Your cabal's board: the roster with each member's state, merges, claims, what it waits on, spend and risk (read from facts), plus members' notes, open asks and the lead's log. Read it at each wake instead of rereading chats. A member sets its own note (one line, at milestones) and files it expects to touch, and opens asks to the lead: a blocking ask wakes the lead, any other is held mail it answers at its next wake. The lead answers asks (the asker hears back the same way), adds and edits roster rows (each with its handoff, model, effort and cost before it can start), appends decisions to its log (who decided, quoted, with the time), sets or clears the red-run line, and posts the roster for people's go with form: one card for every row not yet approved; changing an approved row's title, handoff, model, effort, cost or after takes its approval back.",
+    "Your Plot's board: the roster with each member's state, merges, claims, what it waits on, spend and risk (read from facts), plus members' notes, open asks and the lead's log. Read it at each wake instead of rereading chats. A member sets its own note (one line, at milestones) and files it expects to touch, and opens asks to the lead: a blocking ask wakes the lead, any other is held mail it answers at its next wake. The lead answers asks (the asker hears back the same way), adds and edits roster rows (each with its handoff, model, effort and cost before it can start), appends decisions to its log (who decided, quoted, with the time), sets or clears the red-run line, and posts the roster for people's go with form: one card for every row not yet approved; changing an approved row's title, handoff, model, effort, cost or after takes its approval back.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -72,7 +72,7 @@ export const CABAL_MESSAGE_TASKMASTER = {
 
 export const CABAL_MEMBER = {
   name: 'cabal_member',
-  description: "Unseal, stop or reseal one of your own cabal's members. Any other minion is refused. stop interrupts its turn and drops its queued messages (a running ship stops too); reseal holds what is sent to it until you unseal it.",
+  description: "Unseal, stop or reseal one of your own Plot's members. Any other minion is refused. stop interrupts its turn and drops its queued messages (a running ship stops too); reseal holds what is sent to it until you unseal it.",
   inputSchema: {
     type: 'object',
     properties: {

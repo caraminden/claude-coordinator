@@ -122,7 +122,7 @@ export const CREATE_TICKET = {
       },
       build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, else the start_after minion's, if any. A build whose branch build/<n> exists sets its base and target: the minion starts from build/<n> and merges into it, never main.` },
       cabal: { type: ['integer', 'string'], description: 'The #N of the minion that leads this one\'s cabal: puts it on that lead\'s board (a roster row with the same title becomes its row). A lead in another scheme is "<scheme>#N", as its ask says: it takes the row its people approved for this scheme, by title.' },
-      build_owner: { type: 'boolean', description: "true for a new build's Overseer (its build minion): it leads the build's cabal, makes build/<n>, starts its members, takes main in daily and ships the build with one go card. Needs build; makes it a lead, as lead does." },
+      build_owner: { type: 'boolean', description: "true for a new build's Overseer (its build minion): it leads the build's Plot, makes build/<n>, starts its members, takes main in daily and ships the build with one go card. Needs build; makes it a lead, as lead does." },
       lead: { type: 'boolean', description: "true for a Plot's Overseer: it gets the Plot's board and starts its own members from a roster people approve (the citadel:cabal skill). For a Plot, with effortName set to the goal; a build's is build_owner. Not with Plot." },
       model: MODEL,
       effort: EFFORT,

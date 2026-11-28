@@ -74,7 +74,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
   if (cabal === null) {
     store.leaveCabal(t.id);
     if (was != null) {
-      runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s cabal board.` });
+      runner.emit(t.id, 'note', { text: `${by} took this minion off #${store.getTicket(was)?.number}'s Plot board.` });
       cabalChanged(app, was);
       retroCheck(app, was);
     }
@@ -84,7 +84,7 @@ export function putOnCabal(app: App, t: Pick<Ticket, 'id' | 'project_id' | 'titl
   if (was === lead.id) return;
   const there = lead.project_id !== t.project_id ? store.getProject(lead.project_id)?.name : undefined;
   const row = store.joinCabal(t.id, lead.id, lead.project_id, t.title, Date.now(), there ? crossRow(store, lead, t.project_id, t.title).id : rowId, t.project_id);
-  runner.emit(t.id, 'note', { text: `${by} put this minion on ${there ? `${there} ` : ''}#${lead.number}'s cabal board.` });
+  runner.emit(t.id, 'note', { text: `${by} put this minion on ${there ? `${there} ` : ''}#${lead.number}'s Plot board.` });
   if (there) memberJoined(app, lead, t.id, row, by);
   for (const l of new Set([was, lead.id])) if (l != null) cabalChanged(app, l);
 }
@@ -148,7 +148,7 @@ export const cabalRoutes: Route[] = [
       if (action === 'note' || action === 'ask') {
         if (!own) throw new HttpError(409, leads ? `You lead this Plot: ${action === 'ask' ? 'answer asks, and log decisions with action log' : 'set notes on rows with action row'}` : 'You are not on a Plot board');
         const lead = store.getTicket(own.lead_id);
-        if (!lead) throw new HttpError(404, "This cabal's lead is gone");
+        if (!lead) throw new HttpError(404, "This Plot's lead is gone");
         if (action === 'note') {
           if (body.note === undefined && body.files === undefined) throw new HttpError(400, 'note needs note, files or both');
           store.updateCabalRow(own.id, { ...(body.note !== undefined ? { note: body.note === null ? '' : line(body.note, 'note', 200), note_at: Date.now() } : {}), ...(body.files !== undefined ? { files: files(body.files) } : {}) });
